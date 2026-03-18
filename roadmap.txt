@@ -57,21 +57,25 @@ Goal:
 Lock the v2 shape before writing too much code.
 
 Tasks:
-- [ ] Choose implementation language.
-- [ ] Define the job config format.
-- [ ] Define directory layout for jobs, logs, state, and wrappers.
-- [ ] Define the minimal command set for v2.
-- [ ] Decide which v1 features are required for first release.
-- [ ] Decide which v1 features can wait until later milestones.
+- [x] Choose implementation language.
+- [x] Define the job config format.
+- [x] Define directory layout for jobs, logs, state, and wrappers.
+- [x] Define the minimal command set for v2.
+- [x] Decide which v1 features are required for first release.
+- [x] Decide which v1 features can wait until later milestones.
 
 Deliverables:
-- [ ] v2 architecture note
-- [ ] sample `job.toml`
-- [ ] sample `secrets.env`
-- [ ] command list with expected behavior
+- [x] v2 architecture note
+- [x] sample `job.toml`
+- [x] sample `secrets.env`
+- [x] command list with expected behavior
 
 Success looks like:
 - We can clearly describe how a job is stored, loaded, run, and restored.
+
+Status:
+- M1 complete
+- v2 scaffold and interactive menu work started ahead of later milestones
 
 
 Milestone M2: Build The Core CLI Skeleton

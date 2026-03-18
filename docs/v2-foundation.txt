@@ -1,0 +1,351 @@
+LSS Backup CLI V2 Foundation
+============================
+
+Status
+------
+This document defines the initial foundation for v2 and serves as the
+implementation starting point for Milestone M1 from `roadmap.txt`.
+
+
+1. Language Choice
+------------------
+Recommended language: Go
+
+Reasoning:
+- Go is a strong fit for CLI tools and system utilities.
+- It produces a single binary, which keeps deployment simple.
+- It is safer than shell for config parsing and destructive operations.
+- It is easier to test reliably than a large shell codebase.
+- It still works well with external tools such as `restic`, `rsync`, `mount`,
+  `umount`, and `crontab`.
+- It preserves the sysadmin-friendly operational model of v1 without the same
+  fragility.
+
+Why not stay with shell for v2:
+- v1 already shows the maintenance limit of a large shell system.
+- config handling in shell is too easy to turn into executable behavior
+- quoting, validation, and safe deletion are harder to get right consistently
+- duplication and script generation become difficult to control over time
+
+Decision:
+- v2 should be implemented in Go
+- shell should still be used where it makes sense as a thin wrapper only
+
+
+2. Source Of Truth
+------------------
+Each job must have one durable definition file that survives reinstall,
+upgrade, and runtime regeneration.
+
+Decision:
+- `job.toml` is the primary non-secret job definition file
+- `secrets.env` stores secrets separately
+- generated runtime files such as `run.sh` are rebuildable and not considered
+  the source of truth
+
+Rules:
+- `job.toml` must be treated as data, not sourced as shell
+- `secrets.env` must be loaded deliberately and only when needed
+- reinstall/update must not destroy job definitions
+- import/export must preserve the durable definition
+
+
+3. Proposed Repository Structure
+--------------------------------
+Suggested v2 layout:
+
+```text
+lss-backup-v2/
+  cmd/
+    lss-backup/
+      main.go
+  internal/
+    cli/
+    config/
+    jobs/
+    runner/
+    engines/
+    scheduler/
+    notify/
+    validate/
+    logging/
+    migrate/
+  jobs/
+    <job-id>/
+      job.toml
+      secrets.env
+      logs/
+      run.sh
+  state/
+    index.json
+  docs/
+```
+
+Notes:
+- `cmd/` contains the CLI entrypoint
+- `internal/` contains the app logic
+- `jobs/` contains durable job data
+- `state/` contains generated operational state if needed
+- `run.sh` is optional but recommended if per-job wrappers are still desired
+
+
+4. Job Independence Model
+-------------------------
+V2 should preserve the operational goal from v1 that each job is independently
+runnable and restorable.
+
+Decision:
+- a job is independent because it has its own config, secrets, wrapper, logs,
+  and job directory
+- a job does not need its own duplicated business logic files
+
+Model:
+- `jobs/<job-id>/job.toml` defines the job
+- `jobs/<job-id>/secrets.env` stores secrets
+- `jobs/<job-id>/run.sh` calls the shared binary for that one job
+- shared runner code lives only once in the main application
+
+Example wrapper:
+
+```sh
+#!/bin/sh
+exec /usr/local/bin/lss-backup run job-001
+```
+
+This keeps the operational independence idea while removing duplicated runtime
+logic.
+
+
+5. Minimal V2 Command Set
+-------------------------
+The first stable command set should be:
+
+- `lss-backup init`
+- `lss-backup create`
+- `lss-backup list`
+- `lss-backup show <job-id>`
+- `lss-backup validate <job-id>`
+- `lss-backup run <job-id>`
+- `lss-backup import <path>`
+- `lss-backup export <job-id>`
+- `lss-backup schedule sync`
+- `lss-backup remove <job-id>`
+
+Commands that can wait until later:
+- `lss-backup restore <job-id>`
+- `lss-backup migrate-v1 <path-or-id>`
+
+Notes:
+- restore is important, but it does not have to block the first working slice
+- migration support should arrive before full release, but not before the core
+  model is proven
+
+
+6. First Release Scope
+----------------------
+Required for the first meaningful v2 release candidate:
+- create job
+- list job
+- show job
+- validate job
+- run job
+- schedule sync
+- local source support
+- local destination support
+- restic support
+- logs
+
+Can wait until later milestones:
+- rsync support
+- SMB source/destination
+- NFS source/destination
+- Healthchecks
+- email notifications
+- retention
+- pruning
+- v1 migration
+- restore flow
+
+Recommended first engine slice:
+- restic
+- local source
+- local destination
+
+This is the smallest path that proves the new architecture.
+
+
+7. Job Configuration Format
+---------------------------
+Format choice:
+- TOML
+
+Reasoning:
+- easy for humans to read and edit
+- supports nested sections cleanly
+- better structured than env files for durable config
+- good fit for a server-side CLI product
+
+Example `job.toml`:
+
+```toml
+id = "job-001"
+name = "Documents Backup"
+program = "restic"
+enabled = true
+
+[source]
+type = "local"
+path = "/home/user/Documents"
+
+[destination]
+type = "local"
+path = "/srv/backups/documents"
+
+[schedule]
+mode = "daily"
+minute = 30
+hour = 2
+days = [1, 3, 5]
+
+[retention]
+mode = "none"
+
+[notifications]
+healthchecks_enabled = false
+email_mode = "disabled"
+email_to = ""
+```
+
+Example `secrets.env`:
+
+```sh
+RESTIC_PASSWORD=example-password
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+SMB_PASSWORD=
+NFS_PASSWORD=
+```
+
+Rules:
+- non-secret values belong in `job.toml`
+- secrets belong in `secrets.env`
+- empty secret fields are acceptable if a given job type does not need them
+
+
+8. Validation Rules
+-------------------
+Validation must happen before execution and before schedule generation.
+
+Minimum required checks:
+- job ID format is safe
+- job name is present
+- program is supported
+- source type is supported
+- destination type is supported
+- required fields exist for the selected source and destination types
+- schedule values are within valid ranges
+- destructive target paths are never empty or obviously dangerous
+
+Examples of forbidden values:
+- empty job ID
+- `/` as a delete target
+- empty destination path for local jobs
+
+
+9. Scheduler Model
+------------------
+V2 should still use cron, but cron management must be deterministic.
+
+Decision:
+- jobs store their schedule in `job.toml`
+- one command regenerates a managed cron block
+- cron entries call the shared binary, not generated runtime logic
+
+Example cron line:
+
+```cron
+30 2 * * 1,3,5 /usr/local/bin/lss-backup run job-001
+```
+
+Rules:
+- v2 should manage a single clearly marked cron block
+- schedule sync should be idempotent
+- manual-only jobs should not generate cron entries
+
+
+10. Logging Model
+-----------------
+Each job should keep its own logs.
+
+Decision:
+- logs live in `jobs/<job-id>/logs/`
+- each run creates a dated log file
+- the CLI prints a human-readable summary and writes a detailed log file
+
+Example:
+- `jobs/job-001/logs/2026-03-18.log`
+
+
+11. Safety Model
+----------------
+V2 should default toward safe behavior.
+
+Rules:
+- no direct execution of imported config as shell
+- destructive commands must confirm intent
+- delete operations must validate paths before action
+- secret files must have strict permissions
+- runtime failures should return stable exit codes
+- unknown conditions should fail loudly rather than continue silently
+
+
+12. Immediate Implementation Plan
+---------------------------------
+Start with this order:
+
+Step 1:
+- initialize new v2 codebase
+- set up Go module
+- create CLI entrypoint
+
+Step 2:
+- implement config loading for `job.toml`
+- implement job discovery
+- implement `list`, `show`, and `validate`
+
+Step 3:
+- implement `create`
+- generate job folder layout
+- generate optional `run.sh`
+
+Step 4:
+- implement first real runner:
+- restic
+- local source
+- local destination
+
+Step 5:
+- implement schedule sync
+
+
+13. M1 Exit Criteria
+--------------------
+Milestone M1 is complete when:
+
+- the language choice is locked
+- the config format is locked
+- the directory layout is locked
+- the first command set is defined
+- the initial `job.toml` structure exists
+- the first release scope is defined
+
+
+Final Decision Summary
+----------------------
+- Language: Go
+- Durable job config: `job.toml`
+- Secret storage: `secrets.env`
+- Shared runtime logic: yes
+- Per-job wrapper: yes, thin only
+- First engine slice: restic local-to-local
+- Scheduler: cron, generated from config
