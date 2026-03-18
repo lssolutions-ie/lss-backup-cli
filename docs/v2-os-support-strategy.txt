@@ -1,0 +1,271 @@
+LSS Backup CLI V2 OS Support Strategy
+=====================================
+
+Purpose
+-------
+This document defines the intended operating system strategy for v2.
+
+LSS Backup CLI v2 is a CLI-first backup product. It may eventually gain a GUI
+or connect to a management console, but the CLI remains the primary and most
+important interface.
+
+
+Product Direction
+-----------------
+- v2 is CLI-driven software first
+- any future GUI should sit on top of the same core logic
+- any future management console integration should reuse the same job and
+  runtime model
+- core logic should not be tightly coupled to one operating system
+
+
+Target Operating Systems
+------------------------
+Planned supported operating systems:
+
+- Linux (Debian family)
+- macOS
+- Windows 11
+- Windows Server 2016 and newer
+
+
+Support Philosophy
+------------------
+Not every operating system must have identical support from day one.
+
+The goal is:
+- shared product behavior where possible
+- explicit platform-specific behavior where necessary
+- no hidden Linux-only assumptions in core architecture
+
+Support should be described in terms of capability and maturity, not vague
+claims of “cross-platform.”
+
+
+Recommended Support Tiers
+-------------------------
+Tier 1: Primary launch support
+- Linux (Debian family)
+
+Tier 2: Early cross-platform support
+- macOS
+
+Tier 3: Phased support
+- Windows 11
+- Windows Server 2016+
+
+This means v2 can launch with strongest support on Linux first, while still
+being designed so macOS and Windows support can be added without rethinking
+the whole application.
+
+
+Architecture Implications
+-------------------------
+V2 should be designed in three layers:
+
+1. Core layer
+- job definitions
+- menu flow
+- validation rules
+- backup orchestration
+- import/export
+- retention model
+- notification model
+- management console configuration model
+
+2. Platform layer
+- path conventions
+- scheduler integration
+- service integration
+- file permissions behavior
+- mount behavior
+- dependency checks
+- restore/open behaviors that differ by OS
+
+3. Engine layer
+- restic orchestration
+- rsync orchestration where supported
+- future engines if needed for Windows-specific use cases
+
+
+Core Rule
+---------
+Do not let Linux-specific behavior leak into the core layer.
+
+Examples of things that must not be assumed globally:
+- cron as the only scheduler
+- POSIX file permission semantics everywhere
+- forward-slash-only path assumptions
+- Linux-only mount behavior
+- rsync always being present
+- shell scripting as the only wrapper/runtime model
+
+
+Cross-Platform Baseline
+-----------------------
+The safest cross-platform backup engine is:
+
+- restic
+
+Reason:
+- it has strong multi-platform potential
+- it fits the “single CLI product” direction well
+- it works better as a common baseline than rsync
+
+Implication:
+- restic should be treated as the cross-platform foundation
+- rsync should be treated as supported where appropriate, but not as the
+  universal baseline for every operating system
+
+
+Engine Expectations By OS
+-------------------------
+Linux:
+- restic: yes
+- rsync: yes
+
+macOS:
+- restic: yes
+- rsync: likely yes
+
+Windows 11:
+- restic: yes
+- rsync: uncertain, should be treated as optional/phased
+
+Windows Server 2016+:
+- restic: yes
+- rsync: uncertain, should be treated as optional/phased
+
+Important design implication:
+- the UI should eventually adapt to platform capability
+- unsupported engine/platform combinations should be handled explicitly
+
+
+Scheduler Strategy
+------------------
+Scheduling should be abstracted behind a platform adapter.
+
+Likely scheduler implementations:
+- Linux: cron
+- macOS: launchd or a suitable platform-native equivalent
+- Windows 11: Task Scheduler
+- Windows Server: Task Scheduler
+
+Core should store schedule data in a platform-neutral format.
+Platform adapters should translate schedule config into the correct native
+mechanism.
+
+
+Path Strategy
+-------------
+Core should use:
+- validated absolute paths
+- path handling through Go standard library helpers
+- no hardcoded Linux path separators in core logic
+
+Examples:
+- use `filepath`, not string concatenation
+- avoid assuming `/etc/...` as the only install/config location
+- allow platform-specific default locations later
+
+
+Permissions And Secrets
+-----------------------
+Secret handling must acknowledge OS differences.
+
+Linux and macOS:
+- file permission model can be used directly
+
+Windows:
+- file permissions and secret storage behavior differ
+- future design may require different secret handling strategy
+
+Rule:
+- secrets should remain separated from job definitions
+- the implementation of “protected storage” may vary by platform
+
+
+Menu And UX Implications
+------------------------
+The menu should remain product-consistent across OSes where possible.
+
+That means:
+- the same high-level menu structure
+- the same job concept
+- the same backup philosophy
+- the same recovery-first design
+
+But:
+- options may vary based on platform capability
+- some engines or scheduler methods may be hidden or marked unavailable
+
+
+Future GUI Implication
+----------------------
+If a GUI is ever created, it should not replace the CLI core.
+
+The GUI should be:
+- a frontend
+- using the same core services and job model
+- calling the same platform-aware backend logic
+
+This keeps:
+- CLI as the foundation
+- GUI as optional
+- management console compatibility easier later
+
+
+Future Management Console Implication
+-------------------------------------
+The future management console should be designed as an observer/controller
+layer, not as the place where all backup logic lives.
+
+That means:
+- agents or local CLI nodes still own execution
+- the management console coordinates, observes, and reports
+- local recoverability remains possible even if the console is unavailable
+
+
+Practical Design Rules For Current Development
+----------------------------------------------
+1. Build v2 so Linux can work first.
+2. Avoid writing Linux-only assumptions into core packages.
+3. Keep scheduler logic out of core runtime.
+4. Keep path handling platform-neutral.
+5. Treat restic as the cross-platform baseline.
+6. Treat rsync as supported where it makes sense, not everywhere by default.
+7. Keep secret storage abstract enough to change by platform later.
+8. Keep menu wording product-focused, not OS-focused.
+
+
+Initial OS Support Recommendation
+---------------------------------
+Recommended initial rollout:
+
+Phase 1:
+- Linux (Debian)
+- full focus
+
+Phase 2:
+- macOS
+- restic first, then evaluate rsync parity
+
+Phase 3:
+- Windows 11 and Windows Server
+- restic first
+- scheduling and secret handling adapted to Windows
+- rsync only if there is a clear and reliable Windows story
+
+
+Conclusion
+----------
+V2 should be designed as:
+- CLI-first
+- recovery-focused
+- cross-platform by architecture
+- not necessarily identical on every OS on day one
+
+The most important rule is:
+- shared core
+- explicit platform adapters
+- no hidden Linux lock-in
