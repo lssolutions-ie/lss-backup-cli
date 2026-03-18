@@ -1,0 +1,354 @@
+LSS Backup CLI V2 Roadmap
+=========================
+
+Purpose
+-------
+This roadmap is for building a cleaner, safer, and more maintainable v2 of
+LSS Backup CLI while preserving the strongest ideas from v1:
+
+- each backup job should be independently restorable
+- the job definition should be durable across reinstall/update
+- import/export should remain first-class
+- restic and rsync should both be supported
+- the product should stay operator-friendly
+
+
+Guiding Principles
+------------------
+- One job definition file should be the source of truth.
+- Runtime artifacts should be disposable and rebuildable.
+- Jobs should remain operationally independent.
+- Backup logic should live in shared code, not duplicated per job.
+- Config should be treated as data, not executable script.
+- Secrets should be stored separately from general config.
+- Safety and recoverability matter more than cleverness.
+
+
+Target V2 Shape
+---------------
+Suggested high-level structure:
+
+- `bin/`
+- `jobs/<job-id>/job.toml`
+- `jobs/<job-id>/secrets.env`
+- `jobs/<job-id>/logs/`
+- `jobs/<job-id>/run.sh`
+- `state/`
+- `docs/`
+
+Suggested CLI commands:
+
+- `lss-backup init`
+- `lss-backup create`
+- `lss-backup list`
+- `lss-backup show <job-id>`
+- `lss-backup run <job-id>`
+- `lss-backup validate <job-id>`
+- `lss-backup restore <job-id>`
+- `lss-backup remove <job-id>`
+- `lss-backup import <path>`
+- `lss-backup export <job-id>`
+- `lss-backup schedule sync`
+
+
+Milestone M1: Define The Foundation
+-----------------------------------
+Goal:
+Lock the v2 shape before writing too much code.
+
+Tasks:
+- [ ] Choose implementation language.
+- [ ] Define the job config format.
+- [ ] Define directory layout for jobs, logs, state, and wrappers.
+- [ ] Define the minimal command set for v2.
+- [ ] Decide which v1 features are required for first release.
+- [ ] Decide which v1 features can wait until later milestones.
+
+Deliverables:
+- [ ] v2 architecture note
+- [ ] sample `job.toml`
+- [ ] sample `secrets.env`
+- [ ] command list with expected behavior
+
+Success looks like:
+- We can clearly describe how a job is stored, loaded, run, and restored.
+
+
+Milestone M2: Build The Core CLI Skeleton
+-----------------------------------------
+Goal:
+Get a runnable but mostly empty CLI in place.
+
+Tasks:
+- [ ] Create the main CLI entrypoint.
+- [ ] Add `create` command.
+- [ ] Add `list` command.
+- [ ] Add `show` command.
+- [ ] Add `run` command.
+- [ ] Add `validate` command.
+- [ ] Implement shared logging setup.
+- [ ] Implement job discovery from `jobs/<job-id>/`.
+
+Deliverables:
+- [ ] basic CLI app
+- [ ] jobs can be listed and loaded from config
+- [ ] validation errors are human-readable
+
+Success looks like:
+- v2 can read and inspect jobs even before real backup execution exists.
+
+
+Milestone M3: Implement Job Persistence
+---------------------------------------
+Goal:
+Make job definitions the durable source of truth.
+
+Tasks:
+- [ ] Write config read/write logic.
+- [ ] Create job directory creation logic.
+- [ ] Generate per-job `run.sh` wrappers if job-local entrypoints are kept.
+- [ ] Store secrets separately with safe permissions.
+- [ ] Add export/import of the new config format.
+
+Deliverables:
+- [ ] `create` writes a valid job
+- [ ] `show` prints job data
+- [ ] `import` works for v2 format
+- [ ] `export` works for v2 format
+
+Success looks like:
+- A job can be created, moved, and reconstructed from its config files.
+
+
+Milestone M4: First Working Backup Engine
+-----------------------------------------
+Goal:
+Get one real backup path working end to end.
+
+Recommended first slice:
+- `restic`
+- local source
+- local destination
+
+Tasks:
+- [ ] Validate source and destination.
+- [ ] Initialize repository when needed.
+- [ ] Run backup.
+- [ ] Write logs.
+- [ ] Return stable exit codes.
+
+Deliverables:
+- [ ] first production-capable backup path
+- [ ] log file output
+- [ ] clear failure messages
+
+Success looks like:
+- One real job can run reliably from config with no generated logic duplication.
+
+
+Milestone M5: Scheduling
+------------------------
+Goal:
+Make jobs runnable automatically and repeatably.
+
+Tasks:
+- [ ] Store schedule in job config.
+- [ ] Implement `schedule sync`.
+- [ ] Generate one managed cron block.
+- [ ] Support daily schedules.
+- [ ] Support weekly schedules.
+- [ ] Support monthly schedules.
+- [ ] Support manual-only jobs.
+
+Deliverables:
+- [ ] deterministic cron generation
+- [ ] schedule preview
+- [ ] schedule update flow
+
+Success looks like:
+- Changing a schedule means editing config and syncing cron once.
+
+
+Milestone M6: Notifications And Monitoring
+------------------------------------------
+Goal:
+Restore the ops-friendly behavior from v1.
+
+Tasks:
+- [ ] Add Healthchecks ping support.
+- [ ] Add email notification support.
+- [ ] Support success notifications.
+- [ ] Support failure-only notifications.
+- [ ] Make notification failures visible but non-destructive.
+
+Deliverables:
+- [ ] notification config section
+- [ ] post-run success/failure hooks
+- [ ] testable notification layer
+
+Success looks like:
+- Jobs can be monitored without notification code being scattered everywhere.
+
+
+Milestone M7: Retention And Cleanup
+-----------------------------------
+Goal:
+Bring back restic lifecycle management.
+
+Tasks:
+- [ ] Add retention config support.
+- [ ] Implement no-retention mode.
+- [ ] Implement keep-last-only mode.
+- [ ] Implement full retention policy mode.
+- [ ] Add prune step.
+- [ ] Add log cleanup policy.
+
+Deliverables:
+- [ ] retention module
+- [ ] prune integration
+- [ ] log cleanup command or policy
+
+Success looks like:
+- Restic jobs behave like v1 but from one shared runner.
+
+
+Milestone M8: Add Rsync Support
+-------------------------------
+Goal:
+Support the second engine cleanly.
+
+Tasks:
+- [ ] Add rsync runner behind the same job model.
+- [ ] Support the rsync modes that matter for release.
+- [ ] Reuse the same validation, logging, scheduling, and notification layers.
+
+Deliverables:
+- [ ] `program = "rsync"` job support
+- [ ] same command set works for both engines
+
+Success looks like:
+- Restic and rsync differ only in engine execution, not in the overall app structure.
+
+
+Milestone M9: Network Sources And Destinations
+----------------------------------------------
+Goal:
+Add SMB/NFS carefully after local paths are stable.
+
+Tasks:
+- [ ] Add SMB source support.
+- [ ] Add SMB destination support.
+- [ ] Add NFS source support.
+- [ ] Add NFS destination support.
+- [ ] Make mount/unmount behavior explicit.
+- [ ] Make mount/unmount behavior testable.
+- [ ] Decide whether temporary mounts or persistent mounts are preferred.
+
+Deliverables:
+- [ ] network storage support
+- [ ] safer mount handling
+- [ ] clear validation and cleanup rules
+
+Success looks like:
+- Remote jobs are supported without bringing back the current duplication and fragility.
+
+
+Milestone M10: Migration From V1
+--------------------------------
+Goal:
+Protect existing users and preserve prior work.
+
+Tasks:
+- [ ] Build importer for old `.env` jobs.
+- [ ] Map v1 fields into v2 config.
+- [ ] Detect unsupported combinations cleanly.
+- [ ] Generate a migration report per job.
+
+Deliverables:
+- [ ] `import-v1 <path>` or `migrate-v1-job <id>`
+- [ ] compatibility notes
+- [ ] fallback behavior for edge cases
+
+Success looks like:
+- A real v1 job can be brought into v2 with minimal manual editing.
+
+
+Milestone M11: Safety Hardening
+-------------------------------
+Goal:
+Make v2 trustworthy.
+
+Tasks:
+- [ ] Add strong input validation.
+- [ ] Protect destructive commands.
+- [ ] Add dry-run where possible.
+- [ ] Verify delete targets before removal.
+- [ ] Improve secret handling and file permissions.
+- [ ] Add structured error reporting.
+
+Deliverables:
+- [ ] safer remove flow
+- [ ] validation layer
+- [ ] security checklist
+
+Success looks like:
+- Bad config fails early and safely instead of causing messy runtime behavior.
+
+
+Milestone M12: Release Readiness
+--------------------------------
+Goal:
+Make v2 something that can be comfortably shipped.
+
+Tasks:
+- [ ] Write install docs.
+- [ ] Write migration docs.
+- [ ] Write admin usage guide.
+- [ ] Test upgrade/reinstall flow.
+- [ ] Test fresh install flow.
+- [ ] Test backup/restore/remove/import manually on real scenarios.
+
+Deliverables:
+- [ ] release checklist
+- [ ] user guide
+- [ ] migration guide
+- [ ] known limitations
+
+Success looks like:
+- A real user can be onboarded and upgraded with confidence.
+
+
+Suggested Release Cuts
+----------------------
+`v2.0.0-alpha1`
+- M1 to M4
+- restic local-to-local only
+
+`v2.0.0-beta1`
+- M5 to M7
+- scheduling, notifications, retention
+
+`v2.0.0-beta2`
+- M8 to M10
+- rsync and migration
+
+`v2.0.0`
+- M11 to M12
+- hardening and docs
+
+
+Immediate Next Step
+-------------------
+Short design milestone:
+
+1. Choose language.
+2. Define `job.toml`.
+3. Define CLI commands.
+4. Define folder layout.
+
+Then build the first narrow happy path:
+
+1. Create job.
+2. Validate job.
+3. Run local restic backup.
+4. Log result.
