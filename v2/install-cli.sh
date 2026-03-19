@@ -130,7 +130,7 @@ cat > "${TMP_MANIFEST}" <<EOF
 EOF
 
 if [ "$OS_NAME" = "Linux" ] || [ "$OS_NAME" = "Darwin" ]; then
-	sudo cp "${TMP_MANIFEST}" "${MANIFEST_PATH}"
+	sudo install -m 644 "${TMP_MANIFEST}" "${MANIFEST_PATH}"
 	rm -f "${TMP_MANIFEST}"
 fi
 

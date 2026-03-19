@@ -64,7 +64,11 @@ func Run() error {
 			}
 		}
 	} else {
-		fmt.Println("Install manifest not found, skipping dependency removal.")
+		if os.IsNotExist(manifestErr) {
+			fmt.Println("Install manifest not found, skipping dependency removal.")
+		} else {
+			fmt.Println("Could not read install manifest, skipping dependency removal:", manifestErr)
+		}
 	}
 
 	if err := removeInstalledData(paths); err != nil {
