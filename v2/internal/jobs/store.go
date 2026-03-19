@@ -123,6 +123,7 @@ func Import(paths app.Paths, sourceJobFile string, newID string) (config.Job, er
 	job.Raw = config.RenderJobTOML(job)
 
 	if err := Save(job); err != nil {
+		_ = os.RemoveAll(jobDir)
 		return config.Job{}, err
 	}
 
@@ -132,10 +133,12 @@ func Import(paths app.Paths, sourceJobFile string, newID string) (config.Job, er
 		secretsData = data
 	}
 	if err := os.WriteFile(job.SecretsFile, secretsData, 0o600); err != nil {
+		_ = os.RemoveAll(jobDir)
 		return config.Job{}, fmt.Errorf("write imported secrets.env: %w", err)
 	}
 
 	if err := writeRunScript(job.RunScript, job.ID); err != nil {
+		_ = os.RemoveAll(jobDir)
 		return config.Job{}, err
 	}
 
@@ -196,17 +199,20 @@ func Create(paths app.Paths, input CreateInput) (config.Job, error) {
 	}
 
 	if err := os.WriteFile(jobFile, []byte(config.RenderJobTOML(jobDefinition)), 0o644); err != nil {
+		_ = os.RemoveAll(jobDir)
 		return config.Job{}, fmt.Errorf("write job.toml: %w", err)
 	}
 
 	secretsFile := filepath.Join(jobDir, "secrets.env")
 	secrets := []byte("RESTIC_PASSWORD=\nAWS_ACCESS_KEY_ID=\nAWS_SECRET_ACCESS_KEY=\nSMB_PASSWORD=\nNFS_PASSWORD=\n")
 	if err := os.WriteFile(secretsFile, secrets, 0o600); err != nil {
+		_ = os.RemoveAll(jobDir)
 		return config.Job{}, fmt.Errorf("write secrets.env: %w", err)
 	}
 
 	runScript := filepath.Join(jobDir, config.RunScriptName())
 	if err := writeRunScript(runScript, input.ID); err != nil {
+		_ = os.RemoveAll(jobDir)
 		return config.Job{}, err
 	}
 

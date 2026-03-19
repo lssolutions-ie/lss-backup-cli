@@ -272,7 +272,7 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			"Edit Backup",
 			"Show Schedule",
 			"Show Retention",
-			"Notifications Logs",
+			"Configure Notifications",
 			"Show Job Configuration",
 			"Validate Job",
 			"Back To Main Menu",
@@ -304,7 +304,7 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 				fmt.Println("Schedule update failed:", err)
 				continue
 			}
-		case "Notifications Logs":
+		case "Configure Notifications":
 			updatedJob, err := jobs.Load(paths, job.ID)
 			if err != nil {
 				fmt.Println("Reload failed:", err)
@@ -581,6 +581,14 @@ func promptSchedule(prompter ui.Prompter) (config.Schedule, error) {
 			return config.Schedule{}, err
 		}
 		schedule.Days = days
+	}
+
+	if scheduleMode == "monthly" {
+		dayOfMonthValue, err := prompter.Ask("Day of month (1-28)", validateIntRange(1, 28))
+		if err != nil {
+			return config.Schedule{}, err
+		}
+		schedule.DayOfMonth, _ = strconv.Atoi(dayOfMonthValue)
 	}
 
 	return schedule, nil

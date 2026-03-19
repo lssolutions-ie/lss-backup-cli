@@ -61,7 +61,25 @@ Push-Location $PSScriptRoot
 try {
     $env:GOCACHE = Join-Path $PSScriptRoot ".gocache"
     Ensure-Directory $env:GOCACHE
-    go build -o $BinPath .
+
+    # Build to a temp file first so we never overwrite the running binary directly.
+    # Windows locks running executables, but allows renaming them out of the way.
+    $TempBin = Join-Path $BinDir "lss-backup-cli-new.exe"
+    $OldBin  = Join-Path $BinDir "lss-backup-cli-old.exe"
+
+    go build -o $TempBin .
+
+    # Rename existing binary out of the way (allowed even while the process runs).
+    if (Test-Path $BinPath) {
+        if (Test-Path $OldBin) { Remove-Item $OldBin -Force }
+        Rename-Item $BinPath $OldBin
+    }
+
+    # Move the new binary into place.
+    Rename-Item $TempBin $BinPath
+
+    # Best-effort cleanup of the old binary.
+    if (Test-Path $OldBin) { Remove-Item $OldBin -Force -ErrorAction SilentlyContinue }
 }
 finally {
     Pop-Location
