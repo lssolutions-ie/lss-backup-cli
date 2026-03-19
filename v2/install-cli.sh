@@ -4,6 +4,7 @@ set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 OS_NAME="$(uname -s)"
 MANIFEST_DEPS=""
+CURRENT_UID="$(id -u)"
 
 require_command() {
 	command -v "$1" >/dev/null 2>&1 || {
@@ -83,6 +84,11 @@ case "$OS_NAME" in
 		sudo mkdir -p "$CONFIG_DIR" "$JOBS_DIR" "$LOGS_DIR" "$STATE_DIR"
 		;;
 	Darwin)
+		if [ "$CURRENT_UID" -eq 0 ]; then
+			echo "Please run ./install-cli.sh without sudo on macOS." >&2
+			echo "Homebrew must run as your normal user. The script will ask for elevation only when needed." >&2
+			exit 1
+		fi
 		CONFIG_DIR="/Library/Application Support/LSS Backup"
 		JOBS_DIR="/Library/Application Support/LSS Backup/jobs"
 		LOGS_DIR="/Library/Logs/LSS Backup"
@@ -103,7 +109,10 @@ esac
 
 mkdir -p "${SCRIPT_DIR}/.gocache"
 cd "${SCRIPT_DIR}"
-GOCACHE="${SCRIPT_DIR}/.gocache" go build -o "${TARGET}" .
+TMP_BINARY="$(mktemp "${TMPDIR:-/tmp}/lss-backup-cli.XXXXXX")"
+GOCACHE="${SCRIPT_DIR}/.gocache" go build -o "${TMP_BINARY}" .
+sudo install -m 755 "${TMP_BINARY}" "${TARGET}"
+rm -f "${TMP_BINARY}"
 
 TMP_MANIFEST="$(mktemp "${TMPDIR:-/tmp}/lss-backup-manifest.XXXXXX")"
 cat > "${TMP_MANIFEST}" <<EOF
