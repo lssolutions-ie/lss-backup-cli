@@ -275,12 +275,12 @@ func removeManagedDependencies(manifest installmanifest.Manifest) error {
 			continue
 		}
 
-		fmt.Println("Removing managed dependency:", dep.Name)
 		switch runtime.GOOS {
 		case "linux":
 			if dep.Manager != "apt" {
 				continue
 			}
+			fmt.Println("Removing managed dependency:", dep.Name)
 			cmd := exec.Command("sudo", "apt-get", "remove", "-y", dep.PackageID)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
@@ -288,7 +288,12 @@ func removeManagedDependencies(manifest installmanifest.Manifest) error {
 				return fmt.Errorf("remove dependency %s: %w", dep.Name, err)
 			}
 		case "darwin":
+			if dep.Manager == "brew-bootstrap" {
+				fmt.Println("Skipping Homebrew removal:", dep.Name)
+				continue
+			}
 			if dep.Manager == "brew" {
+				fmt.Println("Removing managed dependency:", dep.Name)
 				cmd := exec.Command("brew", "uninstall", dep.PackageID)
 				cmd.Stdout = os.Stdout
 				cmd.Stderr = os.Stderr
@@ -296,16 +301,9 @@ func removeManagedDependencies(manifest installmanifest.Manifest) error {
 					return fmt.Errorf("remove dependency %s: %w", dep.Name, err)
 				}
 			}
-			if dep.Manager == "brew-bootstrap" {
-				cmd := exec.Command("/bin/bash", "-c", "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)")
-				cmd.Stdout = os.Stdout
-				cmd.Stderr = os.Stderr
-				if err := cmd.Run(); err != nil {
-					return fmt.Errorf("remove Homebrew installed by program: %w", err)
-				}
-			}
 		case "windows":
 			if dep.Manager == "winget" {
+				fmt.Println("Removing managed dependency:", dep.Name)
 				cmd := exec.Command("winget", "uninstall", "--id", dep.PackageID, "--silent", "--accept-source-agreements")
 				cmd.Stdout = os.Stdout
 				cmd.Stderr = os.Stderr
