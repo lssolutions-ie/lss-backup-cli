@@ -360,28 +360,15 @@ func runImportWizard(paths app.Paths, prompter ui.Prompter) error {
 	fmt.Println("")
 	fmt.Println("Import Previous Backup")
 	fmt.Println("----------------------")
+	fmt.Println("Provide a path to job.toml (v2) or a *-Configuration.env (v1 legacy).")
 
-	_, importType, err := prompter.Select("What kind of backup config are you importing?", []string{
-		"v2 job.toml",
-		"v1 legacy *-Configuration.env",
-	})
-	if err != nil {
-		return err
-	}
-
-	if importType == "v2 job.toml" {
-		return runImportV2Wizard(paths, prompter)
-	}
-	return runImportLegacyWizard(paths, prompter)
-}
-
-func runImportV2Wizard(paths app.Paths, prompter ui.Prompter) error {
-	jobFile, err := prompter.Ask("Path to existing job.toml", func(value string) error {
+	configFile, err := prompter.Ask("Path to config file", func(value string) error {
 		if err := validateAbsolutePath(value); err != nil {
 			return err
 		}
-		if filepath.Base(value) != "job.toml" {
-			return fmt.Errorf("file must be named job.toml")
+		base := filepath.Base(value)
+		if base != "job.toml" && !strings.HasSuffix(base, ".env") {
+			return fmt.Errorf("file must be job.toml or a *.env file")
 		}
 		if _, err := os.Stat(value); err != nil {
 			return fmt.Errorf("file does not exist")
@@ -392,6 +379,13 @@ func runImportV2Wizard(paths app.Paths, prompter ui.Prompter) error {
 		return err
 	}
 
+	if filepath.Base(configFile) == "job.toml" {
+		return runImportV2(paths, prompter, configFile)
+	}
+	return runImportLegacy(paths, prompter, configFile)
+}
+
+func runImportV2(paths app.Paths, prompter ui.Prompter, jobFile string) error {
 	newID, err := prompter.Ask("New backup job ID (leave blank to use ID from file)", func(value string) error {
 		if strings.TrimSpace(value) == "" {
 			return nil
@@ -411,23 +405,7 @@ func runImportV2Wizard(paths app.Paths, prompter ui.Prompter) error {
 	return nil
 }
 
-func runImportLegacyWizard(paths app.Paths, prompter ui.Prompter) error {
-	envFile, err := prompter.Ask("Path to *-Configuration.env file", func(value string) error {
-		if err := validateAbsolutePath(value); err != nil {
-			return err
-		}
-		if _, err := os.Stat(value); err != nil {
-			return fmt.Errorf("file does not exist")
-		}
-		if !strings.HasSuffix(value, ".env") {
-			return fmt.Errorf("file must have .env extension")
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-
+func runImportLegacy(paths app.Paths, prompter ui.Prompter, envFile string) error {
 	result, err := legacyimport.Parse(envFile)
 	if err != nil {
 		return fmt.Errorf("parse v1 config: %w", err)
