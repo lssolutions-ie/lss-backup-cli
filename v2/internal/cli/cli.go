@@ -121,6 +121,8 @@ func runCheckForUpdates(prompter ui.Prompter) error {
 		return nil
 	}
 
+	fmt.Println("Updating LSS Backup CLI does not remove existing backup jobs or configuration data.")
+
 	_, installChoice, err := prompter.Select("Would you like to install this update now?", []string{
 		"Yes, install update now",
 		"No, return to main menu",
