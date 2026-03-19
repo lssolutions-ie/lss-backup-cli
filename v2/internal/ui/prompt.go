@@ -38,6 +38,20 @@ func (p Prompter) Ask(question string, validate func(string) error) (string, err
 	}
 }
 
+func (p Prompter) Confirm(question string) (bool, error) {
+	answer, err := p.Ask(question+" [y/n]", func(value string) error {
+		switch strings.ToLower(value) {
+		case "y", "n":
+			return nil
+		}
+		return fmt.Errorf("enter y or n")
+	})
+	if err != nil {
+		return false, err
+	}
+	return strings.ToLower(answer) == "y", nil
+}
+
 func (p Prompter) Select(title string, options []string) (int, string, error) {
 	if len(options) == 0 {
 		return 0, "", fmt.Errorf("no options available")

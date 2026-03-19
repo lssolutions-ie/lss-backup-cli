@@ -168,104 +168,74 @@ func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Promp
 
 	changed := false
 
-	// Name
-	fmt.Printf("Name is currently: %q\n", job.Name)
-	if ok, err := confirmChange(prompter, "Change it?"); err != nil {
+	if ok, err := prompter.Confirm(fmt.Sprintf("Name [%q] — change?", job.Name)); err != nil {
 		return err
 	} else if ok {
-		name, err := prompter.Ask("New name", validateNonEmpty("name"))
-		if err != nil {
+		if job.Name, err = prompter.Ask("New name", validateNonEmpty("name")); err != nil {
 			return err
 		}
-		job.Name = name
 		changed = true
 	}
 
-	// Program
-	fmt.Printf("Program is currently: %q\n", job.Program)
-	if ok, err := confirmChange(prompter, "Change it?"); err != nil {
+	if ok, err := prompter.Confirm(fmt.Sprintf("Program [%q] — change?", job.Program)); err != nil {
 		return err
 	} else if ok {
-		_, program, err := prompter.Select("Select backup program", []string{"restic", "rsync"})
-		if err != nil {
+		if _, job.Program, err = prompter.Select("Select backup program", []string{"restic", "rsync"}); err != nil {
 			return err
 		}
-		job.Program = program
 		changed = true
 	}
 
-	// Source path
-	fmt.Printf("Source path is currently: %q\n", job.Source.Path)
-	if ok, err := confirmChange(prompter, "Change it?"); err != nil {
+	if ok, err := prompter.Confirm(fmt.Sprintf("Source path [%q] — change?", job.Source.Path)); err != nil {
 		return err
 	} else if ok {
-		sourcePath, err := prompter.Ask("New source path", validateExistingDirectory)
-		if err != nil {
+		if job.Source.Path, err = prompter.Ask("New source path", validateExistingDirectory); err != nil {
 			return err
 		}
-		job.Source.Path = sourcePath
 		changed = true
 	}
 
-	// Destination path
-	fmt.Printf("Destination path is currently: %q\n", job.Destination.Path)
-	if ok, err := confirmChange(prompter, "Change it?"); err != nil {
+	if ok, err := prompter.Confirm(fmt.Sprintf("Destination path [%q] — change?", job.Destination.Path)); err != nil {
 		return err
 	} else if ok {
-		destPath, err := prompter.Ask("New destination path", validateAbsolutePath)
-		if err != nil {
+		if job.Destination.Path, err = prompter.Ask("New destination path", validateAbsolutePath); err != nil {
 			return err
 		}
-		job.Destination.Path = destPath
 		changed = true
 	}
 
-	// Schedule
-	fmt.Printf("Schedule is currently: %s\n", describeSchedule(job.Schedule))
-	if ok, err := confirmChange(prompter, "Change it?"); err != nil {
+	if ok, err := prompter.Confirm(fmt.Sprintf("Schedule [%s] — change?", describeSchedule(job.Schedule))); err != nil {
 		return err
 	} else if ok {
-		schedule, err := promptSchedule(prompter)
-		if err != nil {
+		if job.Schedule, err = promptSchedule(prompter); err != nil {
 			return err
 		}
-		job.Schedule = schedule
 		changed = true
 	}
 
-	// Retention
-	fmt.Printf("Retention is currently: %q\n", job.Retention.Mode)
-	if ok, err := confirmChange(prompter, "Change it?"); err != nil {
+	if ok, err := prompter.Confirm(fmt.Sprintf("Retention [%q] — change?", job.Retention.Mode)); err != nil {
 		return err
 	} else if ok {
-		retention, err := promptRetention(prompter)
-		if err != nil {
+		if job.Retention, err = promptRetention(prompter); err != nil {
 			return err
 		}
-		job.Retention = retention
 		changed = true
 	}
 
-	// Notifications
-	fmt.Printf("Notifications are currently: email=%s healthchecks=%t\n", job.Notifications.EmailMode, job.Notifications.HealthchecksEnabled)
-	if ok, err := confirmChange(prompter, "Change it?"); err != nil {
+	if ok, err := prompter.Confirm(fmt.Sprintf("Notifications [email=%s healthchecks=%t] — change?", job.Notifications.EmailMode, job.Notifications.HealthchecksEnabled)); err != nil {
 		return err
 	} else if ok {
-		notifications, err := promptNotifications(prompter)
-		if err != nil {
+		if job.Notifications, err = promptNotifications(prompter); err != nil {
 			return err
 		}
-		job.Notifications = notifications
 		changed = true
 	}
 
-	// Enabled
 	enabledLabel := "enabled"
 	if !job.Enabled {
 		enabledLabel = "disabled"
 	}
-	fmt.Printf("Job is currently %s\n", enabledLabel)
-	if ok, err := confirmChange(prompter, "Change it?"); err != nil {
+	if ok, err := prompter.Confirm(fmt.Sprintf("Job is [%s] — change?", enabledLabel)); err != nil {
 		return err
 	} else if ok {
 		_, choice, err := prompter.Select("Set job status", []string{"enabled", "disabled"})
@@ -286,14 +256,6 @@ func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Promp
 	}
 	fmt.Println("Job updated.")
 	return nil
-}
-
-func confirmChange(prompter ui.Prompter, question string) (bool, error) {
-	_, answer, err := prompter.Select(question, []string{"No", "Yes"})
-	if err != nil {
-		return false, err
-	}
-	return answer == "Yes", nil
 }
 
 func describeSchedule(s config.Schedule) string {
