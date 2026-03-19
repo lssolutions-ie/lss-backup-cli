@@ -270,8 +270,8 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			"Run Backup Now",
 			"Restore Backup",
 			"Edit Backup",
-			"Show Schedule",
-			"Show Retention",
+			"Configure Schedule",
+			"Configure Retention",
 			"Configure Notifications",
 			"Show Job Configuration",
 			"Validate Job",
@@ -294,7 +294,7 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			if err := runRestoreWizard(paths, prompter, job.ID); err != nil {
 				fmt.Println("Restore failed:", err)
 			}
-		case "Show Schedule":
+		case "Configure Schedule":
 			updatedJob, err := jobs.Load(paths, job.ID)
 			if err != nil {
 				fmt.Println("Reload failed:", err)
@@ -314,7 +314,7 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 				fmt.Println("Notification update failed:", err)
 				continue
 			}
-		case "Show Retention":
+		case "Configure Retention":
 			updatedJob, err := jobs.Load(paths, job.ID)
 			if err != nil {
 				fmt.Println("Reload failed:", err)
@@ -636,8 +636,7 @@ func validateJobID(paths app.Paths) func(string) error {
 		if !jobIDPattern.MatchString(value) {
 			return fmt.Errorf("use only letters, numbers, dash, and underscore")
 		}
-		_, err := jobs.Load(paths, value)
-		if err == nil {
+		if jobs.Exists(paths, value) {
 			return fmt.Errorf("backup job ID already exists")
 		}
 		return nil

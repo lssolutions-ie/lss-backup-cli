@@ -70,6 +70,12 @@ func List(paths app.Paths) ([]Summary, error) {
 	return out, nil
 }
 
+func Exists(paths app.Paths, id string) bool {
+	jobDir := filepath.Join(paths.JobsDir, id)
+	_, err := os.Stat(jobDir)
+	return err == nil
+}
+
 func Load(paths app.Paths, id string) (config.Job, error) {
 	jobDir := filepath.Join(paths.JobsDir, id)
 	return config.LoadJob(jobDir)
