@@ -154,35 +154,165 @@ func runCheckForUpdates(prompter ui.Prompter) error {
 	return nil
 }
 
-func runReconfigureBackupWizard(job config.Job, prompter ui.Prompter) error {
-	fmt.Println("")
-	fmt.Println("Edit Backup")
-	fmt.Println("-----------")
-	fmt.Printf("Selected backup job: %s | %s | %s\n", job.ID, job.Program, job.Name)
-	fmt.Println("This is a skeleton edit flow for now.")
-
-	_, editArea, err := prompter.Select("What would you like to edit?", []string{
-		"General Settings",
-		"Source",
-		"Destination",
-		"Schedule",
-		"Notifications",
-		"Retention",
-		"Secrets",
-		"Back To Main Menu",
-	})
+func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Prompter) error {
+	job, err := jobs.Load(paths, jobID)
 	if err != nil {
 		return err
 	}
 
-	if editArea == "Back To Main Menu" {
+	fmt.Println("")
+	fmt.Println("Edit Backup")
+	fmt.Println("-----------")
+	fmt.Printf("Job: %s | %s | %s\n", job.ID, job.Program, job.Name)
+	fmt.Println("")
+
+	changed := false
+
+	// Name
+	fmt.Printf("Name is currently: %q\n", job.Name)
+	if ok, err := confirmChange(prompter, "Change it?"); err != nil {
+		return err
+	} else if ok {
+		name, err := prompter.Ask("New name", validateNonEmpty("name"))
+		if err != nil {
+			return err
+		}
+		job.Name = name
+		changed = true
+	}
+
+	// Program
+	fmt.Printf("Program is currently: %q\n", job.Program)
+	if ok, err := confirmChange(prompter, "Change it?"); err != nil {
+		return err
+	} else if ok {
+		_, program, err := prompter.Select("Select backup program", []string{"restic", "rsync"})
+		if err != nil {
+			return err
+		}
+		job.Program = program
+		changed = true
+	}
+
+	// Source path
+	fmt.Printf("Source path is currently: %q\n", job.Source.Path)
+	if ok, err := confirmChange(prompter, "Change it?"); err != nil {
+		return err
+	} else if ok {
+		sourcePath, err := prompter.Ask("New source path", validateExistingDirectory)
+		if err != nil {
+			return err
+		}
+		job.Source.Path = sourcePath
+		changed = true
+	}
+
+	// Destination path
+	fmt.Printf("Destination path is currently: %q\n", job.Destination.Path)
+	if ok, err := confirmChange(prompter, "Change it?"); err != nil {
+		return err
+	} else if ok {
+		destPath, err := prompter.Ask("New destination path", validateAbsolutePath)
+		if err != nil {
+			return err
+		}
+		job.Destination.Path = destPath
+		changed = true
+	}
+
+	// Schedule
+	fmt.Printf("Schedule is currently: %s\n", describeSchedule(job.Schedule))
+	if ok, err := confirmChange(prompter, "Change it?"); err != nil {
+		return err
+	} else if ok {
+		schedule, err := promptSchedule(prompter)
+		if err != nil {
+			return err
+		}
+		job.Schedule = schedule
+		changed = true
+	}
+
+	// Retention
+	fmt.Printf("Retention is currently: %q\n", job.Retention.Mode)
+	if ok, err := confirmChange(prompter, "Change it?"); err != nil {
+		return err
+	} else if ok {
+		retention, err := promptRetention(prompter)
+		if err != nil {
+			return err
+		}
+		job.Retention = retention
+		changed = true
+	}
+
+	// Notifications
+	fmt.Printf("Notifications are currently: email=%s healthchecks=%t\n", job.Notifications.EmailMode, job.Notifications.HealthchecksEnabled)
+	if ok, err := confirmChange(prompter, "Change it?"); err != nil {
+		return err
+	} else if ok {
+		notifications, err := promptNotifications(prompter)
+		if err != nil {
+			return err
+		}
+		job.Notifications = notifications
+		changed = true
+	}
+
+	// Enabled
+	enabledLabel := "enabled"
+	if !job.Enabled {
+		enabledLabel = "disabled"
+	}
+	fmt.Printf("Job is currently %s\n", enabledLabel)
+	if ok, err := confirmChange(prompter, "Change it?"); err != nil {
+		return err
+	} else if ok {
+		_, choice, err := prompter.Select("Set job status", []string{"enabled", "disabled"})
+		if err != nil {
+			return err
+		}
+		job.Enabled = choice == "enabled"
+		changed = true
+	}
+
+	if !changed {
+		fmt.Println("No changes made.")
 		return nil
 	}
 
-	fmt.Println("")
-	fmt.Printf("Edit area selected: %s\n", editArea)
-	fmt.Println("Full edit question flow will be added next.")
+	if err := jobs.Save(job); err != nil {
+		return err
+	}
+	fmt.Println("Job updated.")
 	return nil
+}
+
+func confirmChange(prompter ui.Prompter, question string) (bool, error) {
+	_, answer, err := prompter.Select(question, []string{"No", "Yes"})
+	if err != nil {
+		return false, err
+	}
+	return answer == "Yes", nil
+}
+
+func describeSchedule(s config.Schedule) string {
+	switch s.Mode {
+	case "manual", "":
+		return "manual"
+	case "daily":
+		return fmt.Sprintf("daily at %02d:%02d", s.Hour, s.Minute)
+	case "weekly":
+		days := make([]string, len(s.Days))
+		for i, d := range s.Days {
+			days[i] = strconv.Itoa(d)
+		}
+		return fmt.Sprintf("weekly on days [%s] at %02d:%02d", strings.Join(days, ", "), s.Hour, s.Minute)
+	case "monthly":
+		return fmt.Sprintf("monthly on day %d at %02d:%02d", s.DayOfMonth, s.Hour, s.Minute)
+	default:
+		return s.Mode
+	}
 }
 
 func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
@@ -289,7 +419,7 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 
 		switch action {
 		case "Edit Backup":
-			if err := runReconfigureBackupWizard(job, prompter); err != nil {
+			if err := runReconfigureBackupWizard(paths, job.ID, prompter); err != nil {
 				fmt.Println("Edit failed:", err)
 			}
 		case "Run Backup Now":
