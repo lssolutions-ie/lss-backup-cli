@@ -53,6 +53,7 @@ func runMenu(paths app.Paths) error {
 
 		_, choice, err := prompter.Select("Main Menu", []string{
 			"Create Backup Job",
+			"List Backup Jobs",
 			"Manage Existing Backup",
 			"Import Previous Backup",
 			"Delete Backup",
@@ -70,6 +71,10 @@ func runMenu(paths app.Paths) error {
 		case "Create Backup Job":
 			if err := runCreateWizard(paths, prompter); err != nil {
 				fmt.Println("Create job failed:", err)
+			}
+		case "List Backup Jobs":
+			if err := printJobs(paths); err != nil {
+				fmt.Println("List failed:", err)
 			}
 		case "Manage Existing Backup":
 			if err := runManageWizard(paths, prompter); err != nil {
@@ -269,6 +274,7 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			"Show Retention",
 			"Notifications Logs",
 			"Show Job Configuration",
+			"Validate Job",
 			"Back To Main Menu",
 		})
 		if err != nil {
@@ -321,6 +327,10 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 		case "Show Job Configuration":
 			if err := showJob(paths, job.ID); err != nil {
 				fmt.Println("Show failed:", err)
+			}
+		case "Validate Job":
+			if err := validateJob(paths, job.ID); err != nil {
+				fmt.Println("Validation failed:", err)
 			}
 		case "Back To Main Menu":
 			return nil
