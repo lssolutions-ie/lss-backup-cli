@@ -35,3 +35,11 @@ func TestParseSemVersionRejectsInvalid(t *testing.T) {
 		t.Fatal("expected invalid version to be rejected")
 	}
 }
+
+func TestArchiveURLForTag(t *testing.T) {
+	url := archiveURLForTag("v2.1.0")
+	want := "https://github.com/lssolutions-ie/lss-backup-cli/archive/refs/tags/v2.1.0.zip"
+	if url != want {
+		t.Fatalf("expected %s, got %s", want, url)
+	}
+}

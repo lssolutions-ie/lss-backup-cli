@@ -93,7 +93,7 @@ func runMenu(paths app.Paths) error {
 			fmt.Println("Configure Management Console is a skeleton for now.")
 			fmt.Println("Final behavior should configure connection to a central server that observes and tracks backups.")
 		case "Check For Updates":
-			if err := runCheckForUpdates(); err != nil {
+			if err := runCheckForUpdates(prompter); err != nil {
 				fmt.Println("Update check failed:", err)
 			}
 		case "Exit":
@@ -103,7 +103,7 @@ func runMenu(paths app.Paths) error {
 	}
 }
 
-func runCheckForUpdates() error {
+func runCheckForUpdates(prompter ui.Prompter) error {
 	fmt.Println("")
 	fmt.Println("Check For Updates")
 	fmt.Println("-----------------")
@@ -117,6 +117,27 @@ func runCheckForUpdates() error {
 	if result.LatestVersion != "" {
 		fmt.Println("Latest GitHub tag:", result.LatestVersion)
 	}
+	if !result.UpdateAvailable {
+		return nil
+	}
+
+	_, installChoice, err := prompter.Select("Would you like to install this update now?", []string{
+		"Yes, install update now",
+		"No, return to main menu",
+	})
+	if err != nil {
+		return err
+	}
+	if installChoice != "Yes, install update now" {
+		return nil
+	}
+
+	fmt.Println("Downloading and installing update...")
+	if err := updatecheck.Install(result); err != nil {
+		return err
+	}
+
+	fmt.Println("Update installed successfully.")
 
 	return nil
 }
