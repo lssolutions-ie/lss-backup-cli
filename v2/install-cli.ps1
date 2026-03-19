@@ -61,7 +61,7 @@ Push-Location $PSScriptRoot
 try {
     $env:GOCACHE = Join-Path $PSScriptRoot ".gocache"
     Ensure-Directory $env:GOCACHE
-    go build -o $BinPath ./cmd/lss-backup
+    go build -o $BinPath .
 }
 finally {
     Pop-Location

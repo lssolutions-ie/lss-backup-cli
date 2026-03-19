@@ -103,7 +103,7 @@ esac
 
 mkdir -p "${SCRIPT_DIR}/.gocache"
 cd "${SCRIPT_DIR}"
-GOCACHE="${SCRIPT_DIR}/.gocache" go build -o "${TARGET}" ./cmd/lss-backup
+GOCACHE="${SCRIPT_DIR}/.gocache" go build -o "${TARGET}" .
 
 TMP_MANIFEST="$(mktemp "${TMPDIR:-/tmp}/lss-backup-manifest.XXXXXX")"
 cat > "${TMP_MANIFEST}" <<EOF
