@@ -22,6 +22,10 @@ func Run() error {
 		return err
 	}
 
+	if runtime.GOOS == "darwin" && os.Geteuid() == 0 {
+		return fmt.Errorf("please run lss-backup-cli --uninstall without sudo on macOS; the program will ask for elevation only when needed")
+	}
+
 	reader := bufio.NewReader(os.Stdin)
 
 	fmt.Println("LSS Backup CLI Uninstall")
@@ -121,6 +125,10 @@ func promptZipPath(reader *bufio.Reader) (string, error) {
 }
 
 func createBackup(paths platform.RuntimePaths, zipPath string) error {
+	if needsElevatedFilesystemOps() {
+		return createBackupWithElevation(paths, zipPath)
+	}
+
 	zipFile, err := os.Create(zipPath)
 	if err != nil {
 		return fmt.Errorf("create backup zip: %w", err)
@@ -147,6 +155,47 @@ func createBackup(paths platform.RuntimePaths, zipPath string) error {
 	}
 
 	return nil
+}
+
+func createBackupWithElevation(paths platform.RuntimePaths, zipPath string) error {
+	stageDir, err := os.MkdirTemp("", "lss-backup-uninstall-*")
+	if err != nil {
+		return fmt.Errorf("create temp stage dir: %w", err)
+	}
+	defer os.RemoveAll(stageDir)
+
+	recoveryDir := filepath.Join(stageDir, "recovery")
+	if err := os.MkdirAll(recoveryDir, 0o755); err != nil {
+		return fmt.Errorf("create recovery stage dir: %w", err)
+	}
+
+	items := []struct {
+		source string
+		target string
+	}{
+		{source: paths.BinPath, target: filepath.Join(recoveryDir, "lss-backup-cli")},
+		{source: paths.ConfigDir, target: filepath.Join(recoveryDir, "config")},
+		{source: paths.LogsDir, target: filepath.Join(recoveryDir, "logs")},
+		{source: paths.StateDir, target: filepath.Join(recoveryDir, "state")},
+	}
+
+	for _, item := range items {
+		if _, err := os.Stat(item.source); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("stat %s: %w", item.source, err)
+		}
+
+		cmd := exec.Command("sudo", "cp", "-R", item.source, item.target)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("copy %s with elevation: %w", item.source, err)
+		}
+	}
+
+	return zipExistingDirectory(filepath.Join(stageDir, "recovery"), zipPath)
 }
 
 func addPathToZip(writer *zip.Writer, sourcePath string, zipRoot string) error {
@@ -270,6 +319,17 @@ func safeRemove(target string) error {
 		return fmt.Errorf("refusing to remove unsafe path: %q", target)
 	}
 
+	if needsElevatedFilesystemOps() {
+		cmd := exec.Command("sudo", "rm", "-rf", target)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("remove %s with elevation: %w", target, err)
+		}
+		fmt.Println("Removed:", target)
+		return nil
+	}
+
 	if _, err := os.Stat(target); err != nil {
 		if os.IsNotExist(err) {
 			fmt.Println("Not present, skipping:", target)
@@ -284,4 +344,34 @@ func safeRemove(target string) error {
 
 	fmt.Println("Removed:", target)
 	return nil
+}
+
+func zipExistingDirectory(sourceDir string, zipPath string) error {
+	zipFile, err := os.Create(zipPath)
+	if err != nil {
+		return fmt.Errorf("create backup zip: %w", err)
+	}
+	defer zipFile.Close()
+
+	writer := zip.NewWriter(zipFile)
+	defer writer.Close()
+
+	return filepath.WalkDir(sourceDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		relative, err := filepath.Rel(filepath.Dir(sourceDir), path)
+		if err != nil {
+			return err
+		}
+		return addFileToZip(writer, path, filepath.ToSlash(relative))
+	})
+}
+
+func needsElevatedFilesystemOps() bool {
+	return runtime.GOOS != "windows" && os.Geteuid() != 0
 }
