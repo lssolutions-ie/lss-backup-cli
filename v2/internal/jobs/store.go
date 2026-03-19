@@ -32,6 +32,7 @@ type CreateInput struct {
 	Enabled     bool
 	Retention   config.Retention
 	Notify      config.Notifications
+	Secrets     *config.Secrets // optional; written to secrets.env when non-nil
 }
 
 func List(paths app.Paths) ([]Summary, error) {
@@ -210,8 +211,8 @@ func Create(paths app.Paths, input CreateInput) (config.Job, error) {
 	}
 
 	secretsFile := filepath.Join(jobDir, "secrets.env")
-	secrets := []byte("RESTIC_PASSWORD=\nAWS_ACCESS_KEY_ID=\nAWS_SECRET_ACCESS_KEY=\nSMB_PASSWORD=\nNFS_PASSWORD=\n")
-	if err := os.WriteFile(secretsFile, secrets, 0o600); err != nil {
+	secretsContent := buildSecretsContent(input.Secrets)
+	if err := os.WriteFile(secretsFile, []byte(secretsContent), 0o600); err != nil {
 		_ = os.RemoveAll(jobDir)
 		return config.Job{}, fmt.Errorf("write secrets.env: %w", err)
 	}
@@ -289,4 +290,50 @@ func writeRunScript(path string, jobID string) error {
 func shellEscape(value string) string {
 	value = strings.ReplaceAll(value, `'`, `'"'"'`)
 	return "'" + value + "'"
+}
+
+// Export copies job.toml and secrets.env from the job directory to targetDir.
+// The target directory is created if it does not exist.
+func Export(paths app.Paths, id string, targetDir string) error {
+	jobDir := filepath.Join(paths.JobsDir, id)
+	if _, err := os.Stat(jobDir); err != nil {
+		return fmt.Errorf("job %q does not exist", id)
+	}
+
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		return fmt.Errorf("create export directory: %w", err)
+	}
+
+	for _, filename := range []string{"job.toml", "secrets.env"} {
+		src := filepath.Join(jobDir, filename)
+		dst := filepath.Join(targetDir, filename)
+		data, err := os.ReadFile(src)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", filename, err)
+		}
+		perm := os.FileMode(0o644)
+		if filename == "secrets.env" {
+			perm = 0o600
+		}
+		if err := os.WriteFile(dst, data, perm); err != nil {
+			return fmt.Errorf("write %s: %w", filename, err)
+		}
+	}
+
+	return nil
+}
+
+// buildSecretsContent renders a secrets.env file body.
+// If secrets is nil the keys are written with empty values.
+func buildSecretsContent(secrets *config.Secrets) string {
+	if secrets == nil {
+		return "RESTIC_PASSWORD=\nAWS_ACCESS_KEY_ID=\nAWS_SECRET_ACCESS_KEY=\nSMB_PASSWORD=\nNFS_PASSWORD=\n"
+	}
+	return fmt.Sprintf("RESTIC_PASSWORD=%s\nAWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\nSMB_PASSWORD=%s\nNFS_PASSWORD=%s\n",
+		secrets.ResticPassword,
+		secrets.AWSAccessKeyID,
+		secrets.AWSSecretAccessKey,
+		secrets.SMBPassword,
+		secrets.NFSPassword,
+	)
 }

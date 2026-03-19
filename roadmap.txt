@@ -84,22 +84,25 @@ Goal:
 Get a runnable but mostly empty CLI in place.
 
 Tasks:
-- [ ] Create the main CLI entrypoint.
-- [ ] Add `create` command.
-- [ ] Add `list` command.
-- [ ] Add `show` command.
-- [ ] Add `run` command.
-- [ ] Add `validate` command.
+- [x] Create the main CLI entrypoint.
+- [x] Add `create` command.
+- [x] Add `list` command.
+- [x] Add `show` command.
+- [x] Add `run` command.
+- [x] Add `validate` command.
 - [ ] Implement shared logging setup.
-- [ ] Implement job discovery from `jobs/<job-id>/`.
+- [x] Implement job discovery from `jobs/<job-id>/`.
 
 Deliverables:
-- [ ] basic CLI app
-- [ ] jobs can be listed and loaded from config
-- [ ] validation errors are human-readable
+- [x] basic CLI app
+- [x] jobs can be listed and loaded from config
+- [x] validation errors are human-readable
 
 Success looks like:
 - v2 can read and inspect jobs even before real backup execution exists.
+
+Status:
+- M2 complete (shared logging deferred to M4 log file work)
 
 
 Milestone M3: Implement Job Persistence
@@ -108,20 +111,25 @@ Goal:
 Make job definitions the durable source of truth.
 
 Tasks:
-- [ ] Write config read/write logic.
-- [ ] Create job directory creation logic.
-- [ ] Generate per-job `run.sh` wrappers if job-local entrypoints are kept.
-- [ ] Store secrets separately with safe permissions.
-- [ ] Add export/import of the new config format.
+- [x] Write config read/write logic.
+- [x] Create job directory creation logic.
+- [x] Generate per-job `run.sh` wrappers if job-local entrypoints are kept.
+- [x] Store secrets separately with safe permissions.
+- [x] Add export/import of the new config format.
+- [x] Add import of v1 legacy *-Configuration.env format.
 
 Deliverables:
-- [ ] `create` writes a valid job
-- [ ] `show` prints job data
-- [ ] `import` works for v2 format
-- [ ] `export` works for v2 format
+- [x] `create` writes a valid job
+- [x] `show` prints job data
+- [x] `import` works for v2 format
+- [x] `import` works for v1 legacy format (with warnings for unsupported features)
+- [x] `export` works for v2 format
 
 Success looks like:
 - A job can be created, moved, and reconstructed from its config files.
+
+Status:
+- M3 complete
 
 
 Milestone M4: First Working Backup Engine

@@ -13,6 +13,7 @@ import (
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/app"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/jobs"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/legacyimport"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/runner"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/ui"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/uninstall"
@@ -56,6 +57,7 @@ func runMenu(paths app.Paths) error {
 			"List Backup Jobs",
 			"Manage Existing Backup",
 			"Import Previous Backup",
+			"Export Backup Job",
 			"Delete Backup",
 			"Manage Notification Channels",
 			"Backup LSS Backup Configuration",
@@ -83,6 +85,10 @@ func runMenu(paths app.Paths) error {
 		case "Import Previous Backup":
 			if err := runImportWizard(paths, prompter); err != nil {
 				fmt.Println("Import failed:", err)
+			}
+		case "Export Backup Job":
+			if err := runExportWizard(paths, prompter); err != nil {
+				fmt.Println("Export failed:", err)
 			}
 		case "Delete Backup":
 			if err := runRemoveSelectWizard(paths, prompter); err != nil {
@@ -354,8 +360,22 @@ func runImportWizard(paths app.Paths, prompter ui.Prompter) error {
 	fmt.Println("")
 	fmt.Println("Import Previous Backup")
 	fmt.Println("----------------------")
-	fmt.Println("Current v2 import supports importing an existing job.toml file and optional secrets.env from the same directory.")
 
+	_, importType, err := prompter.Select("What kind of backup config are you importing?", []string{
+		"v2 job.toml",
+		"v1 legacy *-Configuration.env",
+	})
+	if err != nil {
+		return err
+	}
+
+	if importType == "v2 job.toml" {
+		return runImportV2Wizard(paths, prompter)
+	}
+	return runImportLegacyWizard(paths, prompter)
+}
+
+func runImportV2Wizard(paths app.Paths, prompter ui.Prompter) error {
 	jobFile, err := prompter.Ask("Path to existing job.toml", func(value string) error {
 		if err := validateAbsolutePath(value); err != nil {
 			return err
@@ -372,7 +392,12 @@ func runImportWizard(paths app.Paths, prompter ui.Prompter) error {
 		return err
 	}
 
-	newID, err := prompter.Ask("New backup job ID", validateJobID(paths))
+	newID, err := prompter.Ask("New backup job ID (leave blank to use ID from file)", func(value string) error {
+		if strings.TrimSpace(value) == "" {
+			return nil
+		}
+		return validateJobID(paths)(value)
+	})
 	if err != nil {
 		return err
 	}
@@ -383,6 +408,98 @@ func runImportWizard(paths app.Paths, prompter ui.Prompter) error {
 	}
 
 	fmt.Println("Imported backup job:", job.ID)
+	return nil
+}
+
+func runImportLegacyWizard(paths app.Paths, prompter ui.Prompter) error {
+	envFile, err := prompter.Ask("Path to *-Configuration.env file", func(value string) error {
+		if err := validateAbsolutePath(value); err != nil {
+			return err
+		}
+		if _, err := os.Stat(value); err != nil {
+			return fmt.Errorf("file does not exist")
+		}
+		if !strings.HasSuffix(value, ".env") {
+			return fmt.Errorf("file must have .env extension")
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	result, err := legacyimport.Parse(envFile)
+	if err != nil {
+		return fmt.Errorf("parse v1 config: %w", err)
+	}
+
+	if len(result.Warnings) > 0 {
+		fmt.Println("")
+		fmt.Println("Import warnings (review after import):")
+		for _, w := range result.Warnings {
+			fmt.Println(" -", w)
+		}
+	}
+
+	// Allow overriding the ID from the v1 file
+	proposedID := result.Input.ID
+	fmt.Printf("Job ID from v1 file: %q\n", proposedID)
+
+	newID, err := prompter.Ask("New backup job ID (leave blank to keep above)", func(value string) error {
+		if strings.TrimSpace(value) == "" {
+			return validateJobID(paths)(proposedID)
+		}
+		return validateJobID(paths)(value)
+	})
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(newID) != "" {
+		result.Input.ID = newID
+	}
+
+	job, err := jobs.Create(paths, result.Input)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("")
+	fmt.Println("Backup job imported from v1 config.")
+	fmt.Println("Job ID:", job.ID)
+	fmt.Println("Job file:", job.JobFile)
+	fmt.Println("Secrets file:", job.SecretsFile)
+	if len(result.Warnings) > 0 {
+		fmt.Println("Review the warnings above and verify the job configuration before running.")
+	}
+	return nil
+}
+
+func runExportWizard(paths app.Paths, prompter ui.Prompter) error {
+	fmt.Println("")
+	fmt.Println("Export Backup Job")
+	fmt.Println("-----------------")
+
+	job, err := selectJob(paths, prompter)
+	if err != nil {
+		return err
+	}
+	if job.ID == "" {
+		fmt.Println("There are no backup jobs to export.")
+		return nil
+	}
+
+	targetDir, err := prompter.Ask("Export to directory", validateAbsolutePath)
+	if err != nil {
+		return err
+	}
+
+	if err := jobs.Export(paths, job.ID, targetDir); err != nil {
+		return err
+	}
+
+	fmt.Printf("Exported job %q to %s\n", job.ID, targetDir)
+	fmt.Println("Files: job.toml, secrets.env")
+	fmt.Println("Keep secrets.env safe — it contains your backup passwords.")
 	return nil
 }
 
