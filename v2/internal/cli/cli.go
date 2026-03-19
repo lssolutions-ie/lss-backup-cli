@@ -17,6 +17,7 @@ import (
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/runner"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/ui"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/uninstall"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/updatecheck"
 )
 
 var jobIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
@@ -59,6 +60,7 @@ func runMenu(paths app.Paths) error {
 			"Manage Notification Channels",
 			"Backup LSS Backup Configuration",
 			"Configure Management Console",
+			"Check For Updates",
 			"Exit",
 		})
 		if err != nil {
@@ -90,11 +92,33 @@ func runMenu(paths app.Paths) error {
 		case "Configure Management Console":
 			fmt.Println("Configure Management Console is a skeleton for now.")
 			fmt.Println("Final behavior should configure connection to a central server that observes and tracks backups.")
+		case "Check For Updates":
+			if err := runCheckForUpdates(); err != nil {
+				fmt.Println("Update check failed:", err)
+			}
 		case "Exit":
 			fmt.Println("Good bye.")
 			return nil
 		}
 	}
+}
+
+func runCheckForUpdates() error {
+	fmt.Println("")
+	fmt.Println("Check For Updates")
+	fmt.Println("-----------------")
+
+	result, err := updatecheck.Check()
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(result.Message)
+	if result.LatestVersion != "" {
+		fmt.Println("Latest GitHub tag:", result.LatestVersion)
+	}
+
+	return nil
 }
 
 func runReconfigureBackupWizard(job config.Job, prompter ui.Prompter) error {
