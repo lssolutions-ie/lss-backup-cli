@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/platform"
 )
 
 type Paths struct {
@@ -14,30 +16,40 @@ type Paths struct {
 }
 
 func DiscoverPaths() (Paths, error) {
+	// LSS_BACKUP_V2_ROOT overrides system paths — used for development and testing.
 	root := os.Getenv("LSS_BACKUP_V2_ROOT")
-	if root == "" {
-		wd, err := os.Getwd()
+	if root != "" {
+		abs, err := filepath.Abs(root)
 		if err != nil {
-			return Paths{}, fmt.Errorf("get working directory: %w", err)
+			return Paths{}, fmt.Errorf("resolve root directory: %w", err)
 		}
-		root = wd
+		return Paths{
+			RootDir:  abs,
+			JobsDir:  filepath.Join(abs, "jobs"),
+			StateDir: filepath.Join(abs, "state"),
+			DocsDir:  filepath.Join(abs, "docs"),
+		}, nil
 	}
 
-	root, err := filepath.Abs(root)
+	rp, err := platform.CurrentRuntimePaths()
 	if err != nil {
-		return Paths{}, fmt.Errorf("resolve root directory: %w", err)
+		return Paths{}, err
 	}
 
 	return Paths{
-		RootDir:  root,
-		JobsDir:  filepath.Join(root, "jobs"),
-		StateDir: filepath.Join(root, "state"),
-		DocsDir:  filepath.Join(root, "docs"),
+		RootDir:  rp.ConfigDir,
+		JobsDir:  rp.JobsDir,
+		StateDir: rp.StateDir,
+		DocsDir:  "",
 	}, nil
 }
 
 func (p Paths) EnsureLayout() error {
-	for _, dir := range []string{p.JobsDir, p.StateDir, p.DocsDir} {
+	dirs := []string{p.JobsDir, p.StateDir}
+	if p.DocsDir != "" {
+		dirs = append(dirs, p.DocsDir)
+	}
+	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("create directory %s: %w", dir, err)
 		}

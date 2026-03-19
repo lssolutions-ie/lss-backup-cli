@@ -13,7 +13,6 @@ import (
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/app"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/jobs"
-	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/platform"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/runner"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/ui"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/uninstall"
@@ -38,7 +37,7 @@ func Run(args []string) error {
 		if args[0] == "run" && len(args) == 2 {
 			return runJobByID(paths, args[1])
 		}
-		return errors.New("v2 is menu-driven; run it as sudo lss-backup-cli")
+		return errors.New("v2 is menu-driven; run lss-backup-cli with no arguments to open the menu")
 	}
 
 	return runMenu(paths)
@@ -341,19 +340,6 @@ func runRemoveSelectWizard(paths app.Paths, prompter ui.Prompter) error {
 	return removeJob(paths, prompter, job.ID)
 }
 
-func showRuntimePaths() error {
-	paths, err := platform.CurrentRuntimePaths()
-	if err != nil {
-		return err
-	}
-	fmt.Println("Runtime paths:")
-	fmt.Println("Binary:", paths.BinPath)
-	fmt.Println("Config:", paths.ConfigDir)
-	fmt.Println("Logs:  ", paths.LogsDir)
-	fmt.Println("State: ", paths.StateDir)
-	return nil
-}
-
 func runImportWizard(paths app.Paths, prompter ui.Prompter) error {
 	fmt.Println("")
 	fmt.Println("Import Previous Backup")
@@ -575,7 +561,7 @@ func promptSchedule(prompter ui.Prompter) (config.Schedule, error) {
 	schedule.Hour, _ = strconv.Atoi(hourValue)
 	schedule.Minute, _ = strconv.Atoi(minuteValue)
 
-	if scheduleMode == "daily" || scheduleMode == "weekly" {
+	if scheduleMode == "weekly" {
 		daysText, err := prompter.Ask("Days of week as comma-separated numbers (1-7)", validateDayList)
 		if err != nil {
 			return config.Schedule{}, err

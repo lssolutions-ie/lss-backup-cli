@@ -162,19 +162,15 @@ func (e RsyncEngine) Restore(job config.Job, target string, output io.Writer) er
 }
 
 func ensureResticRepo(job config.Job, output io.Writer) error {
-	snapshots := exec.Command("restic", "-r", job.Destination.Path, "snapshots")
-	snapshots.Stdout = output
-	snapshots.Stderr = output
-	snapshots.Env = append(os.Environ(),
-		"RESTIC_PASSWORD="+job.Secrets.ResticPassword,
-		"AWS_ACCESS_KEY_ID="+job.Secrets.AWSAccessKeyID,
-		"AWS_SECRET_ACCESS_KEY="+job.Secrets.AWSSecretAccessKey,
-	)
-
-	if err := snapshots.Run(); err == nil {
+	// For local repositories, the presence of the 'config' file indicates an
+	// initialised repo. This avoids running 'restic snapshots' as a probe,
+	// which would produce misleading errors (e.g. wrong password → init attempt).
+	repoConfig := filepath.Join(job.Destination.Path, "config")
+	if _, err := os.Stat(repoConfig); err == nil {
 		return nil
 	}
 
+	fmt.Fprintln(output, "Restic repository not found, initialising...")
 	initCmd := exec.Command("restic", "-r", job.Destination.Path, "init")
 	initCmd.Stdout = output
 	initCmd.Stderr = output

@@ -181,7 +181,8 @@ func downloadArchive(url string, targetPath string) error {
 	}
 	defer target.Close()
 
-	if _, err := io.Copy(target, resp.Body); err != nil {
+	const maxDownloadBytes = 500 * 1024 * 1024 // 500 MB
+	if _, err := io.Copy(target, io.LimitReader(resp.Body, maxDownloadBytes)); err != nil {
 		return fmt.Errorf("write update archive: %w", err)
 	}
 

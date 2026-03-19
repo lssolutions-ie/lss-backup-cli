@@ -80,7 +80,6 @@ case "$OS_NAME" in
 		ensure_linux_dependency go golang-go
 		ensure_linux_dependency restic restic
 		ensure_linux_dependency rsync rsync
-		ensure_linux_dependency zip zip
 		sudo mkdir -p "$CONFIG_DIR" "$JOBS_DIR" "$LOGS_DIR" "$STATE_DIR"
 		;;
 	Darwin)

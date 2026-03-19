@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -118,7 +119,7 @@ func Import(paths app.Paths, sourceJobFile string, newID string) (config.Job, er
 	job.JobDir = jobDir
 	job.JobFile = filepath.Join(jobDir, "job.toml")
 	job.SecretsFile = filepath.Join(jobDir, "secrets.env")
-	job.RunScript = filepath.Join(jobDir, "run.sh")
+	job.RunScript = filepath.Join(jobDir, config.RunScriptName())
 	job.Raw = config.RenderJobTOML(job)
 
 	if err := Save(job); err != nil {
@@ -134,9 +135,8 @@ func Import(paths app.Paths, sourceJobFile string, newID string) (config.Job, er
 		return config.Job{}, fmt.Errorf("write imported secrets.env: %w", err)
 	}
 
-	script := fmt.Sprintf("#!/bin/sh\nexec lss-backup-cli run %s\n", shellEscape(job.ID))
-	if err := os.WriteFile(job.RunScript, []byte(script), 0o755); err != nil {
-		return config.Job{}, fmt.Errorf("write imported run.sh: %w", err)
+	if err := writeRunScript(job.RunScript, job.ID); err != nil {
+		return config.Job{}, err
 	}
 
 	return config.LoadJob(jobDir)
@@ -157,9 +157,6 @@ func Create(paths app.Paths, input CreateInput) (config.Job, error) {
 	}
 	if strings.TrimSpace(input.DestType) == "" {
 		input.DestType = "local"
-	}
-	if !input.Enabled {
-		input.Enabled = true
 	}
 	if strings.TrimSpace(input.Retention.Mode) == "" {
 		input.Retention.Mode = "none"
@@ -208,10 +205,9 @@ func Create(paths app.Paths, input CreateInput) (config.Job, error) {
 		return config.Job{}, fmt.Errorf("write secrets.env: %w", err)
 	}
 
-	runScript := filepath.Join(jobDir, "run.sh")
-	script := fmt.Sprintf("#!/bin/sh\nexec lss-backup-cli run %s\n", shellEscape(input.ID))
-	if err := os.WriteFile(runScript, []byte(script), 0o755); err != nil {
-		return config.Job{}, fmt.Errorf("write run.sh: %w", err)
+	runScript := filepath.Join(jobDir, config.RunScriptName())
+	if err := writeRunScript(runScript, input.ID); err != nil {
+		return config.Job{}, err
 	}
 
 	return config.LoadJob(jobDir)
@@ -232,9 +228,14 @@ func ValidateLayout(job config.Job) []error {
 		}
 	}
 
+	runScriptPerm := fs.FileMode(0o755)
+	if runtime.GOOS == "windows" {
+		runScriptPerm = 0
+	}
+
 	checkFile(job.JobFile, "job.toml", 0)
 	checkFile(job.SecretsFile, "secrets.env", 0o600)
-	checkFile(job.RunScript, "run.sh", 0o755)
+	checkFile(job.RunScript, config.RunScriptName(), runScriptPerm)
 
 	if strings.TrimSpace(job.Program) == "" {
 		errs = append(errs, fmt.Errorf("program is not defined in %s", job.JobFile))
@@ -256,6 +257,21 @@ func ValidateLayout(job config.Job) []error {
 	}
 
 	return errs
+}
+
+func writeRunScript(path string, jobID string) error {
+	if runtime.GOOS == "windows" {
+		script := fmt.Sprintf("lss-backup-cli.exe run %s\r\n", jobID)
+		if err := os.WriteFile(path, []byte(script), 0o644); err != nil {
+			return fmt.Errorf("write run.ps1: %w", err)
+		}
+		return nil
+	}
+	script := fmt.Sprintf("#!/bin/sh\nexec lss-backup-cli run %s\n", shellEscape(jobID))
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		return fmt.Errorf("write run.sh: %w", err)
+	}
+	return nil
 }
 
 func shellEscape(value string) string {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -74,7 +75,7 @@ func LoadJob(jobDir string) (Job, error) {
 	job.JobDir = jobDir
 	job.JobFile = jobFile
 	job.SecretsFile = filepath.Join(jobDir, "secrets.env")
-	job.RunScript = filepath.Join(jobDir, "run.sh")
+	job.RunScript = filepath.Join(jobDir, runScriptName())
 	job.Raw = raw
 	if job.ID == "" {
 		job.ID = filepath.Base(jobDir)
@@ -99,7 +100,6 @@ func SaveJob(job Job) error {
 		return fmt.Errorf("write %s: %w", job.JobFile, err)
 	}
 
-	job.Raw = content
 	return nil
 }
 
@@ -275,7 +275,10 @@ func LoadSecrets(path string) (Secrets, error) {
 
 func parseString(value string) string {
 	value = strings.TrimSpace(value)
-	return strings.Trim(value, `"`)
+	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+		return value[1 : len(value)-1]
+	}
+	return value
 }
 
 func parseBool(value string) (bool, error) {
@@ -358,6 +361,18 @@ email_to = %q
 		job.Notifications.EmailMode,
 		job.Notifications.EmailTo,
 	)
+}
+
+// RunScriptName returns the platform-appropriate run script filename.
+func RunScriptName() string {
+	return runScriptName()
+}
+
+func runScriptName() string {
+	if runtime.GOOS == "windows" {
+		return "run.ps1"
+	}
+	return "run.sh"
 }
 
 func renderDays(days []int) string {
