@@ -1,0 +1,287 @@
+package uninstall
+
+import (
+	"archive/zip"
+	"bufio"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/installmanifest"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/platform"
+)
+
+func Run() error {
+	paths, err := platform.CurrentRuntimePaths()
+	if err != nil {
+		return err
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Println("LSS Backup CLI Uninstall")
+	fmt.Println("========================")
+	fmt.Println("Binary:", paths.BinPath)
+	fmt.Println("Config:", paths.ConfigDir)
+	fmt.Println("Logs:  ", paths.LogsDir)
+	fmt.Println("State: ", paths.StateDir)
+	fmt.Println("")
+
+	shouldBackup, err := promptYesNo(reader, "Do you want to back up LSS Backup data before uninstalling?")
+	if err != nil {
+		return err
+	}
+
+	if shouldBackup {
+		zipPath, err := promptZipPath(reader)
+		if err != nil {
+			return err
+		}
+		if err := createBackup(paths, zipPath); err != nil {
+			return err
+		}
+		fmt.Println("Backup created at:", zipPath)
+	}
+
+	manifest, manifestErr := installmanifest.Load(paths.ManifestPath)
+	if manifestErr == nil {
+		removeDeps, err := promptYesNo(reader, "Do you want to also remove dependencies installed by this program?")
+		if err != nil {
+			return err
+		}
+		if removeDeps {
+			if err := removeManagedDependencies(manifest); err != nil {
+				return err
+			}
+		}
+	} else {
+		fmt.Println("Install manifest not found, skipping dependency removal.")
+	}
+
+	if err := removeInstalledData(paths); err != nil {
+		return err
+	}
+
+	fmt.Println("LSS Backup CLI uninstall complete.")
+	return nil
+}
+
+func promptYesNo(reader *bufio.Reader, question string) (bool, error) {
+	for {
+		fmt.Printf("%s (y/n): ", question)
+		answer, err := reader.ReadString('\n')
+		if err != nil {
+			return false, err
+		}
+
+		switch strings.ToLower(strings.TrimSpace(answer)) {
+		case "y":
+			return true, nil
+		case "n":
+			return false, nil
+		default:
+			fmt.Println("Please answer y or n.")
+		}
+	}
+}
+
+func promptZipPath(reader *bufio.Reader) (string, error) {
+	for {
+		if runtime.GOOS == "windows" {
+			fmt.Print("Where should the backup zip be created? Example: C:\\Temp\\lss-backup-recovery.zip: ")
+		} else {
+			fmt.Print("Where should the backup zip be created? Example: /tmp/lss-backup-recovery.zip: ")
+		}
+
+		answer, err := reader.ReadString('\n')
+		if err != nil {
+			return "", err
+		}
+
+		zipPath := strings.TrimSpace(answer)
+		if !strings.HasSuffix(strings.ToLower(zipPath), ".zip") {
+			fmt.Println("Backup file must end with .zip")
+			continue
+		}
+
+		parentDir := filepath.Dir(zipPath)
+		info, err := os.Stat(parentDir)
+		if err != nil || !info.IsDir() {
+			fmt.Println("Parent directory does not exist:", parentDir)
+			continue
+		}
+
+		return zipPath, nil
+	}
+}
+
+func createBackup(paths platform.RuntimePaths, zipPath string) error {
+	zipFile, err := os.Create(zipPath)
+	if err != nil {
+		return fmt.Errorf("create backup zip: %w", err)
+	}
+	defer zipFile.Close()
+
+	writer := zip.NewWriter(zipFile)
+	defer writer.Close()
+
+	items := []struct {
+		source string
+		target string
+	}{
+		{source: paths.BinPath, target: "recovery/lss-backup-cli"},
+		{source: paths.ConfigDir, target: "recovery/config"},
+		{source: paths.LogsDir, target: "recovery/logs"},
+		{source: paths.StateDir, target: "recovery/state"},
+	}
+
+	for _, item := range items {
+		if err := addPathToZip(writer, item.source, item.target); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func addPathToZip(writer *zip.Writer, sourcePath string, zipRoot string) error {
+	info, err := os.Stat(sourcePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat %s: %w", sourcePath, err)
+	}
+
+	if !info.IsDir() {
+		return addFileToZip(writer, sourcePath, zipRoot)
+	}
+
+	return filepath.WalkDir(sourcePath, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		relative, err := filepath.Rel(sourcePath, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.ToSlash(filepath.Join(zipRoot, relative))
+		return addFileToZip(writer, path, target)
+	})
+}
+
+func addFileToZip(writer *zip.Writer, sourcePath string, zipPath string) error {
+	file, err := os.Open(sourcePath)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", sourcePath, err)
+	}
+	defer file.Close()
+
+	entry, err := writer.Create(filepath.ToSlash(zipPath))
+	if err != nil {
+		return fmt.Errorf("create zip entry %s: %w", zipPath, err)
+	}
+
+	if _, err := io.Copy(entry, file); err != nil {
+		return fmt.Errorf("write zip entry %s: %w", zipPath, err)
+	}
+
+	return nil
+}
+
+func removeInstalledData(paths platform.RuntimePaths) error {
+	if err := safeRemove(paths.BinPath); err != nil {
+		return err
+	}
+	if err := safeRemove(paths.ConfigDir); err != nil {
+		return err
+	}
+	if err := safeRemove(paths.LogsDir); err != nil {
+		return err
+	}
+	if paths.StateDir != paths.ConfigDir && paths.StateDir != filepath.Join(paths.ConfigDir, "state") {
+		if err := safeRemove(paths.StateDir); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func removeManagedDependencies(manifest installmanifest.Manifest) error {
+	for _, dep := range manifest.Dependencies {
+		if !dep.InstalledByProgram {
+			continue
+		}
+
+		fmt.Println("Removing managed dependency:", dep.Name)
+		switch runtime.GOOS {
+		case "linux":
+			if dep.Manager != "apt" {
+				continue
+			}
+			cmd := exec.Command("sudo", "apt-get", "remove", "-y", dep.PackageID)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				return fmt.Errorf("remove dependency %s: %w", dep.Name, err)
+			}
+		case "darwin":
+			if dep.Manager == "brew" {
+				cmd := exec.Command("brew", "uninstall", dep.PackageID)
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				if err := cmd.Run(); err != nil {
+					return fmt.Errorf("remove dependency %s: %w", dep.Name, err)
+				}
+			}
+			if dep.Manager == "brew-bootstrap" {
+				cmd := exec.Command("/bin/bash", "-c", "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)")
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				if err := cmd.Run(); err != nil {
+					return fmt.Errorf("remove Homebrew installed by program: %w", err)
+				}
+			}
+		case "windows":
+			if dep.Manager == "winget" {
+				cmd := exec.Command("winget", "uninstall", "--id", dep.PackageID, "--silent", "--accept-source-agreements")
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				if err := cmd.Run(); err != nil {
+					return fmt.Errorf("remove dependency %s: %w", dep.Name, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func safeRemove(target string) error {
+	if target == "" || target == string(filepath.Separator) {
+		return fmt.Errorf("refusing to remove unsafe path: %q", target)
+	}
+
+	if _, err := os.Stat(target); err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("Not present, skipping:", target)
+			return nil
+		}
+		return fmt.Errorf("stat %s: %w", target, err)
+	}
+
+	if err := os.RemoveAll(target); err != nil {
+		return fmt.Errorf("remove %s: %w", target, err)
+	}
+
+	fmt.Println("Removed:", target)
+	return nil
+}

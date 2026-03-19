@@ -1,0 +1,104 @@
+$ErrorActionPreference = "Stop"
+
+function Prompt-YesNo {
+    param([string]$Question)
+
+    while ($true) {
+        $answer = Read-Host "$Question (y/n)"
+        switch ($answer.ToLowerInvariant()) {
+            "y" { return $true }
+            "n" { return $false }
+            default { Write-Host "Please answer y or n." }
+        }
+    }
+}
+
+function Prompt-ZipPath {
+    while ($true) {
+        $path = Read-Host "Where should the backup zip be created? Example: C:\Temp\lss-backup-recovery.zip"
+        if (-not $path.EndsWith(".zip")) {
+            Write-Host "Backup file must end with .zip"
+            continue
+        }
+
+        $parent = Split-Path -Parent $path
+        if (-not (Test-Path $parent)) {
+            Write-Host "Parent directory does not exist: $parent"
+            continue
+        }
+
+        return $path
+    }
+}
+
+function Safe-Remove {
+    param([string]$Target)
+
+    if ([string]::IsNullOrWhiteSpace($Target)) {
+        throw "Refusing to remove an empty path."
+    }
+
+    if ($Target -eq "\" -or $Target -eq "/") {
+        throw "Refusing to remove an unsafe root path."
+    }
+
+    if (Test-Path $Target) {
+        Remove-Item -Recurse -Force $Target
+        Write-Host "Removed: $Target"
+    }
+    else {
+        Write-Host "Not present, skipping: $Target"
+    }
+}
+
+$BinPath = "C:\Program Files\LSS Backup\lss-backup-cli.exe"
+$ConfigDir = "C:\ProgramData\LSS Backup"
+$LogsDir = "C:\ProgramData\LSS Backup\logs"
+$StateDir = "C:\ProgramData\LSS Backup\state"
+
+Write-Host "LSS Backup CLI Uninstall"
+Write-Host "========================"
+Write-Host "Binary: $BinPath"
+Write-Host "Config: $ConfigDir"
+Write-Host "Logs:   $LogsDir"
+Write-Host "State:  $StateDir"
+Write-Host ""
+
+if (Prompt-YesNo "Do you want to back up LSS Backup data before uninstalling?") {
+    $zipPath = Prompt-ZipPath
+    $stageDir = Join-Path ([System.IO.Path]::GetTempPath()) ("lss-backup-uninstall-" + [System.Guid]::NewGuid().ToString())
+    $payloadDir = Join-Path $stageDir "recovery"
+
+    New-Item -ItemType Directory -Path $payloadDir -Force | Out-Null
+
+    if (Test-Path $BinPath) {
+        Copy-Item $BinPath (Join-Path $payloadDir "lss-backup-cli.exe") -Force
+    }
+    if (Test-Path $ConfigDir) {
+        Copy-Item $ConfigDir (Join-Path $payloadDir "config") -Recurse -Force
+    }
+    if (Test-Path $LogsDir) {
+        Copy-Item $LogsDir (Join-Path $payloadDir "logs") -Recurse -Force
+    }
+    if (Test-Path $StateDir) {
+        Copy-Item $StateDir (Join-Path $payloadDir "state") -Recurse -Force
+    }
+
+    if (Test-Path $zipPath) {
+        Remove-Item $zipPath -Force
+    }
+
+    Compress-Archive -Path $payloadDir -DestinationPath $zipPath
+    Remove-Item $stageDir -Recurse -Force
+    Write-Host "Backup created at: $zipPath"
+}
+
+Safe-Remove $BinPath
+Safe-Remove $ConfigDir
+Safe-Remove $LogsDir
+
+if ($StateDir -ne $ConfigDir -and $StateDir -ne (Join-Path $ConfigDir "state")) {
+    Safe-Remove $StateDir
+}
+
+Write-Host "LSS Backup CLI uninstall complete."

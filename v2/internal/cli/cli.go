@@ -13,8 +13,10 @@ import (
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/app"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/jobs"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/platform"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/runner"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/ui"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/uninstall"
 )
 
 var jobIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
@@ -29,6 +31,9 @@ func Run(args []string) error {
 	}
 
 	if len(args) > 0 {
+		if len(args) == 1 && args[0] == "--uninstall" {
+			return uninstall.Run()
+		}
 		if args[0] == "run" && len(args) == 2 {
 			return runJobByID(paths, args[1])
 		}
@@ -287,6 +292,19 @@ func runRemoveSelectWizard(paths app.Paths, prompter ui.Prompter) error {
 		return nil
 	}
 	return removeJob(paths, prompter, job.ID)
+}
+
+func showRuntimePaths() error {
+	paths, err := platform.CurrentRuntimePaths()
+	if err != nil {
+		return err
+	}
+	fmt.Println("Runtime paths:")
+	fmt.Println("Binary:", paths.BinPath)
+	fmt.Println("Config:", paths.ConfigDir)
+	fmt.Println("Logs:  ", paths.LogsDir)
+	fmt.Println("State: ", paths.StateDir)
+	return nil
 }
 
 func runImportWizard(paths app.Paths, prompter ui.Prompter) error {

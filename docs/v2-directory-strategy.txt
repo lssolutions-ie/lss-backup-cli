@@ -1,0 +1,201 @@
+LSS Backup CLI V2 Directory Strategy
+====================================
+
+Purpose
+-------
+This document defines the intended runtime directory layout for LSS Backup CLI
+v2 across supported operating systems.
+
+The goal is to separate:
+- the installed program binary
+- durable configuration and backup jobs
+- logs
+- runtime state and cache
+
+This keeps installation, backup, restore, and future management-console work
+clean and predictable.
+
+
+Directory Model
+---------------
+Every supported operating system should map the same logical concepts:
+
+- Binary location
+- Config directory
+- Jobs directory
+- Logs directory
+- State directory
+
+Suggested internal app path model:
+
+- `BinPath`
+- `ConfigDir`
+- `JobsDir`
+- `LogsDir`
+- `StateDir`
+
+
+Linux (Debian Family)
+---------------------
+Binary:
+- `/usr/local/bin/lss-backup-cli`
+
+Config directory:
+- `/etc/lss-backup/`
+
+Jobs directory:
+- `/etc/lss-backup/jobs/`
+
+Logs directory:
+- `/var/log/lss-backup/`
+
+State directory:
+- `/var/lib/lss-backup/`
+
+Reasoning:
+- follows normal Linux admin expectations
+- `/etc` is appropriate for durable config and job definitions
+- `/var/log` is appropriate for logs
+- `/var/lib` is appropriate for runtime/application state
+
+
+macOS
+-----
+Binary:
+- `/usr/local/bin/lss-backup-cli`
+
+Config directory:
+- `/Library/Application Support/LSS Backup/`
+
+Jobs directory:
+- `/Library/Application Support/LSS Backup/jobs/`
+
+Logs directory:
+- `/Library/Logs/LSS Backup/`
+
+State directory:
+- `/Library/Application Support/LSS Backup/state/`
+
+Reasoning:
+- binary location chosen explicitly by product preference
+- avoids pretending macOS should behave exactly like Linux for app data
+- keeps machine-wide app data in the normal macOS system location
+
+
+Windows 11
+----------
+Binary:
+- `C:\Program Files\LSS Backup\lss-backup-cli.exe`
+
+Config directory:
+- `C:\ProgramData\LSS Backup\`
+
+Jobs directory:
+- `C:\ProgramData\LSS Backup\jobs\`
+
+Logs directory:
+- `C:\ProgramData\LSS Backup\logs\`
+
+State directory:
+- `C:\ProgramData\LSS Backup\state\`
+
+Reasoning:
+- `Program Files` is the correct binary location
+- `ProgramData` is the machine-wide equivalent for durable application data
+
+
+Windows Server 2016+
+--------------------
+Binary:
+- `C:\Program Files\LSS Backup\lss-backup-cli.exe`
+
+Config directory:
+- `C:\ProgramData\LSS Backup\`
+
+Jobs directory:
+- `C:\ProgramData\LSS Backup\jobs\`
+
+Logs directory:
+- `C:\ProgramData\LSS Backup\logs\`
+
+State directory:
+- `C:\ProgramData\LSS Backup\state\`
+
+Reasoning:
+- same model as Windows 11
+- simpler support story
+- easier documentation and recovery process
+
+
+Backup And Recovery Implication
+-------------------------------
+The menu item `Backup LSS Backup Configuration` should eventually capture all
+recovery-critical data, including:
+
+- backup job definitions
+- logs
+- secrets
+- repository passwords
+- management console configuration
+- notification channel configuration
+- any runtime state required for meaningful recovery
+
+The program binary itself does not need to be backed up the same way as data,
+but everything necessary to restore the backup environment on a new server
+must be captured.
+
+
+Development Note
+----------------
+The current `v2/` repo layout is a development layout only.
+
+It is not the final installed runtime directory structure.
+
+Current development directories such as:
+- `v2/jobs/`
+- `v2/state/`
+
+should later be replaced by OS-specific runtime paths via platform-aware path
+resolution.
+
+
+Implementation Direction
+------------------------
+V2 should eventually contain platform-aware path resolution so the rest of the
+application can ask for logical directories instead of hardcoding paths.
+
+That means:
+- core logic should not directly assume `/etc`, `/var`, `/Library`, or
+  `C:\ProgramData`
+- platform adapters should provide those values
+
+
+Locked Path Proposal
+--------------------
+Linux:
+- binary: `/usr/local/bin/lss-backup-cli`
+- config: `/etc/lss-backup/`
+- jobs: `/etc/lss-backup/jobs/`
+- logs: `/var/log/lss-backup/`
+- state: `/var/lib/lss-backup/`
+
+macOS:
+- binary: `/usr/local/bin/lss-backup-cli`
+- config: `/Library/Application Support/LSS Backup/`
+- jobs: `/Library/Application Support/LSS Backup/jobs/`
+- logs: `/Library/Logs/LSS Backup/`
+- state: `/Library/Application Support/LSS Backup/state/`
+
+Windows 11:
+- binary: `C:\Program Files\LSS Backup\lss-backup-cli.exe`
+- config: `C:\ProgramData\LSS Backup\`
+- jobs: `C:\ProgramData\LSS Backup\jobs\`
+- logs: `C:\ProgramData\LSS Backup\logs\`
+- state: `C:\ProgramData\LSS Backup\state\`
+
+Windows Server 2016+:
+- binary: `C:\Program Files\LSS Backup\lss-backup-cli.exe`
+- config: `C:\ProgramData\LSS Backup\`
+- jobs: `C:\ProgramData\LSS Backup\jobs\`
+- logs: `C:\ProgramData\LSS Backup\logs\`
+- state: `C:\ProgramData\LSS Backup\state\`
