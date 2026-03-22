@@ -414,6 +414,14 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 		rsyncNoPerms = noPermsChoice == "Yes"
 	}
 
+	var resticPassword string
+	if program == "restic" {
+		resticPassword, err = prompter.AskPassword("Restic repository password")
+		if err != nil {
+			return err
+		}
+	}
+
 	schedule, err := promptSchedule(prompter)
 	if err != nil {
 		return err
@@ -429,20 +437,26 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 		return err
 	}
 
+	var secrets *config.Secrets
+	if program == "restic" {
+		secrets = &config.Secrets{ResticPassword: resticPassword}
+	}
+
 	input := jobs.CreateInput{
-		ID:          jobID,
-		Name:        name,
-		Program:     program,
-		SourceType:  "local",
-		SourcePath:  sourcePath,
+		ID:                 jobID,
+		Name:               name,
+		Program:            program,
+		SourceType:         "local",
+		SourcePath:         sourcePath,
 		ExcludeFile:        strings.TrimSpace(excludeFile),
 		RsyncNoPermissions: rsyncNoPerms,
 		DestType:           "local",
-		DestPath:    destinationPath,
-		Schedule:   schedule,
-		Enabled:    true,
-		Retention:  retention,
-		Notify:     notifications,
+		DestPath:           destinationPath,
+		Schedule:           schedule,
+		Enabled:            true,
+		Retention:          retention,
+		Notify:             notifications,
+		Secrets:            secrets,
 	}
 
 	job, err := jobs.Create(paths, input)
@@ -455,9 +469,6 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 	fmt.Println("Job ID:", job.ID)
 	fmt.Println("Job file:", job.JobFile)
 	fmt.Println("Secrets file:", job.SecretsFile)
-	if program == "restic" {
-		fmt.Println("Set RESTIC_PASSWORD in secrets.env before running this job.")
-	}
 	return nil
 }
 

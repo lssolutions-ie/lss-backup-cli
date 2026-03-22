@@ -6,6 +6,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"golang.org/x/term"
 )
 
 type Prompter struct {
@@ -50,6 +52,38 @@ func (p Prompter) Confirm(question string) (bool, error) {
 		return false, err
 	}
 	return strings.ToLower(answer) == "y", nil
+}
+
+// AskPassword prompts for a password with masked input (characters are not echoed).
+// Falls back to plain Ask if stdin is not a terminal (e.g. piped input).
+func (p Prompter) AskPassword(question string) (string, error) {
+	for {
+		fmt.Printf("%s: ", question)
+		if term.IsTerminal(int(os.Stdin.Fd())) {
+			password, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Println()
+			if err != nil {
+				return "", err
+			}
+			value := strings.TrimSpace(string(password))
+			if value == "" {
+				fmt.Println("Password cannot be empty.")
+				continue
+			}
+			return value, nil
+		}
+		// Non-terminal fallback (piped input).
+		text, err := p.reader.ReadString('\n')
+		if err != nil {
+			return "", err
+		}
+		value := strings.TrimSpace(text)
+		if value == "" {
+			fmt.Println("Password cannot be empty.")
+			continue
+		}
+		return value, nil
+	}
 }
 
 func (p Prompter) Select(title string, options []string) (int, string, error) {
