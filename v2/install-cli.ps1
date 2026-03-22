@@ -120,7 +120,6 @@ $deps = [System.Collections.ArrayList]::new()
 Ensure-Dependency "go"     "GoLang.Go"     $deps { Install-GoFallback }
 Ensure-Dependency "restic" "restic.restic" $deps { Install-ResticFallback }
 
-Write-Host "Note: rsync is not available on Windows. Rsync backup jobs cannot be run on this platform."
 
 Ensure-Directory $BinDir
 Ensure-Directory $ConfigDir

@@ -236,7 +236,7 @@ func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Promp
 	if ok, err := prompter.Confirm(fmt.Sprintf("Program [%q] — change?", job.Program)); err != nil {
 		return err
 	} else if ok {
-		if _, job.Program, err = prompter.Select("Select backup program", []string{"restic", "rsync"}); err != nil {
+		if _, job.Program, err = prompter.Select("Select backup program", availablePrograms()); err != nil {
 			return err
 		}
 		changed = true
@@ -380,7 +380,7 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 		return err
 	}
 
-	_, program, err := prompter.Select("Select backup program", []string{"restic", "rsync"})
+	_, program, err := prompter.Select("Select backup program", availablePrograms())
 	if err != nil {
 		return err
 	}
@@ -712,6 +712,13 @@ func showJob(paths app.Paths, id string) error {
 	fmt.Println("")
 	fmt.Print(job.Raw)
 	return nil
+}
+
+func availablePrograms() []string {
+	if runtime.GOOS == "windows" {
+		return []string{"restic"}
+	}
+	return []string{"restic", "rsync"}
 }
 
 func validateJob(paths app.Paths, id string) error {
