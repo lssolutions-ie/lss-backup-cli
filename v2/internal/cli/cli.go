@@ -186,12 +186,44 @@ func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Promp
 		changed = true
 	}
 
+	if job.Program == "rsync" {
+		noPermsLabel := "no"
+		if job.RsyncNoPermissions {
+			noPermsLabel = "yes"
+		}
+		if ok, err := prompter.Confirm(fmt.Sprintf("Rsync no-permissions mode [%s] — change?", noPermsLabel)); err != nil {
+			return err
+		} else if ok {
+			_, choice, err := prompter.Select("Sync without preserving permissions/owner/group?", []string{"No", "Yes"})
+			if err != nil {
+				return err
+			}
+			job.RsyncNoPermissions = choice == "Yes"
+			changed = true
+		}
+	}
+
 	if ok, err := prompter.Confirm(fmt.Sprintf("Source path [%q] — change?", job.Source.Path)); err != nil {
 		return err
 	} else if ok {
 		if job.Source.Path, err = prompter.Ask("New source path", validateExistingDirectory); err != nil {
 			return err
 		}
+		changed = true
+	}
+
+	excludeLabel := job.Source.ExcludeFile
+	if excludeLabel == "" {
+		excludeLabel = "none"
+	}
+	if ok, err := prompter.Confirm(fmt.Sprintf("Exclude file [%s] — change?", excludeLabel)); err != nil {
+		return err
+	} else if ok {
+		newExclude, err := prompter.Ask("New exclude file path (leave blank to clear)", validateOptionalExistingFile)
+		if err != nil {
+			return err
+		}
+		job.Source.ExcludeFile = strings.TrimSpace(newExclude)
 		changed = true
 	}
 
@@ -302,9 +334,23 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 		return err
 	}
 
+	excludeFile, err := prompter.Ask("Exclude file path (leave blank for none)", validateOptionalExistingFile)
+	if err != nil {
+		return err
+	}
+
 	destinationPath, err := prompter.Ask("Local destination directory", validateAbsolutePath)
 	if err != nil {
 		return err
+	}
+
+	rsyncNoPerms := false
+	if program == "rsync" {
+		_, noPermsChoice, err := prompter.Select("Sync without preserving permissions/owner/group? (recommended for mounted shares)", []string{"No", "Yes"})
+		if err != nil {
+			return err
+		}
+		rsyncNoPerms = noPermsChoice == "Yes"
 	}
 
 	schedule, err := promptSchedule(prompter)
@@ -323,13 +369,15 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 	}
 
 	input := jobs.CreateInput{
-		ID:         jobID,
-		Name:       name,
-		Program:    program,
-		SourceType: "local",
-		SourcePath: sourcePath,
-		DestType:   "local",
-		DestPath:   destinationPath,
+		ID:          jobID,
+		Name:        name,
+		Program:     program,
+		SourceType:  "local",
+		SourcePath:  sourcePath,
+		ExcludeFile:        strings.TrimSpace(excludeFile),
+		RsyncNoPermissions: rsyncNoPerms,
+		DestType:           "local",
+		DestPath:    destinationPath,
 		Schedule:   schedule,
 		Enabled:    true,
 		Retention:  retention,
@@ -837,6 +885,23 @@ func validateNonEmpty(label string) func(string) error {
 		}
 		return nil
 	}
+}
+
+func validateOptionalExistingFile(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	if !filepath.IsAbs(value) {
+		return fmt.Errorf("path must be absolute")
+	}
+	info, err := os.Stat(value)
+	if err != nil {
+		return fmt.Errorf("file does not exist")
+	}
+	if info.IsDir() {
+		return fmt.Errorf("path must be a file, not a directory")
+	}
+	return nil
 }
 
 func validateExistingDirectory(value string) error {

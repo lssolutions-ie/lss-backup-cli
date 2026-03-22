@@ -132,9 +132,10 @@ func Parse(path string) (Result, error) {
 	// attach secrets pointer so store.Create writes real values
 	res.Input.Secrets = &res.Secrets
 
-	// --- unsupported v1 features ---
-	if kv["BKEXCLUDEFILE"] != "" {
-		warns = append(warns, "BKEXCLUDEFILE is not supported in v2; exclusion rules were not imported")
+	// --- exclude file ---
+	if ef := kv["BKEXCLUDEFILE"]; ef != "" {
+		res.Input.ExcludeFile = ef
+		warns = append(warns, fmt.Sprintf("exclude file imported from BKEXCLUDEFILE=%q; verify the path is correct before running", ef))
 	}
 	if strings.ToLower(kv["MONITORING"]) == "healthchecks" {
 		warns = append(warns, "healthchecks monitoring was detected; re-enable it via Configure Notifications after import")

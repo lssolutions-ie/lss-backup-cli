@@ -6,6 +6,11 @@ OS_NAME="$(uname -s)"
 MANIFEST_DEPS=""
 CURRENT_UID="$(id -u)"
 
+# Minimum Go version required (must match go.mod).
+GO_MIN_MINOR=22
+# Fallback Go version downloaded from go.dev when the system package is too old.
+GO_FALLBACK_VERSION="1.22.5"
+
 require_command() {
 	command -v "$1" >/dev/null 2>&1 || {
 		echo "Required command not found: $1" >&2
@@ -31,6 +36,75 @@ ensure_dir() {
 	mkdir -p "$1"
 }
 
+# Returns 0 if the installed `go` meets GO_MIN_MINOR, 1 otherwise.
+go_meets_minimum() {
+	command -v go >/dev/null 2>&1 || return 1
+	_ver=$(go version 2>/dev/null | awk '{print $3}' | sed 's/go//')
+	_major=$(echo "$_ver" | cut -d. -f1)
+	_minor=$(echo "$_ver" | cut -d. -f2)
+	[ "$_major" -gt 1 ] || { [ "$_major" -eq 1 ] && [ "$_minor" -ge "$GO_MIN_MINOR" ]; }
+}
+
+# Downloads and installs the official Go tarball to /usr/local/go.
+install_go_tarball() {
+	_arch=$(uname -m)
+	case "$_arch" in
+		x86_64)  _goarch="amd64" ;;
+		aarch64) _goarch="arm64" ;;
+		armv7l)  _goarch="armv6l" ;;
+		*)
+			echo "Unsupported architecture for Go tarball install: $_arch" >&2
+			exit 1
+			;;
+	esac
+
+	_tarball="go${GO_FALLBACK_VERSION}.linux-${_goarch}.tar.gz"
+	_url="https://go.dev/dl/${_tarball}"
+	_tmp="/tmp/${_tarball}"
+
+	echo "Downloading Go ${GO_FALLBACK_VERSION} (${_goarch}) from go.dev..."
+	if command -v curl >/dev/null 2>&1; then
+		curl -fsSL "$_url" -o "$_tmp"
+	elif command -v wget >/dev/null 2>&1; then
+		wget -q "$_url" -O "$_tmp"
+	else
+		echo "Neither curl nor wget found; cannot download Go." >&2
+		exit 1
+	fi
+
+	sudo rm -rf /usr/local/go
+	sudo tar -C /usr/local -xzf "$_tmp"
+	rm -f "$_tmp"
+
+	# Make Go available in the current session.
+	export PATH="/usr/local/go/bin:$PATH"
+
+	# Make Go available in future login shells.
+	printf 'export PATH="/usr/local/go/bin:$PATH"\n' | sudo tee /etc/profile.d/go.sh >/dev/null
+
+	append_dep "go" "tarball" "golang" false true
+}
+
+# Installs Go on Linux, falling back to the official tarball when apt is too old.
+ensure_linux_go() {
+	if go_meets_minimum; then
+		append_dep "go" "apt" "golang-go" true false
+		return
+	fi
+
+	echo "Trying apt for Go..."
+	sudo apt-get update -qq
+	sudo apt-get install -y golang-go 2>/dev/null || true
+
+	if go_meets_minimum; then
+		append_dep "go" "apt" "golang-go" false true
+		return
+	fi
+
+	echo "apt golang-go is older than 1.${GO_MIN_MINOR}; downloading official Go ${GO_FALLBACK_VERSION}..."
+	install_go_tarball
+}
+
 ensure_linux_dependency() {
 	cmd_name="$1"
 	package_id="$2"
@@ -40,7 +114,7 @@ ensure_linux_dependency() {
 		return
 	fi
 
-	sudo apt-get update
+	sudo apt-get update -qq
 	sudo apt-get install -y "$package_id"
 	append_dep "$cmd_name" "apt" "$package_id" false true
 }
@@ -77,9 +151,10 @@ case "$OS_NAME" in
 		LOGS_DIR="/var/log/lss-backup"
 		STATE_DIR="/var/lib/lss-backup"
 		MANIFEST_PATH="${STATE_DIR}/install-manifest.json"
-		ensure_linux_dependency go golang-go
+		ensure_linux_go
 		ensure_linux_dependency restic restic
 		ensure_linux_dependency rsync rsync
+		ensure_linux_dependency zip zip
 		sudo mkdir -p "$CONFIG_DIR" "$JOBS_DIR" "$LOGS_DIR" "$STATE_DIR"
 		;;
 	Darwin)
@@ -98,6 +173,9 @@ case "$OS_NAME" in
 		ensure_macos_dependency restic restic
 		ensure_macos_dependency rsync rsync
 		sudo mkdir -p "$CONFIG_DIR" "$JOBS_DIR" "$LOGS_DIR" "$STATE_DIR"
+		# Give the current user ownership so the CLI can write jobs and config
+		# without requiring root at runtime.
+		sudo chown -R "$(id -un)" "${CONFIG_DIR}" "${LOGS_DIR}"
 		;;
 	*)
 		echo "Unsupported OS for install-cli.sh: $OS_NAME" >&2

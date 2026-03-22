@@ -21,18 +21,20 @@ type Summary struct {
 }
 
 type CreateInput struct {
-	ID          string
-	Name        string
-	Program     string
-	SourceType  string
-	SourcePath  string
-	DestType    string
-	DestPath    string
-	Schedule    config.Schedule
-	Enabled     bool
-	Retention   config.Retention
-	Notify      config.Notifications
-	Secrets     *config.Secrets // optional; written to secrets.env when non-nil
+	ID                 string
+	Name               string
+	Program            string
+	SourceType         string
+	SourcePath         string
+	ExcludeFile        string // optional path to an exclude file
+	DestType           string
+	DestPath           string
+	Schedule           config.Schedule
+	Enabled            bool
+	RsyncNoPermissions bool
+	Retention          config.Retention
+	Notify             config.Notifications
+	Secrets            *config.Secrets // optional; written to secrets.env when non-nil
 }
 
 func List(paths app.Paths) ([]Summary, error) {
@@ -188,13 +190,15 @@ func Create(paths app.Paths, input CreateInput) (config.Job, error) {
 
 	jobFile := filepath.Join(jobDir, "job.toml")
 	jobDefinition := config.Job{
-		ID:      input.ID,
-		Name:    input.Name,
-		Program: input.Program,
-		Enabled: input.Enabled,
+		ID:                 input.ID,
+		Name:               input.Name,
+		Program:            input.Program,
+		Enabled:            input.Enabled,
+		RsyncNoPermissions: input.RsyncNoPermissions,
 		Source: config.Endpoint{
-			Type: input.SourceType,
-			Path: input.SourcePath,
+			Type:        input.SourceType,
+			Path:        input.SourcePath,
+			ExcludeFile: input.ExcludeFile,
 		},
 		Destination: config.Endpoint{
 			Type: input.DestType,

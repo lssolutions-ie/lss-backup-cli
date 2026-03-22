@@ -59,9 +59,7 @@ func Run() error {
 			return err
 		}
 		if removeDeps {
-			if err := removeManagedDependencies(manifest); err != nil {
-				return err
-			}
+			removeManagedDependencies(manifest)
 		}
 	} else {
 		if os.IsNotExist(manifestErr) {
@@ -71,9 +69,7 @@ func Run() error {
 		}
 	}
 
-	if err := removeInstalledData(paths); err != nil {
-		return err
-	}
+	removeInstalledData(paths)
 
 	fmt.Println("LSS Backup CLI uninstall complete.")
 	return nil
@@ -251,25 +247,16 @@ func addFileToZip(writer *zip.Writer, sourcePath string, zipPath string) error {
 	return nil
 }
 
-func removeInstalledData(paths platform.RuntimePaths) error {
-	if err := safeRemove(paths.BinPath); err != nil {
-		return err
-	}
-	if err := safeRemove(paths.ConfigDir); err != nil {
-		return err
-	}
-	if err := safeRemove(paths.LogsDir); err != nil {
-		return err
-	}
+func removeInstalledData(paths platform.RuntimePaths) {
+	safeRemove(paths.BinPath)
+	safeRemove(paths.ConfigDir)
+	safeRemove(paths.LogsDir)
 	if paths.StateDir != paths.ConfigDir && paths.StateDir != filepath.Join(paths.ConfigDir, "state") {
-		if err := safeRemove(paths.StateDir); err != nil {
-			return err
-		}
+		safeRemove(paths.StateDir)
 	}
-	return nil
 }
 
-func removeManagedDependencies(manifest installmanifest.Manifest) error {
+func removeManagedDependencies(manifest installmanifest.Manifest) {
 	for _, dep := range manifest.Dependencies {
 		if !dep.InstalledByProgram {
 			continue
@@ -285,7 +272,7 @@ func removeManagedDependencies(manifest installmanifest.Manifest) error {
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			if err := cmd.Run(); err != nil {
-				return fmt.Errorf("remove dependency %s: %w", dep.Name, err)
+				fmt.Printf("Warning: could not remove dependency %s: %v\n", dep.Name, err)
 			}
 		case "darwin":
 			if dep.Manager == "brew-bootstrap" {
@@ -298,7 +285,7 @@ func removeManagedDependencies(manifest installmanifest.Manifest) error {
 				cmd.Stdout = os.Stdout
 				cmd.Stderr = os.Stderr
 				if err := cmd.Run(); err != nil {
-					return fmt.Errorf("remove dependency %s: %w", dep.Name, err)
+					fmt.Printf("Warning: could not remove dependency %s: %v\n", dep.Name, err)
 				}
 			}
 		case "windows":
@@ -308,17 +295,17 @@ func removeManagedDependencies(manifest installmanifest.Manifest) error {
 				cmd.Stdout = os.Stdout
 				cmd.Stderr = os.Stderr
 				if err := cmd.Run(); err != nil {
-					return fmt.Errorf("remove dependency %s: %w", dep.Name, err)
+					fmt.Printf("Warning: could not remove dependency %s: %v\n", dep.Name, err)
 				}
 			}
 		}
 	}
-	return nil
 }
 
-func safeRemove(target string) error {
+func safeRemove(target string) {
 	if target == "" || target == string(filepath.Separator) {
-		return fmt.Errorf("refusing to remove unsafe path: %q", target)
+		fmt.Printf("Warning: refusing to remove unsafe path: %q\n", target)
+		return
 	}
 
 	if needsElevatedFilesystemOps() {
@@ -326,26 +313,37 @@ func safeRemove(target string) error {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("remove %s with elevation: %w", target, err)
+			fmt.Printf("Warning: could not remove %s: %v\n", target, err)
+			return
 		}
 		fmt.Println("Removed:", target)
-		return nil
+		return
 	}
 
 	if _, err := os.Stat(target); err != nil {
 		if os.IsNotExist(err) {
 			fmt.Println("Not present, skipping:", target)
-			return nil
+			return
 		}
-		return fmt.Errorf("stat %s: %w", target, err)
+		fmt.Printf("Warning: could not stat %s: %v\n", target, err)
+		return
 	}
 
 	if err := os.RemoveAll(target); err != nil {
-		return fmt.Errorf("remove %s: %w", target, err)
+		if runtime.GOOS == "windows" {
+			// Windows locks a running executable; we can't delete it from within
+			// the process itself. Everything else (config, jobs, logs) is still
+			// cleaned up. The binary must be removed manually after exiting, or
+			// by running uninstall-cli.ps1 while the program is not running.
+			fmt.Printf("Note: could not remove %s — the binary may be in use.\n", target)
+			fmt.Println("Delete it manually after exiting, or run uninstall-cli.ps1.")
+			return
+		}
+		fmt.Printf("Warning: could not remove %s: %v\n", target, err)
+		return
 	}
 
 	fmt.Println("Removed:", target)
-	return nil
 }
 
 func zipExistingDirectory(sourceDir string, zipPath string) error {

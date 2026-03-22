@@ -47,12 +47,12 @@ prompt_zip_path() {
 safe_remove() {
 	target="$1"
 	if [ -z "$target" ] || [ "$target" = "/" ]; then
-		echo "Refusing to remove unsafe path: $target" >&2
-		exit 1
+		echo "Warning: refusing to remove unsafe path: $target" >&2
+		return
 	fi
 
 	if [ -e "$target" ] || [ -L "$target" ]; then
-		rm -rf "$target"
+		sudo rm -rf "$target"
 		echo "Removed: $target"
 	else
 		echo "Not present, skipping: $target"
@@ -70,7 +70,7 @@ backup_payload() {
 		source_path="$1"
 		target_name="$2"
 		if [ -e "$source_path" ] || [ -L "$source_path" ]; then
-			cp -R "$source_path" "$stage_dir/recovery/$target_name"
+			sudo cp -R "$source_path" "$stage_dir/recovery/$target_name"
 		fi
 	}
 
@@ -102,6 +102,10 @@ case "$OS_NAME" in
 		STATE_DIR="/Library/Application Support/LSS Backup/state"
 		;;
 	Linux)
+		if [ "$(id -u)" -ne 0 ]; then
+			echo "Please run this script as root: sudo ./uninstall-cli.sh" >&2
+			exit 1
+		fi
 		BIN_PATH="/usr/local/bin/lss-backup-cli"
 		CONFIG_DIR="/etc/lss-backup"
 		LOGS_DIR="/var/log/lss-backup"

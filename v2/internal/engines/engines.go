@@ -1,6 +1,7 @@
 package engines
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -41,7 +42,16 @@ func (e ResticEngine) Run(job config.Job, output io.Writer) error {
 		return err
 	}
 
-	cmd := exec.Command("restic", "-r", job.Destination.Path, "backup", job.Source.Path)
+	resticArgs := []string{
+		"-r", job.Destination.Path,
+		"backup", job.Source.Path,
+		"--exclude", "System Volume Information",
+		"--exclude", "$RECYCLE.BIN",
+	}
+	if job.Source.ExcludeFile != "" {
+		resticArgs = append(resticArgs, "--exclude-file="+job.Source.ExcludeFile)
+	}
+	cmd := exec.Command("restic", resticArgs...)
 	cmd.Stdout = output
 	cmd.Stderr = output
 	cmd.Env = append(os.Environ(),
@@ -51,6 +61,11 @@ func (e ResticEngine) Run(job config.Job, output io.Writer) error {
 	)
 
 	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 3 {
+			fmt.Fprintln(output, "Warning: restic exited with code 3 — some files could not be read (locked or permission denied). Backup may be incomplete.")
+			return nil
+		}
 		return fmt.Errorf("restic backup failed: %w", err)
 	}
 
@@ -130,11 +145,28 @@ func (e RsyncEngine) Run(job config.Job, output io.Writer) error {
 	sourcePath := filepath.Clean(job.Source.Path) + string(os.PathSeparator)
 	destinationPath := filepath.Clean(job.Destination.Path) + string(os.PathSeparator)
 
-	cmd := exec.Command("rsync", "-a", sourcePath, destinationPath)
+	rsyncArgs := []string{"-a",
+		"--exclude=System Volume Information",
+		"--exclude=$RECYCLE.BIN",
+	}
+	if job.RsyncNoPermissions {
+		rsyncArgs = append(rsyncArgs, "--no-perms", "--no-owner", "--no-group")
+	}
+	if job.Source.ExcludeFile != "" {
+		rsyncArgs = append(rsyncArgs, "--exclude-from="+job.Source.ExcludeFile)
+	}
+	rsyncArgs = append(rsyncArgs, sourcePath, destinationPath)
+
+	cmd := exec.Command("rsync", rsyncArgs...)
 	cmd.Stdout = output
 	cmd.Stderr = output
 
 	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 24 {
+			fmt.Fprintln(output, "Warning: rsync exited with code 24 — some source files vanished during transfer. This is normal in live environments.")
+			return nil
+		}
 		return fmt.Errorf("rsync failed: %w", err)
 	}
 

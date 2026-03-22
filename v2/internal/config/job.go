@@ -12,26 +12,28 @@ import (
 )
 
 type Job struct {
-	ID            string
-	Name          string
-	Program       string
-	Enabled       bool
-	Source        Endpoint
-	Destination   Endpoint
-	Schedule      Schedule
-	Retention     Retention
-	Notifications Notifications
-	Secrets       Secrets
-	JobDir        string
-	JobFile       string
-	SecretsFile   string
-	RunScript     string
-	Raw           string
+	ID                 string
+	Name               string
+	Program            string
+	Enabled            bool
+	RsyncNoPermissions bool // pass --no-perms --no-owner --no-group; useful for mounted shares
+	Source             Endpoint
+	Destination        Endpoint
+	Schedule           Schedule
+	Retention          Retention
+	Notifications      Notifications
+	Secrets            Secrets
+	JobDir             string
+	JobFile            string
+	SecretsFile        string
+	RunScript          string
+	Raw                string
 }
 
 type Endpoint struct {
-	Type string
-	Path string
+	Type        string
+	Path        string
+	ExcludeFile string // optional path to an exclude file; source only
 }
 
 type Schedule struct {
@@ -156,6 +158,12 @@ func assignValue(job *Job, section string, key string, value string) error {
 				return fmt.Errorf("parse enabled: %w", err)
 			}
 			job.Enabled = boolValue
+		case "rsync_no_permissions":
+			boolValue, err := parseBool(value)
+			if err != nil {
+				return fmt.Errorf("parse rsync_no_permissions: %w", err)
+			}
+			job.RsyncNoPermissions = boolValue
 		default:
 			return fmt.Errorf("unsupported top-level key %q", key)
 		}
@@ -165,6 +173,8 @@ func assignValue(job *Job, section string, key string, value string) error {
 			job.Source.Type = parseString(value)
 		case "path":
 			job.Source.Path = parseString(value)
+		case "exclude_file":
+			job.Source.ExcludeFile = parseString(value)
 		default:
 			return fmt.Errorf("unsupported [source] key %q", key)
 		}
@@ -328,10 +338,12 @@ func RenderJobTOML(job Job) string {
 name = %q
 program = %q
 enabled = %t
+rsync_no_permissions = %t
 
 [source]
 type = %q
 path = %q
+exclude_file = %q
 
 [destination]
 type = %q
@@ -356,8 +368,10 @@ email_to = %q
 		job.Name,
 		job.Program,
 		job.Enabled,
+		job.RsyncNoPermissions,
 		job.Source.Type,
 		job.Source.Path,
+		job.Source.ExcludeFile,
 		job.Destination.Type,
 		job.Destination.Path,
 		job.Schedule.Mode,

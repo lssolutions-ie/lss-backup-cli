@@ -1,3 +1,4 @@
+#Requires -RunAsAdministrator
 $ErrorActionPreference = "Stop"
 
 function Prompt-YesNo {
@@ -34,17 +35,18 @@ function Prompt-ZipPath {
 function Safe-Remove {
     param([string]$Target)
 
-    if ([string]::IsNullOrWhiteSpace($Target)) {
-        throw "Refusing to remove an empty path."
-    }
-
-    if ($Target -eq "\" -or $Target -eq "/") {
-        throw "Refusing to remove an unsafe root path."
+    if ([string]::IsNullOrWhiteSpace($Target) -or $Target -eq "\" -or $Target -eq "/") {
+        Write-Warning "Refusing to remove unsafe path: $Target"
+        return
     }
 
     if (Test-Path $Target) {
-        Remove-Item -Recurse -Force $Target
-        Write-Host "Removed: $Target"
+        try {
+            Remove-Item -Recurse -Force $Target
+            Write-Host "Removed: $Target"
+        } catch {
+            Write-Warning "Could not remove ${Target}: $_"
+        }
     }
     else {
         Write-Host "Not present, skipping: $Target"
