@@ -6,18 +6,22 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/app"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/installmanifest"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/jobs"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/legacyimport"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/platform"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/runner"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/ui"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/uninstall"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/updatecheck"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/version"
 )
 
 var jobIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
@@ -63,6 +67,7 @@ func runMenu(paths app.Paths) error {
 			"Backup LSS Backup Configuration",
 			"Configure Management Console",
 			"Check For Updates",
+			"About",
 			"Exit",
 		})
 		if err != nil {
@@ -106,6 +111,8 @@ func runMenu(paths app.Paths) error {
 			if err := runCheckForUpdates(prompter); err != nil {
 				fmt.Println("Update check failed:", err)
 			}
+		case "About":
+			runAbout()
 		case "Exit":
 			fmt.Println("Good bye.")
 			return nil
@@ -152,6 +159,54 @@ func runCheckForUpdates(prompter ui.Prompter) error {
 	fmt.Println("Update installed successfully.")
 
 	return nil
+}
+
+func runAbout() {
+	fmt.Println("")
+	fmt.Println("About LSS Backup CLI")
+	fmt.Println("====================")
+	fmt.Printf("Version:  %s\n", version.Current)
+	fmt.Printf("Platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
+	fmt.Printf("Go:       %s\n", runtime.Version())
+	fmt.Println("")
+
+	rp, err := platform.CurrentRuntimePaths()
+	if err != nil {
+		fmt.Println("Paths: unavailable —", err)
+	} else {
+		fmt.Println("Paths")
+		fmt.Println("-----")
+		fmt.Printf("  Binary:   %s\n", rp.BinPath)
+		fmt.Printf("  Config:   %s\n", rp.ConfigDir)
+		fmt.Printf("  Jobs:     %s\n", rp.JobsDir)
+		fmt.Printf("  Logs:     %s\n", rp.LogsDir)
+		fmt.Printf("  State:    %s\n", rp.StateDir)
+		fmt.Printf("  Manifest: %s\n", rp.ManifestPath)
+		fmt.Println("")
+
+		manifest, merr := installmanifest.Load(rp.ManifestPath)
+		if merr != nil {
+			fmt.Println("Install manifest: not found or unreadable")
+		} else {
+			fmt.Println("Installation")
+			fmt.Println("------------")
+			fmt.Printf("  Installed at:    %s\n", manifest.InstalledAt)
+			fmt.Printf("  Package manager: %s\n", manifest.PackageManager)
+			fmt.Println("")
+			fmt.Println("Dependencies")
+			fmt.Println("------------")
+			for _, dep := range manifest.Dependencies {
+				installed := "pre-existing"
+				if dep.InstalledByProgram {
+					installed = "installed by this program"
+				}
+				fmt.Printf("  %-10s  %-8s  %s  (%s)\n", dep.Name, dep.Manager, dep.PackageID, installed)
+			}
+		}
+	}
+
+	fmt.Println("")
+	fmt.Printf("Repository: https://github.com/%s\n", version.Repository)
 }
 
 func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Prompter) error {
