@@ -144,7 +144,7 @@ try {
     go build -o $TempBin .
 
     if (Test-Path $BinPath) {
-        if (Test-Path $OldBin) { Remove-Item $OldBin -Force }
+        if (Test-Path $OldBin) { Remove-Item $OldBin -Force -ErrorAction SilentlyContinue }
         Rename-Item $BinPath $OldBin
     }
 
