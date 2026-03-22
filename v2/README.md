@@ -23,9 +23,10 @@ The install scripts automatically install missing dependencies (Go, restic, rsyn
 ### Windows 11
 
 1. Open **PowerShell as Administrator** (right-click PowerShell → *Run as administrator*).
-2. Navigate to the `v2` directory of this repository:
+2. Clone the repository and navigate to the `v2` directory:
    ```powershell
-   cd path\to\lss-backup-cli\v2
+   git clone https://github.com/lssolutions-ie/lss-backup-cli.git
+   cd lss-backup-cli\v2
    ```
 3. Allow script execution for this session if needed:
    ```powershell
@@ -52,9 +53,10 @@ The install scripts automatically install missing dependencies (Go, restic, rsyn
 ### macOS
 
 1. Open **Terminal** as your normal user (do **not** use `sudo`).
-2. Navigate to the `v2` directory of this repository:
+2. Clone the repository and navigate to the `v2` directory:
    ```sh
-   cd path/to/lss-backup-cli/v2
+   git clone https://github.com/lssolutions-ie/lss-backup-cli.git
+   cd lss-backup-cli/v2
    ```
 3. Make the script executable and run it:
    ```sh
@@ -80,9 +82,10 @@ The install scripts automatically install missing dependencies (Go, restic, rsyn
 ### Linux (Debian/Ubuntu)
 
 1. Open a terminal with `sudo` access.
-2. Navigate to the `v2` directory of this repository:
+2. Clone the repository and navigate to the `v2` directory:
    ```sh
-   cd path/to/lss-backup-cli/v2
+   git clone https://github.com/lssolutions-ie/lss-backup-cli.git
+   cd lss-backup-cli/v2
    ```
 3. Make the script executable and run it:
    ```sh
