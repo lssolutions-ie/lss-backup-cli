@@ -26,6 +26,8 @@ import (
 
 var jobIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
+var errCancelled = errors.New("cancelled")
+
 func Run(args []string) error {
 	paths, err := app.DiscoverPaths()
 	if err != nil {
@@ -76,7 +78,7 @@ func runMenu(paths app.Paths) error {
 
 		switch choice {
 		case "Create Backup Job":
-			if err := runCreateWizard(paths, prompter); err != nil {
+			if err := runCreateWizard(paths, prompter); err != nil && err != errCancelled {
 				fmt.Println("Create job failed:", err)
 			}
 		case "List Backup Jobs":
@@ -380,9 +382,12 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 		return err
 	}
 
-	_, program, err := prompter.Select("Select backup program", availablePrograms())
+	_, program, err := prompter.Select("Select backup program", append(availablePrograms(), "Cancel — return to main menu"))
 	if err != nil {
 		return err
+	}
+	if program == "Cancel — return to main menu" {
+		return errCancelled
 	}
 
 	sourcePath, err := prompter.Ask("Local source directory", validateExistingDirectory)
