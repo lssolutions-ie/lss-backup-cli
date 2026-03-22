@@ -144,7 +144,13 @@ try {
     go build -o $TempBin .
 
     if (Test-Path $BinPath) {
+        # Try to clear a pre-existing old binary. If it is locked (held by the
+        # currently-running process), fall back to a unique name so the rename
+        # of the live binary never collides with it.
         if (Test-Path $OldBin) { Remove-Item $OldBin -Force -ErrorAction SilentlyContinue }
+        if (Test-Path $OldBin) {
+            $OldBin = Join-Path $BinDir ("lss-backup-cli-old-" + [System.Guid]::NewGuid().ToString("N") + ".exe")
+        }
         Rename-Item $BinPath $OldBin
     }
 
