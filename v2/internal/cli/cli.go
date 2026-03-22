@@ -157,7 +157,8 @@ func runCheckForUpdates(prompter ui.Prompter) error {
 	}
 
 	fmt.Println("Update installed successfully.")
-
+	fmt.Println("Please restart LSS Backup CLI to use the new version.")
+	os.Exit(0)
 	return nil
 }
 
