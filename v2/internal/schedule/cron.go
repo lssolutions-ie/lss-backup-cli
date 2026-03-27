@@ -199,16 +199,60 @@ func describe(minute, hour, dom, month, dow string) string {
 }
 
 func timeDesc(minute, hour string) string {
+	// Simple case: both single integers
 	if isSimpleInt(hour) && isSimpleInt(minute) {
 		h, _ := strconv.Atoi(hour)
 		m, _ := strconv.Atoi(minute)
 		return fmt.Sprintf("at %02d:%02d", h, m)
 	}
+
+	// Comma-separated hours with a fixed minute: "9,15" + "0" → "at 09:00 and 15:00"
+	if isSimpleInt(minute) && !strings.ContainsAny(hour, "*/-") {
+		m, _ := strconv.Atoi(minute)
+		parts := strings.Split(hour, ",")
+		times := make([]string, 0, len(parts))
+		for _, p := range parts {
+			h, err := strconv.Atoi(strings.TrimSpace(p))
+			if err != nil {
+				break
+			}
+			times = append(times, fmt.Sprintf("%02d:%02d", h, m))
+		}
+		if len(times) == len(parts) {
+			return "at " + joinWith(times, " and ")
+		}
+	}
+
+	// Comma-separated minutes with a fixed hour: "0,30" + "9" → "at 09:00 and 09:30"
+	if isSimpleInt(hour) && !strings.ContainsAny(minute, "*/-") {
+		h, _ := strconv.Atoi(hour)
+		parts := strings.Split(minute, ",")
+		times := make([]string, 0, len(parts))
+		for _, p := range parts {
+			m, err := strconv.Atoi(strings.TrimSpace(p))
+			if err != nil {
+				break
+			}
+			times = append(times, fmt.Sprintf("%02d:%02d", h, m))
+		}
+		if len(times) == len(parts) {
+			return "at " + joinWith(times, " and ")
+		}
+	}
+
+	// Fallback
 	if isSimpleInt(hour) {
 		h, _ := strconv.Atoi(hour)
 		return fmt.Sprintf("at %02d:(%s)", h, minute)
 	}
 	return fmt.Sprintf("at hour %s, minute %s", hour, minute)
+}
+
+func joinWith(items []string, last string) string {
+	if len(items) == 1 {
+		return items[0]
+	}
+	return strings.Join(items[:len(items)-1], ", ") + last + items[len(items)-1]
 }
 
 func dowDesc(dow string) string {
