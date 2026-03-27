@@ -37,11 +37,12 @@ type Endpoint struct {
 }
 
 type Schedule struct {
-	Mode       string
-	Minute     int
-	Hour       int
-	Days       []int // day-of-week 1–7, used by weekly
-	DayOfMonth int   // 1–28, used by monthly
+	Mode           string
+	Minute         int
+	Hour           int
+	Days           []int  // day-of-week 1–7, used by weekly
+	DayOfMonth     int    // 1–28, used by monthly
+	CronExpression string // used by cron mode only
 }
 
 type Retention struct {
@@ -215,6 +216,8 @@ func assignValue(job *Job, section string, key string, value string) error {
 				return fmt.Errorf("parse schedule day_of_month: %w", err)
 			}
 			job.Schedule.DayOfMonth = intValue
+		case "cron_expression":
+			job.Schedule.CronExpression = parseString(value)
 		default:
 			return fmt.Errorf("unsupported [schedule] key %q", key)
 		}
@@ -355,6 +358,7 @@ minute = %d
 hour = %d
 days = %s
 day_of_month = %d
+cron_expression = %q
 
 [retention]
 mode = %q
@@ -379,6 +383,7 @@ email_to = %q
 		job.Schedule.Hour,
 		days,
 		job.Schedule.DayOfMonth,
+		job.Schedule.CronExpression,
 		job.Retention.Mode,
 		job.Notifications.HealthchecksEnabled,
 		job.Notifications.EmailMode,

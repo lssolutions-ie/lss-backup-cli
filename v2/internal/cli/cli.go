@@ -18,6 +18,7 @@ import (
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/legacyimport"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/platform"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/runner"
+	cronSchedule "github.com/lssolutions-ie/lss-backup-cli/v2/internal/schedule"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/ui"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/uninstall"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/updatecheck"
@@ -351,17 +352,22 @@ func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Promp
 func describeSchedule(s config.Schedule) string {
 	switch s.Mode {
 	case "manual", "":
-		return "manual"
+		return "manual (no schedule)"
 	case "daily":
 		return fmt.Sprintf("daily at %02d:%02d", s.Hour, s.Minute)
 	case "weekly":
 		days := make([]string, len(s.Days))
 		for i, d := range s.Days {
-			days[i] = strconv.Itoa(d)
+			days[i] = shortDayName(d)
 		}
-		return fmt.Sprintf("weekly on days [%s] at %02d:%02d", strings.Join(days, ", "), s.Hour, s.Minute)
+		return fmt.Sprintf("weekly on %s at %02d:%02d", strings.Join(days, ", "), s.Hour, s.Minute)
 	case "monthly":
 		return fmt.Sprintf("monthly on day %d at %02d:%02d", s.DayOfMonth, s.Hour, s.Minute)
+	case "cron":
+		if desc, err := cronSchedule.ValidateCron(s.CronExpression); err == nil {
+			return fmt.Sprintf("cron %q — %s", s.CronExpression, desc)
+		}
+		return fmt.Sprintf("cron %q", s.CronExpression)
 	default:
 		return s.Mode
 	}
@@ -865,48 +871,70 @@ func selectJob(paths app.Paths, prompter ui.Prompter) (config.Job, error) {
 }
 
 func promptSchedule(prompter ui.Prompter) (config.Schedule, error) {
-	_, scheduleMode, err := prompter.Select("Select schedule mode", []string{"manual", "daily", "weekly", "monthly"})
-	if err != nil {
-		return config.Schedule{}, err
-	}
-
-	schedule := config.Schedule{Mode: scheduleMode}
-	if scheduleMode == "manual" {
-		return schedule, nil
-	}
-
-	hourValue, err := prompter.Ask("Hour (0-23)", validateIntRange(0, 23))
-	if err != nil {
-		return config.Schedule{}, err
-	}
-	minuteValue, err := prompter.Ask("Minute (0-59)", validateIntRange(0, 59))
-	if err != nil {
-		return config.Schedule{}, err
-	}
-	schedule.Hour, _ = strconv.Atoi(hourValue)
-	schedule.Minute, _ = strconv.Atoi(minuteValue)
-
-	if scheduleMode == "weekly" {
-		daysText, err := prompter.Ask("Days of week as comma-separated numbers (1-7)", validateDayList)
+	for {
+		_, choice, err := prompter.Select("Select schedule", []string{
+			"Daily",
+			"Weekly",
+			"Monthly",
+			"Manual (No Schedule)",
+			"Custom Schedule (Cron)",
+		})
 		if err != nil {
 			return config.Schedule{}, err
 		}
-		days, err := parseDayList(daysText)
-		if err != nil {
-			return config.Schedule{}, err
-		}
-		schedule.Days = days
-	}
 
-	if scheduleMode == "monthly" {
-		dayOfMonthValue, err := prompter.Ask("Day of month (1-28)", validateIntRange(1, 28))
-		if err != nil {
-			return config.Schedule{}, err
-		}
-		schedule.DayOfMonth, _ = strconv.Atoi(dayOfMonthValue)
-	}
+		switch choice {
+		case "Manual (No Schedule)":
+			return config.Schedule{Mode: "manual"}, nil
 
-	return schedule, nil
+		case "Daily":
+			hour, minute, err := promptHHMM(prompter)
+			if err != nil {
+				return config.Schedule{}, err
+			}
+			return config.Schedule{Mode: "daily", Hour: hour, Minute: minute}, nil
+
+		case "Weekly":
+			hour, minute, err := promptHHMM(prompter)
+			if err != nil {
+				return config.Schedule{}, err
+			}
+			daysText, err := prompter.Ask("Days of week as comma-separated numbers (1=Mon, 7=Sun)", validateDayList)
+			if err != nil {
+				return config.Schedule{}, err
+			}
+			days, err := parseDayList(daysText)
+			if err != nil {
+				return config.Schedule{}, err
+			}
+			return config.Schedule{Mode: "weekly", Hour: hour, Minute: minute, Days: days}, nil
+
+		case "Monthly":
+			hour, minute, err := promptHHMM(prompter)
+			if err != nil {
+				return config.Schedule{}, err
+			}
+			dayOfMonthValue, err := prompter.Ask("Day of month (1-28)", validateIntRange(1, 28))
+			if err != nil {
+				return config.Schedule{}, err
+			}
+			dom, _ := strconv.Atoi(dayOfMonthValue)
+			return config.Schedule{Mode: "monthly", Hour: hour, Minute: minute, DayOfMonth: dom}, nil
+
+		case "Custom Schedule (Cron)":
+			expr, err := prompter.Ask("Cron expression (e.g. 0 17 * * 1-5)", nil)
+			if err != nil {
+				return config.Schedule{}, err
+			}
+			desc, err := cronSchedule.ValidateCron(expr)
+			if err != nil {
+				fmt.Printf("\nInvalid cron expression: %v\n\n", err)
+				continue
+			}
+			fmt.Printf("\nSchedule: %s\n\n", desc)
+			return config.Schedule{Mode: "cron", CronExpression: expr}, nil
+		}
+	}
 }
 
 func promptNotifications(prompter ui.Prompter) (config.Notifications, error) {
@@ -996,6 +1024,46 @@ func validateExistingDirectory(value string) error {
 		return fmt.Errorf("path must be a directory")
 	}
 	return nil
+}
+
+func promptHHMM(prompter ui.Prompter) (int, int, error) {
+	value, err := prompter.Ask("Run time in 24h format (e.g. 17:30)", validateHHMM)
+	if err != nil {
+		return 0, 0, err
+	}
+	parts := strings.SplitN(value, ":", 2)
+	hour, _ := strconv.Atoi(parts[0])
+	minute, _ := strconv.Atoi(parts[1])
+	return hour, minute, nil
+}
+
+func validateHHMM(value string) error {
+	parts := strings.SplitN(value, ":", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("use HH:MM format, e.g. 17:30")
+	}
+	hour, err1 := strconv.Atoi(parts[0])
+	minute, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil {
+		return fmt.Errorf("use HH:MM format, e.g. 17:30")
+	}
+	if hour < 0 || hour > 23 {
+		return fmt.Errorf("hour must be between 0 and 23")
+	}
+	if minute < 0 || minute > 59 {
+		return fmt.Errorf("minute must be between 0 and 59")
+	}
+	return nil
+}
+
+func shortDayName(n int) string {
+	names := map[int]string{
+		1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun",
+	}
+	if name, ok := names[n]; ok {
+		return name
+	}
+	return strconv.Itoa(n)
 }
 
 func formatLastRun(r *runner.RunResult) string {
