@@ -22,19 +22,21 @@ func NewService() Service {
 	}
 }
 
-func (s Service) Run(job config.Job) error {
+func (s Service) Run(job config.Job) (RunResult, error) {
+	startedAt := time.Now()
+
 	if err := validateSupportedSlice(job); err != nil {
-		return err
+		return RunResult{}, err
 	}
 
 	engine, err := s.Registry.Get(job.Program)
 	if err != nil {
-		return err
+		return RunResult{}, err
 	}
 
 	logFile, writer, closeLog, err := prepareLog(job)
 	if err != nil {
-		return err
+		return RunResult{}, err
 	}
 	defer closeLog()
 
@@ -42,14 +44,34 @@ func (s Service) Run(job config.Job) error {
 	fmt.Fprintf(writer, "Source: %s\n", job.Source.Path)
 	fmt.Fprintf(writer, "Destination: %s\n", job.Destination.Path)
 
-	if err := engine.Run(job, writer); err != nil {
-		fmt.Fprintf(writer, "Job failed: %v\n", err)
-		return fmt.Errorf("job %s (%s) failed; see log %s: %w", job.ID, engine.Name(), logFile, err)
+	runErr := engine.Run(job, writer)
+	finishedAt := time.Now()
+
+	result := RunResult{
+		StartedAt:       startedAt,
+		FinishedAt:      finishedAt,
+		DurationSeconds: int64(finishedAt.Sub(startedAt).Seconds()),
+		LogFile:         logFile,
 	}
 
-	fmt.Fprintf(writer, "Job completed successfully.\n")
-	fmt.Fprintf(writer, "Log file: %s\n", logFile)
-	return nil
+	if runErr != nil {
+		result.Status = "failure"
+		result.ErrorMessage = runErr.Error()
+		fmt.Fprintf(writer, "Job failed: %v\n", runErr)
+	} else {
+		result.Status = "success"
+		fmt.Fprintf(writer, "Job completed successfully.\n")
+		fmt.Fprintf(writer, "Log file: %s\n", logFile)
+	}
+
+	if err := WriteLastRun(job.JobDir, result); err != nil {
+		fmt.Fprintf(writer, "Warning: could not write last run state: %v\n", err)
+	}
+
+	if runErr != nil {
+		return result, fmt.Errorf("job %s (%s) failed; see log %s: %w", job.ID, engine.Name(), logFile, runErr)
+	}
+	return result, nil
 }
 
 func (s Service) Restore(job config.Job, target string) error {

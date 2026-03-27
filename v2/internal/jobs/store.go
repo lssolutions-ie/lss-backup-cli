@@ -11,6 +11,7 @@ import (
 
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/app"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/runner"
 )
 
 type Summary struct {
@@ -18,6 +19,7 @@ type Summary struct {
 	Program string
 	Name    string
 	JobDir  string
+	LastRun *runner.RunResult // nil if the job has never been run
 }
 
 type CreateInput struct {
@@ -58,11 +60,13 @@ func List(paths app.Paths) ([]Summary, error) {
 			continue
 		}
 
+		lastRun, _ := runner.LoadLastRun(jobDir)
 		out = append(out, Summary{
 			ID:      job.ID,
 			Name:    job.Name,
 			Program: job.Program,
 			JobDir:  job.JobDir,
+			LastRun: lastRun,
 		})
 	}
 

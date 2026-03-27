@@ -708,7 +708,7 @@ func printJobs(paths app.Paths) error {
 	}
 
 	for _, item := range items {
-		fmt.Printf("%s | %s | %s\n", item.ID, item.Program, item.Name)
+		fmt.Printf("%s | %s | %s | %s\n", item.ID, item.Program, item.Name, formatLastRun(item.LastRun))
 	}
 	return nil
 }
@@ -762,7 +762,8 @@ func runJobByID(paths app.Paths, id string) error {
 	}
 
 	service := runner.NewService()
-	return service.Run(job)
+	_, err = service.Run(job)
+	return err
 }
 
 func runRestoreWizard(paths app.Paths, prompter ui.Prompter, id string) error {
@@ -850,7 +851,7 @@ func selectJob(paths app.Paths, prompter ui.Prompter) (config.Job, error) {
 	options := make([]string, 0, len(items))
 	lookup := make(map[string]string, len(items))
 	for _, item := range items {
-		label := fmt.Sprintf("%s | %s | %s", item.ID, item.Program, item.Name)
+		label := fmt.Sprintf("%s | %s | %s | %s", item.ID, item.Program, item.Name, formatLastRun(item.LastRun))
 		options = append(options, label)
 		lookup[label] = item.ID
 	}
@@ -995,6 +996,13 @@ func validateExistingDirectory(value string) error {
 		return fmt.Errorf("path must be a directory")
 	}
 	return nil
+}
+
+func formatLastRun(r *runner.RunResult) string {
+	if r == nil {
+		return "never run"
+	}
+	return fmt.Sprintf("%s %s", r.Status, r.FinishedAt.Local().Format("2006-01-02 15:04"))
 }
 
 func validateAbsolutePath(value string) error {
