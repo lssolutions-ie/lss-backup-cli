@@ -872,34 +872,43 @@ func selectJob(paths app.Paths, prompter ui.Prompter) (config.Job, error) {
 
 func promptSchedule(prompter ui.Prompter) (config.Schedule, error) {
 	for {
-		_, choice, err := prompter.Select("Select schedule", []string{
-			"Daily",
-			"Weekly",
-			"Monthly",
-			"Manual (No Schedule)",
-			"Custom Schedule (Cron)",
+		idx, _, err := prompter.Select("Select schedule", []string{
+			"Daily                  — runs every day at a set time",
+			"Weekly                 — runs on selected days of the week",
+			"Monthly                — runs on a specific day each month",
+			"Manual (No Schedule)   — run only when triggered manually",
+			"Custom Schedule (Cron) — define a precise schedule using cron syntax",
 		})
 		if err != nil {
 			return config.Schedule{}, err
 		}
 
-		switch choice {
-		case "Manual (No Schedule)":
+		switch idx {
+		case 3: // Manual (No Schedule)
 			return config.Schedule{Mode: "manual"}, nil
 
-		case "Daily":
+		case 0: // Daily
+			fmt.Println()
 			hour, minute, err := promptHHMM(prompter)
 			if err != nil {
 				return config.Schedule{}, err
 			}
 			return config.Schedule{Mode: "daily", Hour: hour, Minute: minute}, nil
 
-		case "Weekly":
+		case 1: // Weekly
+			fmt.Println()
 			hour, minute, err := promptHHMM(prompter)
 			if err != nil {
 				return config.Schedule{}, err
 			}
-			daysText, err := prompter.Ask("Days of week as comma-separated numbers (1=Mon, 7=Sun)", validateDayList)
+			fmt.Println()
+			fmt.Println("Day reference:")
+			fmt.Println("  1 = Monday     5 = Friday")
+			fmt.Println("  2 = Tuesday    6 = Saturday")
+			fmt.Println("  3 = Wednesday  7 = Sunday")
+			fmt.Println("  4 = Thursday")
+			fmt.Println()
+			daysText, err := prompter.Ask("Days (e.g. 1,2,3  or  1-5 for Mon–Fri  or  1-5,7)", validateDayList)
 			if err != nil {
 				return config.Schedule{}, err
 			}
@@ -909,26 +918,42 @@ func promptSchedule(prompter ui.Prompter) (config.Schedule, error) {
 			}
 			return config.Schedule{Mode: "weekly", Hour: hour, Minute: minute, Days: days}, nil
 
-		case "Monthly":
+		case 2: // Monthly
+			fmt.Println()
 			hour, minute, err := promptHHMM(prompter)
 			if err != nil {
 				return config.Schedule{}, err
 			}
-			dayOfMonthValue, err := prompter.Ask("Day of month (1-28)", validateIntRange(1, 28))
+			fmt.Println()
+			fmt.Println("Note: capped at 28 to run reliably in every month, including February.")
+			dayOfMonthValue, err := prompter.Ask("Day of month (e.g. 1 for the 1st, 15 for the 15th)", validateIntRange(1, 28))
 			if err != nil {
 				return config.Schedule{}, err
 			}
 			dom, _ := strconv.Atoi(dayOfMonthValue)
 			return config.Schedule{Mode: "monthly", Hour: hour, Minute: minute, DayOfMonth: dom}, nil
 
-		case "Custom Schedule (Cron)":
-			expr, err := prompter.Ask("Cron expression (e.g. 0 17 * * 1-5)", nil)
+		case 4: // Custom Schedule (Cron)
+			fmt.Println()
+			fmt.Println("Cron format:  MINUTE  HOUR  DAY-OF-MONTH  MONTH  DAY-OF-WEEK")
+			fmt.Println()
+			fmt.Println("  Expression           Meaning")
+			fmt.Println("  0 17 * * *           Every day at 17:00")
+			fmt.Println("  0 9,17 * * 1-5       Every weekday at 09:00 and 17:00")
+			fmt.Println("  30 8 * * 1,3,5       Mon, Wed, Fri at 08:30")
+			fmt.Println("  */15 * * * *         Every 15 minutes")
+			fmt.Println("  0 */4 * * *          Every 4 hours")
+			fmt.Println("  0 0 1 * *            1st of every month at midnight")
+			fmt.Println("  @daily               Every day at midnight")
+			fmt.Println("  @hourly              Every hour")
+			fmt.Println()
+			expr, err := prompter.Ask("Cron expression", nil)
 			if err != nil {
 				return config.Schedule{}, err
 			}
 			desc, err := cronSchedule.ValidateCron(expr)
 			if err != nil {
-				fmt.Printf("\nInvalid cron expression: %v\n\n", err)
+				fmt.Printf("\nInvalid: %v\n\n", err)
 				continue
 			}
 			fmt.Printf("\nSchedule: %s\n\n", desc)
@@ -1027,7 +1052,7 @@ func validateExistingDirectory(value string) error {
 }
 
 func promptHHMM(prompter ui.Prompter) (int, int, error) {
-	value, err := prompter.Ask("Run time in 24h format (e.g. 17:30)", validateHHMM)
+	value, err := prompter.Ask("Run time in 24h format (e.g. 09:00, 17:30, 23:45)", validateHHMM)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -1106,22 +1131,38 @@ func parseDayList(value string) ([]int, error) {
 		return nil, fmt.Errorf("day list cannot be empty")
 	}
 
-	parts := strings.Split(value, ",")
 	seen := map[int]bool{}
-	days := make([]int, 0, len(parts))
-	for _, part := range parts {
-		number, err := strconv.Atoi(strings.TrimSpace(part))
-		if err != nil {
-			return nil, fmt.Errorf("days must be numbers from 1 to 7")
+	var days []int
+
+	for _, part := range strings.Split(value, ",") {
+		part = strings.TrimSpace(part)
+		if strings.Contains(part, "-") {
+			// Range: e.g. 1-5
+			bounds := strings.SplitN(part, "-", 2)
+			lo, err1 := strconv.Atoi(strings.TrimSpace(bounds[0]))
+			hi, err2 := strconv.Atoi(strings.TrimSpace(bounds[1]))
+			if err1 != nil || err2 != nil {
+				return nil, fmt.Errorf("%q is not a valid range — use numbers 1 (Mon) to 7 (Sun)", part)
+			}
+			if lo < 1 || hi > 7 || lo > hi {
+				return nil, fmt.Errorf("range %d-%d is invalid — values must be between 1 (Mon) and 7 (Sun)", lo, hi)
+			}
+			for d := lo; d <= hi; d++ {
+				if !seen[d] {
+					seen[d] = true
+					days = append(days, d)
+				}
+			}
+		} else {
+			n, err := strconv.Atoi(part)
+			if err != nil || n < 1 || n > 7 {
+				return nil, fmt.Errorf("%q is not a valid day — enter a number from 1 (Mon) to 7 (Sun)", part)
+			}
+			if !seen[n] {
+				seen[n] = true
+				days = append(days, n)
+			}
 		}
-		if number < 1 || number > 7 {
-			return nil, fmt.Errorf("days must be numbers from 1 to 7")
-		}
-		if seen[number] {
-			continue
-		}
-		seen[number] = true
-		days = append(days, number)
 	}
 
 	sort.Ints(days)
