@@ -27,6 +27,10 @@ type scheduledJob struct {
 // Run starts the daemon. It blocks until a shutdown signal is received.
 // Intended to run as a managed service (systemd, launchd, Windows Task Scheduler).
 func Run(paths app.Paths) error {
+	// Detach from the console on Windows so Task Scheduler's console host
+	// closing does not send CTRL_CLOSE_EVENT → os.Interrupt to the daemon.
+	detachConsole()
+
 	log.SetFlags(log.Ldate | log.Ltime)
 	log.Println("LSS Backup daemon starting")
 

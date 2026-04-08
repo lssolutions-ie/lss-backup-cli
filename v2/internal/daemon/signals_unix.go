@@ -10,6 +10,9 @@ import (
 	"syscall"
 )
 
+// detachConsole is a no-op on Unix — console detachment is only needed on Windows.
+func detachConsole() {}
+
 // watchReloadSignal listens for SIGHUP and sends on reloadCh when received.
 // This allows operators to trigger an immediate config reload without restarting
 // the daemon: `kill -HUP <pid>` or `systemctl reload lss-backup`.
