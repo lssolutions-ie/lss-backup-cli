@@ -200,6 +200,7 @@ $settings  = New-ScheduledTaskSettingsSet `
     -RestartCount 3 `
     -RestartInterval (New-TimeSpan -Minutes 1) `
     -StartWhenAvailable `
+    -MultipleInstances IgnoreNew `
     -ExecutionTimeLimit ([System.TimeSpan]::Zero)
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
 
