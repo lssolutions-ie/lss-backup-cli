@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -32,6 +34,18 @@ func Run(paths app.Paths) error {
 	detachConsole()
 
 	log.SetFlags(log.Ldate | log.Ltime)
+
+	// On Windows the process has no console after FreeConsole(), so log output
+	// would be lost. Write to a file instead so the daemon's activity is visible.
+	if runtime.GOOS == "windows" {
+		logPath := filepath.Join(paths.StateDir, "daemon.log")
+		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err == nil {
+			log.SetOutput(f)
+			// f intentionally not closed — stays open for the daemon's lifetime.
+		}
+	}
+
 	log.Println("LSS Backup daemon starting")
 
 	ctx, cancel := context.WithCancel(context.Background())
