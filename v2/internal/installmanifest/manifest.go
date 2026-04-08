@@ -1,6 +1,7 @@
 package installmanifest
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -26,11 +27,17 @@ type Manifest struct {
 	Dependencies   []Dependency `json:"dependencies"`
 }
 
+// utf8BOM is the byte order mark written by PowerShell 5.x Set-Content -Encoding UTF8.
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
 func Load(path string) (Manifest, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("read %s: %w", path, err)
 	}
+
+	// Strip UTF-8 BOM if present — PowerShell 5.x writes one by default.
+	data = bytes.TrimPrefix(data, utf8BOM)
 
 	var manifest Manifest
 	if err := json.Unmarshal(data, &manifest); err != nil {

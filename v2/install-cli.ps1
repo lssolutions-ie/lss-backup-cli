@@ -173,7 +173,10 @@ $manifest = [ordered]@{
     dependencies    = $deps
 }
 
-$manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $ManifestPath -Encoding UTF8
+# Write without BOM — PowerShell 5.x Set-Content -Encoding UTF8 writes a BOM
+# which breaks Go's JSON parser. Use .NET directly for BOM-free UTF-8.
+$enc = New-Object System.Text.UTF8Encoding $false
+[System.IO.File]::WriteAllText($ManifestPath, ($manifest | ConvertTo-Json -Depth 5), $enc)
 
 Write-Host "Installed lss-backup-cli to $BinPath"
 
