@@ -177,12 +177,14 @@ $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $ManifestPath -Encoding 
 
 Write-Host "Installed lss-backup-cli to $BinPath"
 
-# Add the binary directory to the system PATH if not already present.
+# Add the binary directory to the system PATH if not already present,
+# then refresh the current session so lss-backup-cli is usable immediately.
 $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
 if ($machinePath -notlike "*$BinDir*") {
     [System.Environment]::SetEnvironmentVariable("Path", "$machinePath;$BinDir", "Machine")
     Write-Host "Added $BinDir to system PATH"
 }
+Refresh-Path
 
 # Register and start the daemon as a Task Scheduler task running as SYSTEM.
 # -Force overwrites any existing task (handles reinstall/update).
