@@ -194,7 +194,16 @@ Refresh-Path
 $TaskPath = "\LSS Backup\"
 $TaskName = "LSS Backup Daemon"
 
-$action    = New-ScheduledTaskAction -Execute $BinPath -Argument "daemon"
+# Run via a hidden PowerShell window so Windows does not allocate a console
+# for the Go binary. When Task Scheduler launches a console application as
+# SYSTEM it immediately closes the allocated console, sending CTRL_CLOSE_EVENT
+# to the process. Go's runtime catches that as os.Interrupt before our code
+# can call FreeConsole(), causing the daemon to exit cleanly (exit code 0).
+# A hidden PowerShell parent owns the console; the Go binary inherits it but
+# never receives a close event.
+$action    = New-ScheduledTaskAction `
+    -Execute "powershell.exe" `
+    -Argument "-NonInteractive -NoProfile -WindowStyle Hidden -Command `"& '$BinPath' daemon`""
 $trigger   = New-ScheduledTaskTrigger -AtStartup
 $settings  = New-ScheduledTaskSettingsSet `
     -RestartCount 3 `
