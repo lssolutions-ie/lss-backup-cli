@@ -131,6 +131,27 @@ if prompt_yes_no "Do you want to back up LSS Backup data before uninstalling?"; 
 	backup_payload "$ZIP_PATH"
 fi
 
+# Stop and remove the daemon service before removing files.
+case "$OS_NAME" in
+	Linux)
+		if command -v systemctl >/dev/null 2>&1; then
+			sudo systemctl stop lss-backup 2>/dev/null || true
+			sudo systemctl disable lss-backup 2>/dev/null || true
+			safe_remove "/etc/systemd/system/lss-backup.service"
+			sudo systemctl daemon-reload
+			echo "Daemon service stopped and removed (systemd)"
+		fi
+		;;
+	Darwin)
+		PLIST_PATH="/Library/LaunchDaemons/com.lssolutions.lss-backup.plist"
+		if [ -f "$PLIST_PATH" ]; then
+			sudo launchctl bootout system "${PLIST_PATH}" 2>/dev/null || true
+			safe_remove "$PLIST_PATH"
+			echo "Daemon service stopped and removed (launchd)"
+		fi
+		;;
+esac
+
 safe_remove "$BIN_PATH"
 safe_remove "$CONFIG_DIR"
 safe_remove "$LOGS_DIR"

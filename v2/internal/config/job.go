@@ -46,13 +46,24 @@ type Schedule struct {
 }
 
 type Retention struct {
-	Mode string
+	// Mode controls which retention strategy is applied after each restic backup.
+	// "none"         — keep everything, never prune (default, safe)
+	// "keep-last"    — keep the N most recent snapshots
+	// "keep-within"  — keep all snapshots within a time window (e.g. "30d", "8w", "12m")
+	// "tiered"       — keep daily/weekly/monthly/yearly layers
+	Mode        string
+	KeepLast    int
+	KeepWithin  string // restic duration string: "30d", "8w", "12m", "2y"
+	KeepDaily   int
+	KeepWeekly  int
+	KeepMonthly int
+	KeepYearly  int
 }
 
 type Notifications struct {
 	HealthchecksEnabled bool
-	EmailMode           string
-	EmailTo             string
+	HealthchecksDomain  string // e.g. "https://cron.lssolutions.ie" — base URL of the healthchecks instance
+	HealthchecksID      string // UUID from the healthchecks dashboard — unique per job
 }
 
 type Secrets struct {
@@ -225,6 +236,38 @@ func assignValue(job *Job, section string, key string, value string) error {
 		switch key {
 		case "mode":
 			job.Retention.Mode = parseString(value)
+		case "keep_last":
+			n, err := parseInt(value)
+			if err != nil {
+				return fmt.Errorf("parse retention keep_last: %w", err)
+			}
+			job.Retention.KeepLast = n
+		case "keep_within":
+			job.Retention.KeepWithin = parseString(value)
+		case "keep_daily":
+			n, err := parseInt(value)
+			if err != nil {
+				return fmt.Errorf("parse retention keep_daily: %w", err)
+			}
+			job.Retention.KeepDaily = n
+		case "keep_weekly":
+			n, err := parseInt(value)
+			if err != nil {
+				return fmt.Errorf("parse retention keep_weekly: %w", err)
+			}
+			job.Retention.KeepWeekly = n
+		case "keep_monthly":
+			n, err := parseInt(value)
+			if err != nil {
+				return fmt.Errorf("parse retention keep_monthly: %w", err)
+			}
+			job.Retention.KeepMonthly = n
+		case "keep_yearly":
+			n, err := parseInt(value)
+			if err != nil {
+				return fmt.Errorf("parse retention keep_yearly: %w", err)
+			}
+			job.Retention.KeepYearly = n
 		default:
 			return fmt.Errorf("unsupported [retention] key %q", key)
 		}
@@ -236,10 +279,10 @@ func assignValue(job *Job, section string, key string, value string) error {
 				return fmt.Errorf("parse notifications healthchecks_enabled: %w", err)
 			}
 			job.Notifications.HealthchecksEnabled = boolValue
-		case "email_mode":
-			job.Notifications.EmailMode = parseString(value)
-		case "email_to":
-			job.Notifications.EmailTo = parseString(value)
+		case "healthchecks_domain":
+			job.Notifications.HealthchecksDomain = parseString(value)
+		case "healthchecks_id":
+			job.Notifications.HealthchecksID = parseString(value)
 		default:
 			return fmt.Errorf("unsupported [notifications] key %q", key)
 		}
@@ -362,11 +405,17 @@ cron_expression = %q
 
 [retention]
 mode = %q
+keep_last = %d
+keep_within = %q
+keep_daily = %d
+keep_weekly = %d
+keep_monthly = %d
+keep_yearly = %d
 
 [notifications]
 healthchecks_enabled = %t
-email_mode = %q
-email_to = %q
+healthchecks_domain = %q
+healthchecks_id = %q
 `,
 		job.ID,
 		job.Name,
@@ -385,9 +434,15 @@ email_to = %q
 		job.Schedule.DayOfMonth,
 		job.Schedule.CronExpression,
 		job.Retention.Mode,
+		job.Retention.KeepLast,
+		job.Retention.KeepWithin,
+		job.Retention.KeepDaily,
+		job.Retention.KeepWeekly,
+		job.Retention.KeepMonthly,
+		job.Retention.KeepYearly,
 		job.Notifications.HealthchecksEnabled,
-		job.Notifications.EmailMode,
-		job.Notifications.EmailTo,
+		job.Notifications.HealthchecksDomain,
+		job.Notifications.HealthchecksID,
 	)
 }
 

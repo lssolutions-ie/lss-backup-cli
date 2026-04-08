@@ -36,9 +36,7 @@ func TestCreateAndLoadJob(t *testing.T) {
 		Retention: config.Retention{
 			Mode: "none",
 		},
-		Notify: config.Notifications{
-			EmailMode: "disabled",
-		},
+		Notify: config.Notifications{},
 	})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)

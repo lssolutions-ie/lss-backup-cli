@@ -203,33 +203,10 @@ func convertSchedule(kv map[string]string) (config.Schedule, []string) {
 }
 
 // convertNotifications maps v1 notification keys to config.Notifications.
+// Email fields from v1 (EMAILSETUP, EMAILTO) are ignored — email notifications
+// were removed in v2.
 func convertNotifications(kv map[string]string) (config.Notifications, []string) {
-	var warns []string
-
-	emailSetup := strings.ToLower(strings.TrimSpace(kv["EMAILSETUP"]))
-	var emailMode string
-	switch emailSetup {
-	case "disabled", "":
-		emailMode = "disabled"
-	case "fail-only":
-		emailMode = "fail-only"
-	case "success-and-failure", "always":
-		emailMode = "success-and-failure"
-	default:
-		emailMode = "disabled"
-		warns = append(warns, fmt.Sprintf("unknown EMAILSETUP value %q; email notifications set to disabled", emailSetup))
-	}
-
-	emailTo := strings.TrimSpace(kv["EMAILTO"])
-	if emailMode != "disabled" && emailTo == "" {
-		warns = append(warns, "EMAILTO is empty; email notifications disabled")
-		emailMode = "disabled"
-	}
-
-	return config.Notifications{
-		EmailMode: emailMode,
-		EmailTo:   emailTo,
-	}, warns
+	return config.Notifications{}, nil
 }
 
 // parseEnvFile reads KEY=VALUE lines from an env-style file.

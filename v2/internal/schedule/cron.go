@@ -4,7 +4,70 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
+	"github.com/robfig/cron/v3"
 )
+
+// IsHighFrequency reports whether the schedule runs more than once per day.
+// It computes two consecutive next run times and checks the gap. Returns false
+// for manual schedules or expressions that cannot be parsed.
+func IsHighFrequency(s config.Schedule) bool {
+	expr, ok := ToCronExpression(s)
+	if !ok {
+		return false
+	}
+	sched, err := cron.ParseStandard(expr)
+	if err != nil {
+		return false
+	}
+	now := time.Now()
+	first := sched.Next(now)
+	if first.IsZero() {
+		return false
+	}
+	second := sched.Next(first)
+	if second.IsZero() {
+		return false
+	}
+	return second.Sub(first) < 24*time.Hour
+}
+
+// ToCronExpression converts a Schedule to a standard 5-field cron expression.
+// Returns ("", false) for manual schedules or modes that cannot be expressed.
+// Days in weekly mode use values 1–7 (Mon–Sun); cron also accepts 7 as Sunday.
+func ToCronExpression(s config.Schedule) (string, bool) {
+	switch s.Mode {
+	case "manual", "":
+		return "", false
+	case "daily":
+		return fmt.Sprintf("%d %d * * *", s.Minute, s.Hour), true
+	case "weekly":
+		if len(s.Days) == 0 {
+			return "", false
+		}
+		parts := make([]string, len(s.Days))
+		for i, d := range s.Days {
+			parts[i] = strconv.Itoa(d)
+		}
+		return fmt.Sprintf("%d %d * * %s", s.Minute, s.Hour, strings.Join(parts, ",")), true
+	case "monthly":
+		dom := s.DayOfMonth
+		if dom < 1 || dom > 28 {
+			dom = 1
+		}
+		return fmt.Sprintf("%d %d %d * *", s.Minute, s.Hour, dom), true
+	case "cron":
+		expr := strings.TrimSpace(s.CronExpression)
+		if expr == "" {
+			return "", false
+		}
+		return expr, true
+	default:
+		return "", false
+	}
+}
 
 type fieldRange struct {
 	name string

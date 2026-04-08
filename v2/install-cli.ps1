@@ -176,4 +176,40 @@ $manifest = [ordered]@{
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $ManifestPath -Encoding UTF8
 
 Write-Host "Installed lss-backup-cli to $BinPath"
+
+# Add the binary directory to the system PATH if not already present.
+$machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+if ($machinePath -notlike "*$BinDir*") {
+    [System.Environment]::SetEnvironmentVariable("Path", "$machinePath;$BinDir", "Machine")
+    Write-Host "Added $BinDir to system PATH"
+}
+
+# Register and start the daemon as a Task Scheduler task running as SYSTEM.
+# -Force overwrites any existing task (handles reinstall/update).
+$TaskPath = "\LSS Backup\"
+$TaskName = "LSS Backup Daemon"
+
+$action    = New-ScheduledTaskAction -Execute $BinPath -Argument "daemon"
+$trigger   = New-ScheduledTaskTrigger -AtStartup
+$settings  = New-ScheduledTaskSettingsSet `
+    -RestartCount 3 `
+    -RestartInterval (New-TimeSpan -Minutes 1) `
+    -StartWhenAvailable `
+    -ExecutionTimeLimit ([System.TimeSpan]::Zero)
+$principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
+
+Register-ScheduledTask `
+    -TaskPath $TaskPath `
+    -TaskName $TaskName `
+    -Action $action `
+    -Trigger $trigger `
+    -Settings $settings `
+    -Principal $principal `
+    -Force | Out-Null
+
+# Stop any existing instance before starting fresh (reinstall case).
+Stop-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction SilentlyContinue
+Start-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName
+Write-Host "Daemon task registered and started (Task Scheduler)"
+
 Write-Host "Install manifest written to $ManifestPath"

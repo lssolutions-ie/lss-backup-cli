@@ -12,9 +12,9 @@ A cross-platform backup manager built on [restic](https://restic.net/) and [rsyn
 | macOS | Terminal access (do **not** run as root) |
 | Linux (Debian/Ubuntu) | `sudo` access |
 
-The install scripts automatically install missing dependencies (Go, restic, rsync). You do not need to install them manually.
+The install scripts automatically install all missing dependencies (Go, restic, rsync). You do not need to install them manually.
 
-> **Windows note:** rsync is not available on Windows. Rsync backup jobs cannot be run on this platform.
+> **Windows note:** rsync is not available on Windows. Rsync backup jobs cannot be created on this platform.
 
 ---
 
@@ -36,17 +36,19 @@ The install scripts automatically install missing dependencies (Go, restic, rsyn
    ```powershell
    .\install-cli.ps1
    ```
-5. The installer will:
-   - Install Go and restic via **winget** (or direct download if winget is unavailable)
-   - Build `lss-backup-cli.exe` from source
-   - Place the binary at `C:\Program Files\LSS Backup\lss-backup-cli.exe`
-   - Create config, jobs, logs, and state directories under `C:\ProgramData\LSS Backup\`
-   - Write an install manifest to `C:\ProgramData\LSS Backup\state\install-manifest.json`
 
-6. After installation, run the CLI:
-   ```powershell
-   & "C:\Program Files\LSS Backup\lss-backup-cli.exe"
-   ```
+The installer will:
+- Install Go and restic via **winget** (falls back to direct download if winget is unavailable)
+- Build `lss-backup-cli.exe` from source
+- Place the binary at `C:\Program Files\LSS Backup\lss-backup-cli.exe` and add it to the system PATH
+- Create config, jobs, logs, and state directories under `C:\ProgramData\LSS Backup\`
+- Register and start the **backup daemon** as a Task Scheduler task (runs as SYSTEM, restarts automatically on failure)
+- Write an install manifest to `C:\ProgramData\LSS Backup\state\install-manifest.json`
+
+After installation, run the CLI from any terminal:
+```powershell
+lss-backup-cli
+```
 
 ---
 
@@ -63,19 +65,20 @@ The install scripts automatically install missing dependencies (Go, restic, rsyn
    chmod +x install-cli.sh
    ./install-cli.sh
    ```
-4. The installer will:
-   - Install [Homebrew](https://brew.sh/) if not already present
-   - Install Go, restic, and rsync via Homebrew
-   - Build `lss-backup-cli` from source
-   - Place the binary at `/usr/local/bin/lss-backup-cli`
-   - Create config and jobs directories under `/Library/Application Support/LSS Backup/`
-   - Create logs at `/Library/Logs/LSS Backup/`
-   - Write an install manifest to `/Library/Application Support/LSS Backup/state/install-manifest.json`
 
-5. After installation, run the CLI from any terminal:
-   ```sh
-   lss-backup-cli
-   ```
+The installer will:
+- Install [Homebrew](https://brew.sh/) if not already present
+- Install Go, restic, and rsync via Homebrew
+- Build `lss-backup-cli` from source and place it at `/usr/local/bin/lss-backup-cli`
+- Create config and jobs directories under `/Library/Application Support/LSS Backup/`
+- Create logs at `/Library/Logs/LSS Backup/`
+- Install and start the **backup daemon** as a launchd system service (auto-starts on boot, restarts on failure)
+- Write an install manifest to `/Library/Application Support/LSS Backup/state/install-manifest.json`
+
+After installation, run the CLI from any terminal:
+```sh
+lss-backup-cli
+```
 
 ---
 
@@ -92,19 +95,55 @@ The install scripts automatically install missing dependencies (Go, restic, rsyn
    chmod +x install-cli.sh
    sudo ./install-cli.sh
    ```
-4. The installer will:
-   - Install Go via `apt` (falls back to the official Go tarball if the apt version is too old)
-   - Install restic, rsync, and zip via `apt`
-   - Build `lss-backup-cli` from source
-   - Place the binary at `/usr/local/bin/lss-backup-cli`
-   - Create config and jobs directories at `/etc/lss-backup/`
-   - Create logs at `/var/log/lss-backup/`
-   - Write an install manifest to `/var/lib/lss-backup/install-manifest.json`
 
-5. After installation, run the CLI:
-   ```sh
-   lss-backup-cli
-   ```
+The installer will:
+- Install Go via `apt` (falls back to the official Go tarball if the apt version is too old)
+- Install restic, rsync, and zip via `apt`
+- Build `lss-backup-cli` from source and place it at `/usr/local/bin/lss-backup-cli`
+- Create config and jobs directories at `/etc/lss-backup/`
+- Create logs at `/var/log/lss-backup/`
+- Install and start the **backup daemon** as a systemd service (`lss-backup.service`, enabled on boot, restarts on failure)
+- Write an install manifest to `/var/lib/lss-backup/install-manifest.json`
+
+After installation, run the CLI:
+```sh
+lss-backup-cli
+```
+
+---
+
+## The Backup Daemon
+
+The backup daemon (`lss-backup-cli daemon`) runs in the background and executes jobs on their configured schedules. It is installed and managed automatically — you do not need to start or stop it manually.
+
+| Platform | Service manager | Service name |
+|----------|----------------|--------------|
+| Linux | systemd | `lss-backup` |
+| macOS | launchd | `com.lssolutions.lss-backup` |
+| Windows | Task Scheduler | `LSS Backup\LSS Backup Daemon` |
+
+**Useful commands (Linux):**
+```sh
+sudo systemctl status lss-backup    # check daemon status
+sudo systemctl restart lss-backup   # restart after config changes
+sudo journalctl -u lss-backup -f    # follow daemon logs
+```
+
+**Useful commands (macOS):**
+```sh
+sudo launchctl list | grep lss-backup           # check if running
+tail -f "/Library/Logs/LSS Backup/daemon.log"   # follow daemon logs
+```
+
+The daemon checks `next_run.json` in each job directory to track upcoming runs. If the CLI shows a job as **OVERDUE**, the daemon may not be running — check the service status above.
+
+---
+
+## Updating
+
+Run the installer script again from the `v2` directory. It will build and replace the binary and restart the daemon service automatically.
+
+Alternatively, use the built-in update check from the CLI main menu: **Check For Updates**. This downloads the latest release, builds it, and restarts the daemon without any manual steps.
 
 ---
 
@@ -117,13 +156,15 @@ The install scripts automatically install missing dependencies (Go, restic, rsyn
    ```powershell
    .\uninstall-cli.ps1
    ```
-3. You will be prompted to optionally create a zip backup of all LSS Backup data before files are removed.
+
+You will be prompted to optionally create a zip backup of all LSS Backup data before anything is removed.
 
 **What is removed:**
-- `C:\Program Files\LSS Backup\lss-backup-cli.exe`
+- Daemon task stopped and unregistered from Task Scheduler
+- `C:\Program Files\LSS Backup\` (binary directory, removed from system PATH)
 - `C:\ProgramData\LSS Backup\` (config, jobs, logs, state)
 
-Go and restic are **not** uninstalled — only the LSS Backup CLI binary and its data directories are removed.
+Go and restic are **not** uninstalled.
 
 ---
 
@@ -134,9 +175,11 @@ Go and restic are **not** uninstalled — only the LSS Backup CLI binary and its
    ```sh
    ./uninstall-cli.sh
    ```
-3. You will be prompted to optionally create a zip backup of all LSS Backup data before files are removed.
+
+You will be prompted to optionally create a zip backup before anything is removed.
 
 **What is removed:**
+- Daemon stopped and unloaded from launchd (`/Library/LaunchDaemons/com.lssolutions.lss-backup.plist` removed)
 - `/usr/local/bin/lss-backup-cli`
 - `/Library/Application Support/LSS Backup/` (config, jobs, state)
 - `/Library/Logs/LSS Backup/`
@@ -149,9 +192,11 @@ Go and restic are **not** uninstalled — only the LSS Backup CLI binary and its
    ```sh
    sudo ./uninstall-cli.sh
    ```
-2. You will be prompted to optionally create a zip backup of all LSS Backup data before files are removed.
+
+You will be prompted to optionally create a zip backup before anything is removed.
 
 **What is removed:**
+- Daemon stopped, disabled, and unit file removed (`systemctl daemon-reload` run afterwards)
 - `/usr/local/bin/lss-backup-cli`
 - `/etc/lss-backup/` (config, jobs)
 - `/var/log/lss-backup/`
@@ -167,3 +212,4 @@ Go and restic are **not** uninstalled — only the LSS Backup CLI binary and its
 | Config / Jobs | `C:\ProgramData\LSS Backup\` | `/Library/Application Support/LSS Backup/` | `/etc/lss-backup/` |
 | Logs | `C:\ProgramData\LSS Backup\logs\` | `/Library/Logs/LSS Backup/` | `/var/log/lss-backup/` |
 | State / Manifest | `C:\ProgramData\LSS Backup\state\` | `/Library/Application Support/LSS Backup/state/` | `/var/lib/lss-backup/` |
+| Daemon log | Task Scheduler history | `/Library/Logs/LSS Backup/daemon.log` | `journalctl -u lss-backup` |

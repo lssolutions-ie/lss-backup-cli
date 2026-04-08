@@ -19,7 +19,8 @@ type Summary struct {
 	Program string
 	Name    string
 	JobDir  string
-	LastRun *runner.RunResult // nil if the job has never been run
+	LastRun *runner.RunResult  // nil if the job has never been run
+	NextRun *runner.NextRunResult // nil if manual or daemon has not scheduled yet
 }
 
 type CreateInput struct {
@@ -61,13 +62,46 @@ func List(paths app.Paths) ([]Summary, error) {
 		}
 
 		lastRun, _ := runner.LoadLastRun(jobDir)
+		nextRun, _ := runner.LoadNextRun(jobDir)
 		out = append(out, Summary{
 			ID:      job.ID,
 			Name:    job.Name,
 			Program: job.Program,
 			JobDir:  job.JobDir,
 			LastRun: lastRun,
+			NextRun: nextRun,
 		})
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID
+	})
+
+	return out, nil
+}
+
+// LoadAll loads every job from the jobs directory.
+// Jobs that fail to parse are silently skipped (same behaviour as List).
+func LoadAll(paths app.Paths) ([]config.Job, error) {
+	entries, err := os.ReadDir(paths.JobsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read jobs directory: %w", err)
+	}
+
+	var out []config.Job
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		jobDir := filepath.Join(paths.JobsDir, entry.Name())
+		job, err := config.LoadJob(jobDir)
+		if err != nil {
+			continue
+		}
+		out = append(out, job)
 	}
 
 	sort.Slice(out, func(i, j int) bool {
@@ -177,11 +211,7 @@ func Create(paths app.Paths, input CreateInput) (config.Job, error) {
 	if strings.TrimSpace(input.Retention.Mode) == "" {
 		input.Retention.Mode = "none"
 	}
-	if strings.TrimSpace(input.Notify.EmailMode) == "" {
-		input.Notify.EmailMode = "disabled"
-	}
-
-	jobDir := filepath.Join(paths.JobsDir, input.ID)
+jobDir := filepath.Join(paths.JobsDir, input.ID)
 	if _, err := os.Stat(jobDir); err == nil {
 		return config.Job{}, fmt.Errorf("job %q already exists", input.ID)
 	} else if !os.IsNotExist(err) {

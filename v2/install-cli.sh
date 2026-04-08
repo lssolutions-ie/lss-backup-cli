@@ -212,4 +212,71 @@ if [ "$OS_NAME" = "Linux" ] || [ "$OS_NAME" = "Darwin" ]; then
 fi
 
 echo "Installed lss-backup-cli to ${TARGET}"
+
+# Install and start the daemon service.
+case "$OS_NAME" in
+	Linux)
+		SYSTEMD_SERVICE="/etc/systemd/system/lss-backup.service"
+		TMP_UNIT="$(mktemp "${TMPDIR:-/tmp}/lss-backup.service.XXXXXX")"
+		cat > "${TMP_UNIT}" <<'UNIT'
+[Unit]
+Description=LSS Backup Daemon
+Documentation=https://github.com/lssolutions-ie/lss-backup-cli
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/lss-backup-cli daemon
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lss-backup
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+		sudo install -m 644 "${TMP_UNIT}" "${SYSTEMD_SERVICE}"
+		rm -f "${TMP_UNIT}"
+		sudo systemctl daemon-reload
+		sudo systemctl enable lss-backup
+		sudo systemctl restart lss-backup
+		echo "Daemon service enabled and started (systemd)"
+		;;
+	Darwin)
+		PLIST_PATH="/Library/LaunchDaemons/com.lssolutions.lss-backup.plist"
+		TMP_PLIST="$(mktemp "${TMPDIR:-/tmp}/lss-backup.plist.XXXXXX")"
+		cat > "${TMP_PLIST}" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.lssolutions.lss-backup</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/local/bin/lss-backup-cli</string>
+		<string>daemon</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>${LOGS_DIR}/daemon.log</string>
+	<key>StandardErrorPath</key>
+	<string>${LOGS_DIR}/daemon.log</string>
+</dict>
+</plist>
+PLIST
+		# Unload any running instance before replacing the plist (reinstall).
+		sudo launchctl bootout system "${PLIST_PATH}" 2>/dev/null || true
+		sudo install -m 644 "${TMP_PLIST}" "${PLIST_PATH}"
+		rm -f "${TMP_PLIST}"
+		sudo launchctl bootstrap system "${PLIST_PATH}"
+		echo "Daemon service enabled and started (launchd)"
+		;;
+esac
+
 echo "Install manifest written to ${MANIFEST_PATH}"

@@ -53,7 +53,8 @@ function Safe-Remove {
     }
 }
 
-$BinPath = "C:\Program Files\LSS Backup\lss-backup-cli.exe"
+$BinDir  = "C:\Program Files\LSS Backup"
+$BinPath = Join-Path $BinDir "lss-backup-cli.exe"
 $ConfigDir = "C:\ProgramData\LSS Backup"
 $LogsDir = "C:\ProgramData\LSS Backup\logs"
 $StateDir = "C:\ProgramData\LSS Backup\state"
@@ -95,7 +96,21 @@ if (Prompt-YesNo "Do you want to back up LSS Backup data before uninstalling?") 
     Write-Host "Backup created at: $zipPath"
 }
 
-Safe-Remove $BinPath
+# Stop and remove the daemon task before removing files.
+$TaskPath = "\LSS Backup\"
+$TaskName = "LSS Backup Daemon"
+if (Get-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction SilentlyContinue) {
+    Stop-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -Confirm:$false
+    Write-Host "Daemon task stopped and removed (Task Scheduler)"
+}
+
+# Remove the binary directory and clean it from the system PATH.
+$machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+$cleanedPath = ($machinePath -split ";") | Where-Object { $_.TrimEnd("\") -ne $BinDir.TrimEnd("\") }
+[System.Environment]::SetEnvironmentVariable("Path", ($cleanedPath -join ";"), "Machine")
+
+Safe-Remove $BinDir
 Safe-Remove $ConfigDir
 Safe-Remove $LogsDir
 

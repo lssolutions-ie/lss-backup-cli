@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/retention"
 )
 
 type Engine interface {
@@ -64,11 +65,38 @@ func (e ResticEngine) Run(job config.Job, output io.Writer) error {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 3 {
 			fmt.Fprintln(output, "Warning: restic exited with code 3 — some files could not be read (locked or permission denied). Backup may be incomplete.")
-			return nil
+		} else {
+			return fmt.Errorf("restic backup failed: %w", err)
 		}
-		return fmt.Errorf("restic backup failed: %w", err)
 	}
 
+	if err := runForget(job, output); err != nil {
+		// A failed forget is a warning, not a backup failure — data was already saved.
+		fmt.Fprintf(output, "Warning: retention cleanup failed: %v\n", err)
+	}
+
+	return nil
+}
+
+func runForget(job config.Job, output io.Writer) error {
+	flags := retention.ForgetFlags(job.Retention)
+	if len(flags) == 0 {
+		return nil
+	}
+
+	fmt.Fprintln(output, "Running retention cleanup (restic forget --prune)...")
+	args := append([]string{"-r", job.Destination.Path, "forget", "--prune"}, flags...)
+	cmd := exec.Command("restic", args...)
+	cmd.Stdout = output
+	cmd.Stderr = output
+	cmd.Env = append(os.Environ(),
+		"RESTIC_PASSWORD="+job.Secrets.ResticPassword,
+		"AWS_ACCESS_KEY_ID="+job.Secrets.AWSAccessKeyID,
+		"AWS_SECRET_ACCESS_KEY="+job.Secrets.AWSSecretAccessKey,
+	)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("restic forget: %w", err)
+	}
 	return nil
 }
 

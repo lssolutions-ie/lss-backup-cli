@@ -27,8 +27,8 @@ mode = "none"
 
 [notifications]
 healthchecks_enabled = false
-email_mode = "disabled"
-email_to = ""
+healthchecks_domain = ""
+healthchecks_id = ""
 `
 
 	job, err := ParseJobTOML(raw)

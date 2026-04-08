@@ -9,6 +9,50 @@ import (
 )
 
 const lastRunFile = "last_run.json"
+const nextRunFile = "next_run.json"
+
+// NextRunResult records when the daemon last scheduled a job and when it is
+// next due to run. Written by the daemon; read by the CLI job list.
+// A stale or missing file for a scheduled job indicates the daemon is not running.
+type NextRunResult struct {
+	NextRun   time.Time `json:"next_run"`
+	UpdatedAt time.Time `json:"updated_at"` // when the daemon last wrote this file
+}
+
+// WriteNextRun persists the next scheduled run time to {jobDir}/next_run.json.
+func WriteNextRun(jobDir string, next time.Time) error {
+	result := NextRunResult{
+		NextRun:   next,
+		UpdatedAt: time.Now().UTC(),
+	}
+	data, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal next run: %w", err)
+	}
+	path := filepath.Join(jobDir, nextRunFile)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write next run: %w", err)
+	}
+	return nil
+}
+
+// LoadNextRun reads {jobDir}/next_run.json. Returns nil if the file does not
+// exist (daemon has never scheduled this job or job has a manual schedule).
+func LoadNextRun(jobDir string) (*NextRunResult, error) {
+	path := filepath.Join(jobDir, nextRunFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read next run: %w", err)
+	}
+	var result NextRunResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("parse next run: %w", err)
+	}
+	return &result, nil
+}
 
 // RunResult holds the outcome of a single backup job execution.
 type RunResult struct {

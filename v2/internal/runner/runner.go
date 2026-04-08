@@ -10,6 +10,7 @@ import (
 
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/engines"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/healthchecks"
 )
 
 type Service struct {
@@ -44,6 +45,11 @@ func (s Service) Run(job config.Job) (RunResult, error) {
 	fmt.Fprintf(writer, "Source: %s\n", job.Source.Path)
 	fmt.Fprintf(writer, "Destination: %s\n", job.Destination.Path)
 
+	hc, hcEnabled := healthchecksConfig(job)
+	if hcEnabled {
+		healthchecks.PingStart(hc, writer)
+	}
+
 	runErr := engine.Run(job, writer)
 	finishedAt := time.Now()
 
@@ -58,10 +64,16 @@ func (s Service) Run(job config.Job) (RunResult, error) {
 		result.Status = "failure"
 		result.ErrorMessage = runErr.Error()
 		fmt.Fprintf(writer, "Job failed: %v\n", runErr)
+		if hcEnabled {
+			healthchecks.PingFail(hc, runErr.Error(), writer)
+		}
 	} else {
 		result.Status = "success"
 		fmt.Fprintf(writer, "Job completed successfully.\n")
 		fmt.Fprintf(writer, "Log file: %s\n", logFile)
+		if hcEnabled {
+			healthchecks.PingSuccess(hc, writer)
+		}
 	}
 
 	if err := WriteLastRun(job.JobDir, result); err != nil {
@@ -134,6 +146,22 @@ func validateSupportedSlice(job config.Job) error {
 		return fmt.Errorf("source path must be a directory for the first execution slice")
 	}
 	return nil
+}
+
+// healthchecksConfig returns the healthchecks config and whether it is usable.
+// Returns false if monitoring is disabled or domain/ID are not set.
+func healthchecksConfig(job config.Job) (healthchecks.Config, bool) {
+	n := job.Notifications
+	if !n.HealthchecksEnabled {
+		return healthchecks.Config{}, false
+	}
+	if strings.TrimSpace(n.HealthchecksDomain) == "" || strings.TrimSpace(n.HealthchecksID) == "" {
+		return healthchecks.Config{}, false
+	}
+	return healthchecks.Config{
+		Domain: n.HealthchecksDomain,
+		ID:     n.HealthchecksID,
+	}, true
 }
 
 func prepareLog(job config.Job) (string, io.Writer, func(), error) {

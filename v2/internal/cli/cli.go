@@ -10,13 +10,17 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/app"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/daemon"
+	healthchecksPkg "github.com/lssolutions-ie/lss-backup-cli/v2/internal/healthchecks"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/installmanifest"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/jobs"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/legacyimport"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/platform"
+	retentionPkg "github.com/lssolutions-ie/lss-backup-cli/v2/internal/retention"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/runner"
 	cronSchedule "github.com/lssolutions-ie/lss-backup-cli/v2/internal/schedule"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/ui"
@@ -41,6 +45,9 @@ func Run(args []string) error {
 	if len(args) > 0 {
 		if len(args) == 1 && args[0] == "--uninstall" {
 			return uninstall.Run()
+		}
+		if len(args) == 1 && args[0] == "daemon" {
+			return daemon.Run(paths)
 		}
 		if args[0] == "run" && len(args) == 2 {
 			return runJobByID(paths, args[1])
@@ -304,16 +311,16 @@ func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Promp
 		changed = true
 	}
 
-	if ok, err := prompter.Confirm(fmt.Sprintf("Retention [%q] — change?", job.Retention.Mode)); err != nil {
+	if ok, err := prompter.Confirm(fmt.Sprintf("Retention [%s] — change?", retentionPkg.Describe(job.Retention))); err != nil {
 		return err
 	} else if ok {
-		if job.Retention, err = promptRetention(prompter); err != nil {
+		if job.Retention, err = promptRetention(prompter, job.Program, job.Schedule); err != nil {
 			return err
 		}
 		changed = true
 	}
 
-	if ok, err := prompter.Confirm(fmt.Sprintf("Notifications [email=%s healthchecks=%t] — change?", job.Notifications.EmailMode, job.Notifications.HealthchecksEnabled)); err != nil {
+	if ok, err := prompter.Confirm(fmt.Sprintf("Notifications [healthchecks=%t] — change?", job.Notifications.HealthchecksEnabled)); err != nil {
 		return err
 	} else if ok {
 		if job.Notifications, err = promptNotifications(prompter); err != nil {
@@ -433,7 +440,7 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 		return err
 	}
 
-	retention, err := promptRetention(prompter)
+	retention, err := promptRetention(prompter, program, schedule)
 	if err != nil {
 		return err
 	}
@@ -714,7 +721,9 @@ func printJobs(paths app.Paths) error {
 	}
 
 	for _, item := range items {
-		fmt.Printf("%s | %s | %s | %s\n", item.ID, item.Program, item.Name, formatLastRun(item.LastRun))
+		fmt.Printf("%s | %s | %s\n", item.ID, item.Program, item.Name)
+		fmt.Printf("  Last run: %s\n", formatLastRun(item.LastRun))
+		fmt.Printf("  Next run: %s\n", formatNextRun(item.NextRun))
 	}
 	return nil
 }
@@ -814,11 +823,17 @@ func configureNotifications(prompter ui.Prompter, job config.Job) error {
 }
 
 func configureRetention(prompter ui.Prompter, job config.Job) error {
-	retention, err := promptRetention(prompter)
+	fmt.Println("")
+	fmt.Println("Configure Retention")
+	fmt.Println("-------------------")
+	fmt.Printf("Job: %s | %s | %s\n\n", job.ID, job.Program, job.Name)
+	fmt.Printf("Current policy: %s\n\n", retentionPkg.Describe(job.Retention))
+
+	r, err := promptRetention(prompter, job.Program, job.Schedule)
 	if err != nil {
 		return err
 	}
-	job.Retention = retention
+	job.Retention = r
 	if err := jobs.Save(job); err != nil {
 		return err
 	}
@@ -963,37 +978,208 @@ func promptSchedule(prompter ui.Prompter) (config.Schedule, error) {
 }
 
 func promptNotifications(prompter ui.Prompter) (config.Notifications, error) {
-	_, healthchecks, err := prompter.Select("Enable Healthchecks monitoring?", []string{"No", "Yes"})
+	fmt.Println("")
+	fmt.Println("Notifications")
+	fmt.Println("-------------")
+
+	var notify config.Notifications
+
+	// --- Healthchecks ---
+	_, hcChoice, err := prompter.Select("Enable Healthchecks.io monitoring?", []string{"No", "Yes"})
 	if err != nil {
 		return config.Notifications{}, err
 	}
 
-	_, emailModeChoice, err := prompter.Select("Email notifications", []string{"disabled", "fail-only", "success-and-failure"})
-	if err != nil {
-		return config.Notifications{}, err
-	}
+	if hcChoice == "Yes" {
+		notify.HealthchecksEnabled = true
 
-	emailTo := ""
-	if emailModeChoice != "disabled" {
-		emailTo, err = prompter.Ask("Notification email address", validateNonEmpty("notification email address"))
+		fmt.Printf("Healthchecks domain (press Enter for %s):\n", healthchecksPkg.DefaultDomain)
+		domain, err := prompter.Ask("Domain", nil)
 		if err != nil {
 			return config.Notifications{}, err
 		}
+		if strings.TrimSpace(domain) == "" {
+			domain = healthchecksPkg.DefaultDomain
+		}
+		notify.HealthchecksDomain = strings.TrimRight(domain, "/")
+
+		id, err := prompter.Ask("Ping ID (UUID from your healthchecks dashboard)", validateNonEmpty("ping ID"))
+		if err != nil {
+			return config.Notifications{}, err
+		}
+		notify.HealthchecksID = strings.TrimSpace(id)
+
+		fmt.Printf("  Ping URL: %s/ping/%s\n", notify.HealthchecksDomain, notify.HealthchecksID)
 	}
 
-	return config.Notifications{
-		HealthchecksEnabled: healthchecks == "Yes",
-		EmailMode:           emailModeChoice,
-		EmailTo:             emailTo,
-	}, nil
+	return notify, nil
 }
 
-func promptRetention(prompter ui.Prompter) (config.Retention, error) {
-	_, retentionMode, err := prompter.Select("Retention mode", []string{"none", "keep-last-only", "full"})
+func promptRetention(prompter ui.Prompter, program string, sched config.Schedule) (config.Retention, error) {
+	fmt.Println("")
+	fmt.Println("Retention Policy")
+	fmt.Println("----------------")
+
+	if program != "restic" {
+		fmt.Println("Retention policies apply to restic only.")
+		fmt.Println("rsync mirrors the source exactly — deleted source files are removed from the destination on the next run.")
+		return config.Retention{Mode: "none"}, nil
+	}
+
+	_, choice, err := prompter.Select("How should old backups be managed?", []string{
+		"Keep everything            — never delete, repository grows over time",
+		"Keep last N backups        — always keep exactly N snapshots",
+		"Smart tiered (recommended) — daily, weekly, and monthly layers",
+	})
 	if err != nil {
 		return config.Retention{}, err
 	}
-	return config.Retention{Mode: retentionMode}, nil
+
+	switch {
+	case strings.HasPrefix(choice, "Keep everything"):
+		r := config.Retention{Mode: "none"}
+		fmt.Println("")
+		fmt.Println(retentionPkg.Describe(r))
+		return r, nil
+
+	case strings.HasPrefix(choice, "Keep last N"):
+		return promptKeepLast(prompter)
+
+	case strings.HasPrefix(choice, "Smart tiered"):
+		return promptTiered(prompter, sched)
+	}
+
+	return config.Retention{Mode: "none"}, nil
+}
+
+func promptKeepLast(prompter ui.Prompter) (config.Retention, error) {
+	fmt.Println("")
+	fmt.Println("How many backups to keep?")
+	fmt.Println("  7  = one week of daily backups")
+	fmt.Println("  14 = two weeks of daily backups")
+	fmt.Println("  30 = one month of daily backups")
+
+	raw, err := prompter.Ask("Number of backups to keep", func(s string) error {
+		if n, err := strconv.Atoi(s); err != nil || n < 1 {
+			return fmt.Errorf("enter a whole number greater than 0")
+		}
+		return nil
+	})
+	if err != nil {
+		return config.Retention{}, err
+	}
+	n, _ := strconv.Atoi(raw)
+	r := config.Retention{Mode: "keep-last", KeepLast: n}
+	fmt.Println("")
+	fmt.Println(retentionPkg.Describe(r))
+	return r, nil
+}
+
+func promptKeepWithin(prompter ui.Prompter) (config.Retention, error) {
+	fmt.Println("")
+	_, unit, err := prompter.Select("Keep backups from the last...", []string{
+		"Days", "Weeks", "Months", "Years",
+	})
+	if err != nil {
+		return config.Retention{}, err
+	}
+
+	unitSuffix := map[string]string{
+		"Days": "d", "Weeks": "w", "Months": "m", "Years": "y",
+	}[unit]
+
+	raw, err := prompter.Ask(fmt.Sprintf("How many %s?", strings.ToLower(unit)), func(s string) error {
+		if n, err := strconv.Atoi(s); err != nil || n < 1 {
+			return fmt.Errorf("enter a whole number greater than 0")
+		}
+		return nil
+	})
+	if err != nil {
+		return config.Retention{}, err
+	}
+	r := config.Retention{Mode: "keep-within", KeepWithin: raw + unitSuffix}
+	fmt.Println("")
+	fmt.Println(retentionPkg.Describe(r))
+	return r, nil
+}
+
+func promptTiered(prompter ui.Prompter, sched config.Schedule) (config.Retention, error) {
+	fmt.Println("")
+	fmt.Println("Set how many snapshots to keep at each granularity.")
+	fmt.Println("Enter 0 to skip a tier.")
+	fmt.Println("")
+
+	askTier := func(label, hint string) (int, error) {
+		fmt.Println(hint)
+		raw, err := prompter.Ask(label, func(s string) error {
+			if _, err := strconv.Atoi(s); err != nil {
+				return fmt.Errorf("enter a whole number (0 to skip)")
+			}
+			return nil
+		})
+		if err != nil {
+			return 0, err
+		}
+		n, _ := strconv.Atoi(raw)
+		return n, nil
+	}
+
+	daily, err := askTier("Daily snapshots to keep",
+		"  One restore point per day — good for recovering recent mistakes")
+	if err != nil {
+		return config.Retention{}, err
+	}
+
+	weekly, err := askTier("Weekly snapshots to keep",
+		"  One restore point per week — covers the past N weeks")
+	if err != nil {
+		return config.Retention{}, err
+	}
+
+	monthly, err := askTier("Monthly snapshots to keep",
+		"  One restore point per month — covers the past N months")
+	if err != nil {
+		return config.Retention{}, err
+	}
+
+	yearly, err := askTier("Yearly snapshots to keep",
+		"  One restore point per year — long-term archive")
+	if err != nil {
+		return config.Retention{}, err
+	}
+
+	r := config.Retention{
+		Mode:        "tiered",
+		KeepDaily:   daily,
+		KeepWeekly:  weekly,
+		KeepMonthly: monthly,
+		KeepYearly:  yearly,
+	}
+
+	// Only surface the high-frequency window question when the schedule warrants it.
+	if cronSchedule.IsHighFrequency(sched) {
+		fmt.Println("")
+		fmt.Println("Your job runs more than once per day.")
+		fmt.Println("Without a granularity window, all snapshots from a given day collapse")
+		fmt.Println("to one at end of day — you lose the ability to restore to a specific")
+		fmt.Println("point within that day.")
+		fmt.Println("")
+		fmt.Println("You can preserve every snapshot for a short window before thinning begins.")
+		fmt.Println("Example: 2 keeps every individual snapshot from the last 2 days.")
+
+		raw, err := askTier("Keep full granularity for the last N days (0 to skip)",
+			"  0 = thinning starts immediately, all sub-daily snapshots beyond today are collapsed")
+		if err != nil {
+			return config.Retention{}, err
+		}
+		if raw > 0 {
+			r.KeepWithin = fmt.Sprintf("%dd", raw)
+		}
+	}
+
+	fmt.Println("")
+	fmt.Println(retentionPkg.Describe(r))
+	return r, nil
 }
 
 func validateJobID(paths app.Paths) func(string) error {
@@ -1096,6 +1282,22 @@ func formatLastRun(r *runner.RunResult) string {
 		return "never run"
 	}
 	return fmt.Sprintf("%s %s", r.Status, r.FinishedAt.Local().Format("2006-01-02 15:04"))
+}
+
+func formatNextRun(r *runner.NextRunResult) string {
+	if r == nil {
+		return "not scheduled (manual or daemon not started)"
+	}
+	now := time.Now()
+	due := r.NextRun.Local()
+	if r.NextRun.Before(now) {
+		overdue := now.Sub(r.NextRun).Round(time.Minute)
+		return fmt.Sprintf("OVERDUE by %s — daemon may not be running (last updated %s)",
+			overdue,
+			r.UpdatedAt.Local().Format("2006-01-02 15:04"),
+		)
+	}
+	return fmt.Sprintf("%s (in %s)", due.Format("2006-01-02 15:04"), time.Until(r.NextRun).Round(time.Minute))
 }
 
 func validateAbsolutePath(value string) error {
