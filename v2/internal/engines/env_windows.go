@@ -94,6 +94,51 @@ func lookPath(name string) (string, error) {
 			return candidate, nil
 		}
 	}
+
+	// Last resort: scan all user profiles for winget-installed binaries.
+	// The daemon runs as SYSTEM so %USERPROFILE% points to the system profile,
+	// not the user who installed the tool via winget.
+	usersDir := `C:\Users`
+	if userEntries, err := os.ReadDir(usersDir); err == nil {
+		for _, userEntry := range userEntries {
+			if !userEntry.IsDir() {
+				continue
+			}
+			profileDir := filepath.Join(usersDir, userEntry.Name())
+
+			// Check winget app execution aliases.
+			candidate := filepath.Join(profileDir, `AppData\Local\Microsoft\WindowsApps`, name+".exe")
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate, nil
+			}
+
+			// Check winget package directories (actual binaries, not aliases).
+			packagesDir := filepath.Join(profileDir, `AppData\Local\Microsoft\WinGet\Packages`)
+			if pkgEntries, err := os.ReadDir(packagesDir); err == nil {
+				for _, pkgEntry := range pkgEntries {
+					if !pkgEntry.IsDir() || !strings.HasPrefix(strings.ToLower(pkgEntry.Name()), strings.ToLower(name)) {
+						continue
+					}
+					// Walk one level deeper for versioned subdirectories.
+					pkgDir := filepath.Join(packagesDir, pkgEntry.Name())
+					if verEntries, err := os.ReadDir(pkgDir); err == nil {
+						for _, verEntry := range verEntries {
+							candidate := filepath.Join(pkgDir, verEntry.Name(), name+".exe")
+							if _, err := os.Stat(candidate); err == nil {
+								return candidate, nil
+							}
+							// Also check directly in the package dir.
+							candidate = filepath.Join(pkgDir, name+".exe")
+							if _, err := os.Stat(candidate); err == nil {
+								return candidate, nil
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	return "", fmt.Errorf("%s not found. searched:\n%s", name, strings.Join(searched, "\n"))
 }
 
