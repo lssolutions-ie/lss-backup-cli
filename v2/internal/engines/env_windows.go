@@ -60,13 +60,18 @@ func readRegistryPath(root registry.Key, subKey string) string {
 //
 // Returns the full absolute path to the binary.
 func lookPath(name string) (string, error) {
+	var searched []string
+
 	if p, err := exec.LookPath(name); err == nil {
 		return p, nil
 	}
+	searched = append(searched, "process PATH: "+os.Getenv("PATH"))
 
 	// Check the directory of the running executable.
 	if exePath, err := os.Executable(); err == nil {
-		candidate := filepath.Join(filepath.Dir(exePath), name+".exe")
+		dir := filepath.Dir(exePath)
+		candidate := filepath.Join(dir, name+".exe")
+		searched = append(searched, "exe dir: "+dir)
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate, nil
 		}
@@ -76,6 +81,8 @@ func lookPath(name string) (string, error) {
 	systemPath := readRegistryPath(registry.LOCAL_MACHINE,
 		`SYSTEM\CurrentControlSet\Control\Session Manager\Environment`)
 	userPath := readRegistryPath(registry.CURRENT_USER, `Environment`)
+	searched = append(searched, "registry system PATH: "+systemPath)
+	searched = append(searched, "registry user PATH: "+userPath)
 
 	for _, segment := range strings.Split(systemPath+";"+userPath, ";") {
 		segment = strings.TrimSpace(segment)
@@ -87,7 +94,7 @@ func lookPath(name string) (string, error) {
 			return candidate, nil
 		}
 	}
-	return "", fmt.Errorf("%s is not installed or not on PATH", name)
+	return "", fmt.Errorf("%s not found. searched:\n%s", name, strings.Join(searched, "\n"))
 }
 
 // mergePaths joins path segments, deduplicating case-insensitively.
