@@ -164,6 +164,16 @@ func healthchecksConfig(job config.Job) (healthchecks.Config, bool) {
 	}, true
 }
 
+// bestEffortWriter wraps an io.Writer and discards any write errors.
+// Used for os.Stdout in the MultiWriter so that a missing or closed console
+// (e.g. Windows daemon with no terminal) never prevents writes to the log file.
+type bestEffortWriter struct{ w io.Writer }
+
+func (b bestEffortWriter) Write(p []byte) (int, error) {
+	b.w.Write(p) //nolint:errcheck
+	return len(p), nil
+}
+
 func prepareLog(job config.Job) (string, io.Writer, func(), error) {
 	logDir := filepath.Join(job.JobDir, "logs")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
@@ -176,7 +186,7 @@ func prepareLog(job config.Job) (string, io.Writer, func(), error) {
 		return "", nil, nil, fmt.Errorf("create log file: %w", err)
 	}
 
-	writer := io.MultiWriter(os.Stdout, file)
+	writer := io.MultiWriter(bestEffortWriter{os.Stdout}, file)
 	closeFn := func() {
 		_ = file.Close()
 	}
