@@ -81,7 +81,9 @@ func runMenu(paths app.Paths) error {
 			return err
 		}
 
-		activitylog.Log(paths.LogsDir, "menu: "+choice)
+		if choice != "" {
+			activitylog.Log(paths.LogsDir, "menu: "+choice)
+		}
 
 		switch choice {
 		case "Create Backup":
@@ -518,7 +520,9 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			return err
 		}
 
-		activitylog.Log(paths.LogsDir, fmt.Sprintf("manage %s (%s): %s", job.ID, job.Name, action))
+		if action != "" {
+			activitylog.Log(paths.LogsDir, fmt.Sprintf("manage %s (%s): %s", job.ID, job.Name, action))
+		}
 
 		switch action {
 		case "Run Backup Now":
@@ -627,7 +631,9 @@ func runSettingsWizard(paths app.Paths, prompter ui.Prompter) error {
 			return err
 		}
 
-		activitylog.Log(paths.LogsDir, "settings: "+action)
+		if action != "" {
+			activitylog.Log(paths.LogsDir, "settings: "+action)
+		}
 
 		switch action {
 		case "Manage Notification Channels":
@@ -982,7 +988,7 @@ func selectJob(paths app.Paths, prompter ui.Prompter) (config.Job, error) {
 	if err != nil {
 		return config.Job{}, err
 	}
-	if selected == selectJobBack {
+	if selected == selectJobBack || selected == "" {
 		return config.Job{}, nil
 	}
 	return jobs.Load(paths, lookup[selected])

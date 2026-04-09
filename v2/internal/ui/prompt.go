@@ -97,7 +97,10 @@ func (p Prompter) Select(title string, options []string) (int, string, error) {
 			fmt.Printf("%d. %s\n", i+1, option)
 		}
 
-		answer, err := p.Ask("Select option number", func(value string) error {
+		answer, err := p.Ask("Select option number (Enter to go back)", func(value string) error {
+			if strings.TrimSpace(value) == "" {
+				return nil
+			}
 			number, err := strconv.Atoi(value)
 			if err != nil {
 				return fmt.Errorf("enter a number")
@@ -108,7 +111,11 @@ func (p Prompter) Select(title string, options []string) (int, string, error) {
 			return nil
 		})
 		if err != nil {
-			return 0, "", err
+			return -1, "", err
+		}
+
+		if strings.TrimSpace(answer) == "" {
+			return -1, "", nil
 		}
 
 		index, _ := strconv.Atoi(answer)
