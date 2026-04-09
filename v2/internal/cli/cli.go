@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/activitylog"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/app"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/daemon"
@@ -105,7 +106,7 @@ func runMenu(paths app.Paths) error {
 	}
 }
 
-func runCheckForUpdates(prompter ui.Prompter) error {
+func runCheckForUpdates(paths app.Paths, prompter ui.Prompter) error {
 	fmt.Println("")
 	fmt.Println("Check For Updates")
 	fmt.Println("-----------------")
@@ -141,6 +142,7 @@ func runCheckForUpdates(prompter ui.Prompter) error {
 		return err
 	}
 
+	activitylog.Log(paths.LogsDir, fmt.Sprintf("update installed: %s", result.LatestVersion))
 	fmt.Println("Update installed successfully.")
 	fmt.Println("Please restart LSS Backup CLI to use the new version.")
 	os.Exit(0)
@@ -452,6 +454,7 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 		return err
 	}
 
+	activitylog.Log(paths.LogsDir, fmt.Sprintf("job created: %s (%s)", job.ID, job.Name))
 	fmt.Println("")
 	fmt.Println("Backup job created successfully.")
 	fmt.Println("Job ID:", job.ID)
@@ -510,10 +513,16 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 		case "Run Backup Now":
 			if err := runJobByID(paths, job.ID); err != nil {
 				fmt.Println("Run failed:", err)
+				activitylog.Log(paths.LogsDir, fmt.Sprintf("manual run failed: %s (%s) — %v", job.ID, job.Name, err))
+			} else {
+				activitylog.Log(paths.LogsDir, fmt.Sprintf("manual run completed: %s (%s)", job.ID, job.Name))
 			}
 		case "Restore Backup":
 			if err := runRestoreWizard(paths, prompter, job.ID); err != nil {
 				fmt.Println("Restore failed:", err)
+				activitylog.Log(paths.LogsDir, fmt.Sprintf("restore failed: %s (%s) — %v", job.ID, job.Name, err))
+			} else {
+				activitylog.Log(paths.LogsDir, fmt.Sprintf("restore completed: %s (%s)", job.ID, job.Name))
 			}
 		case "List Snapshots":
 			if err := runListSnapshots(paths, job.ID); err != nil {
@@ -522,6 +531,8 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 		case "Edit Backup":
 			if err := runReconfigureBackupWizard(paths, job.ID, prompter); err != nil {
 				fmt.Println("Edit failed:", err)
+			} else {
+				activitylog.Log(paths.LogsDir, fmt.Sprintf("job edited: %s (%s)", job.ID, job.Name))
 			}
 		case "Configure Schedule":
 			updatedJob, err := jobs.Load(paths, job.ID)
@@ -531,6 +542,8 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			}
 			if err := configureSchedule(prompter, updatedJob); err != nil {
 				fmt.Println("Schedule update failed:", err)
+			} else {
+				activitylog.Log(paths.LogsDir, fmt.Sprintf("schedule updated: %s (%s)", job.ID, job.Name))
 			}
 		case "Configure Retention":
 			updatedJob, err := jobs.Load(paths, job.ID)
@@ -540,6 +553,8 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			}
 			if err := configureRetention(prompter, updatedJob); err != nil {
 				fmt.Println("Retention update failed:", err)
+			} else {
+				activitylog.Log(paths.LogsDir, fmt.Sprintf("retention updated: %s (%s)", job.ID, job.Name))
 			}
 		case "Configure Notifications":
 			updatedJob, err := jobs.Load(paths, job.ID)
@@ -549,6 +564,8 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			}
 			if err := configureNotifications(prompter, updatedJob); err != nil {
 				fmt.Println("Notification update failed:", err)
+			} else {
+				activitylog.Log(paths.LogsDir, fmt.Sprintf("notifications updated: %s (%s)", job.ID, job.Name))
 			}
 		case "Show Job Configuration":
 			if err := showJob(paths, job.ID); err != nil {
@@ -568,6 +585,7 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 				fmt.Println("Export failed:", err)
 				continue
 			}
+			activitylog.Log(paths.LogsDir, fmt.Sprintf("job exported: %s (%s) → %s", job.ID, job.Name, targetDir))
 			fmt.Printf("Exported job %q to %s\n", job.ID, targetDir)
 			fmt.Println("Files: job.toml, secrets.env")
 			fmt.Println("Keep secrets.env safe — it contains your backup passwords.")
@@ -576,6 +594,7 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 				fmt.Println("Delete failed:", err)
 				continue
 			}
+			activitylog.Log(paths.LogsDir, fmt.Sprintf("job deleted: %s (%s)", job.ID, job.Name))
 			return nil
 		case "Back To Main Menu":
 			return nil
@@ -607,7 +626,7 @@ func runSettingsWizard(paths app.Paths, prompter ui.Prompter) error {
 			fmt.Println("Configure Management Console is a skeleton for now.")
 			fmt.Println("Final behavior should configure connection to a central server that observes and tracks backups.")
 		case "Check For Updates":
-			if err := runCheckForUpdates(prompter); err != nil {
+			if err := runCheckForUpdates(paths, prompter); err != nil {
 				fmt.Println("Update check failed:", err)
 			}
 		case "Back To Main Menu":
@@ -673,6 +692,7 @@ func runImportV2(paths app.Paths, prompter ui.Prompter, jobFile string) error {
 		return err
 	}
 
+	activitylog.Log(paths.LogsDir, fmt.Sprintf("job imported (v2): %s (%s)", job.ID, job.Name))
 	fmt.Println("Imported backup job:", job.ID)
 	return nil
 }
@@ -713,6 +733,7 @@ func runImportLegacy(paths app.Paths, prompter ui.Prompter, envFile string) erro
 		return err
 	}
 
+	activitylog.Log(paths.LogsDir, fmt.Sprintf("job imported (v1): %s (%s)", job.ID, job.Name))
 	fmt.Println("")
 	fmt.Println("Backup job imported from v1 config.")
 	fmt.Println("Job ID:", job.ID)

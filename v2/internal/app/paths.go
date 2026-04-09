@@ -11,6 +11,7 @@ import (
 type Paths struct {
 	RootDir  string
 	JobsDir  string
+	LogsDir  string
 	StateDir string
 	DocsDir  string
 }
@@ -26,6 +27,7 @@ func DiscoverPaths() (Paths, error) {
 		return Paths{
 			RootDir:  abs,
 			JobsDir:  filepath.Join(abs, "jobs"),
+			LogsDir:  filepath.Join(abs, "logs"),
 			StateDir: filepath.Join(abs, "state"),
 			DocsDir:  filepath.Join(abs, "docs"),
 		}, nil
@@ -39,13 +41,14 @@ func DiscoverPaths() (Paths, error) {
 	return Paths{
 		RootDir:  rp.ConfigDir,
 		JobsDir:  rp.JobsDir,
+		LogsDir:  rp.LogsDir,
 		StateDir: rp.StateDir,
 		DocsDir:  "",
 	}, nil
 }
 
 func (p Paths) EnsureLayout() error {
-	dirs := []string{p.JobsDir, p.StateDir}
+	dirs := []string{p.JobsDir, p.LogsDir, p.StateDir}
 	if p.DocsDir != "" {
 		dirs = append(dirs, p.DocsDir)
 	}
