@@ -85,7 +85,7 @@ func lookPath(name string) (string, error) {
 	searched = append(searched, "registry user PATH: "+userPath)
 
 	for _, segment := range strings.Split(systemPath+";"+userPath, ";") {
-		segment = strings.TrimSpace(segment)
+		segment = strings.TrimSpace(expandWindowsEnv(segment))
 		if segment == "" {
 			continue
 		}
@@ -95,6 +95,29 @@ func lookPath(name string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%s not found. searched:\n%s", name, strings.Join(searched, "\n"))
+}
+
+// expandWindowsEnv expands %VARIABLE% style environment variables in s.
+func expandWindowsEnv(s string) string {
+	var result strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] == '%' {
+			end := strings.Index(s[i+1:], "%")
+			if end >= 0 {
+				varName := s[i+1 : i+1+end]
+				if val := os.Getenv(varName); val != "" {
+					result.WriteString(val)
+				} else {
+					result.WriteString(s[i : i+1+end+1])
+				}
+				i += end + 2
+				continue
+			}
+		}
+		result.WriteByte(s[i])
+		i++
+	}
+	return result.String()
 }
 
 // mergePaths joins path segments, deduplicating case-insensitively.
