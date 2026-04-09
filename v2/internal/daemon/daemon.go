@@ -60,7 +60,7 @@ func Run(paths app.Paths) error {
 	}()
 
 	reloadCh := make(chan struct{}, 1)
-	watchReloadSignal(ctx, reloadCh)
+	watchReloadSignal(ctx, paths.StateDir, reloadCh)
 
 	return loop(ctx, paths, reloadCh)
 }

@@ -4,7 +4,10 @@ package daemon
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"syscall"
+	"time"
 )
 
 // detachConsole detaches the process from its console window.
@@ -19,6 +22,27 @@ func detachConsole() {
 	dll.NewProc("FreeConsole").Call()
 }
 
-// watchReloadSignal is a no-op on Windows — SIGHUP does not exist.
-// Config reload happens on the periodic ticker (every 60s).
-func watchReloadSignal(_ context.Context, _ chan<- struct{}) {}
+// watchReloadSignal polls for a sentinel file every 5 seconds.
+// SIGHUP does not exist on Windows; the CLI writes daemon.reload to stateDir
+// after any job change, and the daemon picks it up here.
+func watchReloadSignal(ctx context.Context, stateDir string, reloadCh chan<- struct{}) {
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				triggerPath := filepath.Join(stateDir, reloadTriggerFile)
+				if _, err := os.Stat(triggerPath); err == nil {
+					os.Remove(triggerPath)
+					select {
+					case reloadCh <- struct{}{}:
+					default:
+					}
+				}
+			}
+		}
+	}()
+}
