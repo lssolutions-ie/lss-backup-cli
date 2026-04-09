@@ -68,16 +68,10 @@ func runMenu(paths app.Paths) error {
 		fmt.Println("=================")
 
 		_, choice, err := prompter.Select("Main Menu", []string{
-			"Create Backup Job",
-			"List Backup Jobs",
-			"Manage Existing Backup",
-			"Import Previous Backup",
-			"Export Backup Job",
-			"Delete Backup",
-			"Manage Notification Channels",
-			"Backup LSS Backup Configuration",
-			"Configure Management Console",
-			"Check For Updates",
+			"Create Backup",
+			"Manage Backup",
+			"Import Backup",
+			"Settings",
 			"About",
 			"Exit",
 		})
@@ -86,41 +80,21 @@ func runMenu(paths app.Paths) error {
 		}
 
 		switch choice {
-		case "Create Backup Job":
+		case "Create Backup":
 			if err := runCreateWizard(paths, prompter); err != nil && err != errCancelled {
 				fmt.Println("Create job failed:", err)
 			}
-		case "List Backup Jobs":
-			if err := printJobs(paths); err != nil {
-				fmt.Println("List failed:", err)
-			}
-		case "Manage Existing Backup":
+		case "Manage Backup":
 			if err := runManageWizard(paths, prompter); err != nil {
 				fmt.Println("Manage job failed:", err)
 			}
-		case "Import Previous Backup":
+		case "Import Backup":
 			if err := runImportWizard(paths, prompter); err != nil {
 				fmt.Println("Import failed:", err)
 			}
-		case "Export Backup Job":
-			if err := runExportWizard(paths, prompter); err != nil {
-				fmt.Println("Export failed:", err)
-			}
-		case "Delete Backup":
-			if err := runRemoveSelectWizard(paths, prompter); err != nil {
-				fmt.Println("Delete failed:", err)
-			}
-		case "Manage Notification Channels":
-			fmt.Println("Notification channel management is a skeleton for now.")
-		case "Backup LSS Backup Configuration":
-			fmt.Println("Backup LSS Backup Configuration is a skeleton for now.")
-			fmt.Println("Final behavior should back up jobs, logs, secrets, passwords, and all other recovery-critical data.")
-		case "Configure Management Console":
-			fmt.Println("Configure Management Console is a skeleton for now.")
-			fmt.Println("Final behavior should configure connection to a central server that observes and tracks backups.")
-		case "Check For Updates":
-			if err := runCheckForUpdates(prompter); err != nil {
-				fmt.Println("Update check failed:", err)
+		case "Settings":
+			if err := runSettingsWizard(paths, prompter); err != nil {
+				fmt.Println("Settings failed:", err)
 			}
 		case "About":
 			runAbout()
@@ -487,18 +461,10 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 }
 
 func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
-	job, err := selectJob(paths, prompter)
-	if err != nil {
-		return err
-	}
-	if job.ID == "" {
-		fmt.Println("There are no backup jobs to manage.")
-		return nil
-	}
-
 	for {
 		fmt.Println("")
-		_, action, err := prompter.Select("Manage Backup Job", []string{
+		_, action, err := prompter.Select("Manage Backup", []string{
+			"List Backup Jobs",
 			"Run Backup Now",
 			"Restore Backup",
 			"List Snapshots",
@@ -508,6 +474,8 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			"Configure Notifications",
 			"Show Job Configuration",
 			"Validate Job",
+			"Export Backup Job",
+			"Delete Backup",
 			"Back To Main Menu",
 		})
 		if err != nil {
@@ -515,10 +483,36 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 		}
 
 		switch action {
-		case "Edit Backup":
-			if err := runReconfigureBackupWizard(paths, job.ID, prompter); err != nil {
-				fmt.Println("Edit failed:", err)
+		case "List Backup Jobs":
+			if err := printJobs(paths); err != nil {
+				fmt.Println("List failed:", err)
 			}
+			continue
+		case "Export Backup Job":
+			if err := runExportWizard(paths, prompter); err != nil {
+				fmt.Println("Export failed:", err)
+			}
+			continue
+		case "Delete Backup":
+			if err := runRemoveSelectWizard(paths, prompter); err != nil {
+				fmt.Println("Delete failed:", err)
+			}
+			continue
+		case "Back To Main Menu":
+			return nil
+		}
+
+		// All remaining actions require a selected job.
+		job, err := selectJob(paths, prompter)
+		if err != nil {
+			return err
+		}
+		if job.ID == "" {
+			fmt.Println("There are no backup jobs to manage.")
+			continue
+		}
+
+		switch action {
 		case "Run Backup Now":
 			if err := runJobByID(paths, job.ID); err != nil {
 				fmt.Println("Run failed:", err)
@@ -531,6 +525,10 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			if err := runListSnapshots(paths, job.ID); err != nil {
 				fmt.Println("List snapshots failed:", err)
 			}
+		case "Edit Backup":
+			if err := runReconfigureBackupWizard(paths, job.ID, prompter); err != nil {
+				fmt.Println("Edit failed:", err)
+			}
 		case "Configure Schedule":
 			updatedJob, err := jobs.Load(paths, job.ID)
 			if err != nil {
@@ -539,17 +537,6 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			}
 			if err := configureSchedule(prompter, updatedJob); err != nil {
 				fmt.Println("Schedule update failed:", err)
-				continue
-			}
-		case "Configure Notifications":
-			updatedJob, err := jobs.Load(paths, job.ID)
-			if err != nil {
-				fmt.Println("Reload failed:", err)
-				continue
-			}
-			if err := configureNotifications(prompter, updatedJob); err != nil {
-				fmt.Println("Notification update failed:", err)
-				continue
 			}
 		case "Configure Retention":
 			updatedJob, err := jobs.Load(paths, job.ID)
@@ -559,7 +546,15 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			}
 			if err := configureRetention(prompter, updatedJob); err != nil {
 				fmt.Println("Retention update failed:", err)
+			}
+		case "Configure Notifications":
+			updatedJob, err := jobs.Load(paths, job.ID)
+			if err != nil {
+				fmt.Println("Reload failed:", err)
 				continue
+			}
+			if err := configureNotifications(prompter, updatedJob); err != nil {
+				fmt.Println("Notification update failed:", err)
 			}
 		case "Show Job Configuration":
 			if err := showJob(paths, job.ID); err != nil {
@@ -568,6 +563,37 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 		case "Validate Job":
 			if err := validateJob(paths, job.ID); err != nil {
 				fmt.Println("Validation failed:", err)
+			}
+		}
+	}
+}
+
+func runSettingsWizard(paths app.Paths, prompter ui.Prompter) error {
+	for {
+		fmt.Println("")
+		_, action, err := prompter.Select("Settings", []string{
+			"Manage Notification Channels",
+			"Backup LSS Backup Configuration",
+			"Configure Management Console",
+			"Check For Updates",
+			"Back To Main Menu",
+		})
+		if err != nil {
+			return err
+		}
+
+		switch action {
+		case "Manage Notification Channels":
+			fmt.Println("Notification channel management is a skeleton for now.")
+		case "Backup LSS Backup Configuration":
+			fmt.Println("Backup LSS Backup Configuration is a skeleton for now.")
+			fmt.Println("Final behavior should back up jobs, logs, secrets, passwords, and all other recovery-critical data.")
+		case "Configure Management Console":
+			fmt.Println("Configure Management Console is a skeleton for now.")
+			fmt.Println("Final behavior should configure connection to a central server that observes and tracks backups.")
+		case "Check For Updates":
+			if err := runCheckForUpdates(prompter); err != nil {
+				fmt.Println("Update check failed:", err)
 			}
 		case "Back To Main Menu":
 			return nil
