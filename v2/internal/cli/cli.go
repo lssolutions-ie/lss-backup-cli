@@ -57,6 +57,7 @@ func Run(args []string) error {
 		return errors.New("v2 is menu-driven; run lss-backup-cli with no arguments to open the menu")
 	}
 
+	activitylog.Log(paths.LogsDir, "program started")
 	return runMenu(paths)
 }
 
@@ -80,6 +81,8 @@ func runMenu(paths app.Paths) error {
 			return err
 		}
 
+		activitylog.Log(paths.LogsDir, "menu: "+choice)
+
 		switch choice {
 		case "Create Backup":
 			if err := runCreateWizard(paths, prompter); err != nil && err != errCancelled {
@@ -100,6 +103,7 @@ func runMenu(paths app.Paths) error {
 		case "About":
 			runAbout()
 		case "Exit":
+			activitylog.Log(paths.LogsDir, "program exited")
 			fmt.Println("Good bye.")
 			return nil
 		}
@@ -487,6 +491,11 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 	if err != nil {
 		return err
 	}
+	if job.ID == "" {
+		activitylog.Log(paths.LogsDir, "manage backup: back")
+		return nil
+	}
+	activitylog.Log(paths.LogsDir, fmt.Sprintf("manage backup: selected job %s (%s)", job.ID, job.Name))
 
 	// 4. Per-job action loop.
 	for {
@@ -508,6 +517,8 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 		if err != nil {
 			return err
 		}
+
+		activitylog.Log(paths.LogsDir, fmt.Sprintf("manage %s (%s): %s", job.ID, job.Name, action))
 
 		switch action {
 		case "Run Backup Now":
@@ -615,6 +626,8 @@ func runSettingsWizard(paths app.Paths, prompter ui.Prompter) error {
 		if err != nil {
 			return err
 		}
+
+		activitylog.Log(paths.LogsDir, "settings: "+action)
 
 		switch action {
 		case "Manage Notification Channels":
