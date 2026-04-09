@@ -52,15 +52,27 @@ func readRegistryPath(root registry.Key, subKey string) string {
 	return val
 }
 
-// lookPath finds a binary by searching the process PATH first, then falling
-// back to the system and user PATH from the Windows registry. This ensures
-// tools like restic are found when running as a service with a stripped PATH.
+// lookPath finds a binary by searching in order:
+//  1. Standard exec.LookPath (process PATH + CWD on Windows)
+//  2. Directory of the running executable (restic may be installed alongside the CLI)
+//  3. System and user PATH from the Windows registry (covers winget/user installs
+//     that are invisible to service processes with a stripped PATH)
+//
 // Returns the full absolute path to the binary.
 func lookPath(name string) (string, error) {
 	if p, err := exec.LookPath(name); err == nil {
 		return p, nil
 	}
 
+	// Check the directory of the running executable.
+	if exePath, err := os.Executable(); err == nil {
+		candidate := filepath.Join(filepath.Dir(exePath), name+".exe")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+
+	// Fall back to registry PATH entries.
 	systemPath := readRegistryPath(registry.LOCAL_MACHINE,
 		`SYSTEM\CurrentControlSet\Control\Session Manager\Environment`)
 	userPath := readRegistryPath(registry.CURRENT_USER, `Environment`)
