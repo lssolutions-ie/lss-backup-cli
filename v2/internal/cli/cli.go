@@ -944,6 +944,8 @@ func removeJob(paths app.Paths, prompter ui.Prompter, id string) error {
 	return nil
 }
 
+const selectJobBack = "Back"
+
 func selectJob(paths app.Paths, prompter ui.Prompter) (config.Job, error) {
 	items, err := jobs.List(paths)
 	if err != nil {
@@ -953,7 +955,7 @@ func selectJob(paths app.Paths, prompter ui.Prompter) (config.Job, error) {
 		return config.Job{}, nil
 	}
 
-	options := make([]string, 0, len(items))
+	options := make([]string, 0, len(items)+1)
 	lookup := make(map[string]string, len(items))
 	for _, item := range items {
 		label := fmt.Sprintf("%s | %s | %s | %s", item.ID, item.Program, item.Name, formatLastRun(item.LastRun))
@@ -961,10 +963,14 @@ func selectJob(paths app.Paths, prompter ui.Prompter) (config.Job, error) {
 		lookup[label] = item.ID
 	}
 	sort.Strings(options)
+	options = append(options, selectJobBack)
 
 	_, selected, err := prompter.Select("Select backup job", options)
 	if err != nil {
 		return config.Job{}, err
+	}
+	if selected == selectJobBack {
+		return config.Job{}, nil
 	}
 	return jobs.Load(paths, lookup[selected])
 }

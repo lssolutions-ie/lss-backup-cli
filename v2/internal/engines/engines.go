@@ -32,15 +32,16 @@ func (e ResticEngine) Run(job config.Job, output io.Writer) error {
 		return fmt.Errorf("RESTIC_PASSWORD is required for restic jobs")
 	}
 
-	if _, err := exec.LookPath("restic"); err != nil {
-		return fmt.Errorf("restic is not installed or not on PATH")
+	resticBin, err := lookPath("restic")
+	if err != nil {
+		return err
 	}
 
 	if err := os.MkdirAll(job.Destination.Path, 0o755); err != nil {
 		return fmt.Errorf("create destination path: %w", err)
 	}
 
-	if err := ensureResticRepo(job, output); err != nil {
+	if err := ensureResticRepo(job, resticBin, output); err != nil {
 		return err
 	}
 
@@ -53,10 +54,10 @@ func (e ResticEngine) Run(job config.Job, output io.Writer) error {
 	if job.Source.ExcludeFile != "" {
 		resticArgs = append(resticArgs, "--exclude-file="+job.Source.ExcludeFile)
 	}
-	cmd := exec.Command("restic", resticArgs...)
+	cmd := exec.Command(resticBin, resticArgs...)
 	cmd.Stdout = output
 	cmd.Stderr = output
-	cmd.Env = append(os.Environ(),
+	cmd.Env = buildEnv(
 		"RESTIC_PASSWORD="+job.Secrets.ResticPassword,
 		"AWS_ACCESS_KEY_ID="+job.Secrets.AWSAccessKeyID,
 		"AWS_SECRET_ACCESS_KEY="+job.Secrets.AWSSecretAccessKey,
@@ -71,7 +72,7 @@ func (e ResticEngine) Run(job config.Job, output io.Writer) error {
 		}
 	}
 
-	if err := runForget(job, output); err != nil {
+	if err := runForget(job, resticBin, output); err != nil {
 		// A failed forget is a warning, not a backup failure — data was already saved.
 		fmt.Fprintf(output, "Warning: retention cleanup failed: %v\n", err)
 	}
@@ -79,7 +80,7 @@ func (e ResticEngine) Run(job config.Job, output io.Writer) error {
 	return nil
 }
 
-func runForget(job config.Job, output io.Writer) error {
+func runForget(job config.Job, resticBin string, output io.Writer) error {
 	flags := retention.ForgetFlags(job.Retention)
 	if len(flags) == 0 {
 		return nil
@@ -87,10 +88,10 @@ func runForget(job config.Job, output io.Writer) error {
 
 	fmt.Fprintln(output, "Running retention cleanup (restic forget --prune)...")
 	args := append([]string{"-r", job.Destination.Path, "forget", "--prune"}, flags...)
-	cmd := exec.Command("restic", args...)
+	cmd := exec.Command(resticBin, args...)
 	cmd.Stdout = output
 	cmd.Stderr = output
-	cmd.Env = append(os.Environ(),
+	cmd.Env = buildEnv(
 		"RESTIC_PASSWORD="+job.Secrets.ResticPassword,
 		"AWS_ACCESS_KEY_ID="+job.Secrets.AWSAccessKeyID,
 		"AWS_SECRET_ACCESS_KEY="+job.Secrets.AWSSecretAccessKey,
@@ -105,17 +106,18 @@ func (e ResticEngine) Restore(job config.Job, target string, output io.Writer) e
 	if strings.TrimSpace(job.Secrets.ResticPassword) == "" {
 		return fmt.Errorf("RESTIC_PASSWORD is required for restic jobs")
 	}
-	if _, err := exec.LookPath("restic"); err != nil {
-		return fmt.Errorf("restic is not installed or not on PATH")
+	resticBin, err := lookPath("restic")
+	if err != nil {
+		return err
 	}
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return fmt.Errorf("create restore target: %w", err)
 	}
 
-	cmd := exec.Command("restic", "-r", job.Destination.Path, "restore", "latest", "--target", target)
+	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "restore", "latest", "--target", target)
 	cmd.Stdout = output
 	cmd.Stderr = output
-	cmd.Env = append(os.Environ(),
+	cmd.Env = buildEnv(
 		"RESTIC_PASSWORD="+job.Secrets.ResticPassword,
 		"AWS_ACCESS_KEY_ID="+job.Secrets.AWSAccessKeyID,
 		"AWS_SECRET_ACCESS_KEY="+job.Secrets.AWSSecretAccessKey,
@@ -130,14 +132,15 @@ func (e ResticEngine) Snapshots(job config.Job, output io.Writer) error {
 	if strings.TrimSpace(job.Secrets.ResticPassword) == "" {
 		return fmt.Errorf("RESTIC_PASSWORD is required for restic jobs")
 	}
-	if _, err := exec.LookPath("restic"); err != nil {
-		return fmt.Errorf("restic is not installed or not on PATH")
+	resticBin, err := lookPath("restic")
+	if err != nil {
+		return err
 	}
 
-	cmd := exec.Command("restic", "-r", job.Destination.Path, "snapshots")
+	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "snapshots")
 	cmd.Stdout = output
 	cmd.Stderr = output
-	cmd.Env = append(os.Environ(),
+	cmd.Env = buildEnv(
 		"RESTIC_PASSWORD="+job.Secrets.ResticPassword,
 		"AWS_ACCESS_KEY_ID="+job.Secrets.AWSAccessKeyID,
 		"AWS_SECRET_ACCESS_KEY="+job.Secrets.AWSSecretAccessKey,
@@ -185,8 +188,9 @@ func (e RsyncEngine) Name() string {
 }
 
 func (e RsyncEngine) Run(job config.Job, output io.Writer) error {
-	if _, err := exec.LookPath("rsync"); err != nil {
-		return fmt.Errorf("rsync is not installed or not on PATH")
+	rsyncBin, err := lookPath("rsync")
+	if err != nil {
+		return err
 	}
 
 	if err := os.MkdirAll(job.Destination.Path, 0o755); err != nil {
@@ -208,7 +212,7 @@ func (e RsyncEngine) Run(job config.Job, output io.Writer) error {
 	}
 	rsyncArgs = append(rsyncArgs, sourcePath, destinationPath)
 
-	cmd := exec.Command("rsync", rsyncArgs...)
+	cmd := exec.Command(rsyncBin, rsyncArgs...)
 	cmd.Stdout = output
 	cmd.Stderr = output
 
@@ -230,8 +234,9 @@ func (e RsyncEngine) Snapshots(job config.Job, output io.Writer) error {
 }
 
 func (e RsyncEngine) Restore(job config.Job, target string, output io.Writer) error {
-	if _, err := exec.LookPath("rsync"); err != nil {
-		return fmt.Errorf("rsync is not installed or not on PATH")
+	rsyncBin, err := lookPath("rsync")
+	if err != nil {
+		return err
 	}
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return fmt.Errorf("create restore target: %w", err)
@@ -240,7 +245,7 @@ func (e RsyncEngine) Restore(job config.Job, target string, output io.Writer) er
 	sourcePath := filepath.Clean(job.Destination.Path) + string(os.PathSeparator)
 	targetPath := filepath.Clean(target) + string(os.PathSeparator)
 
-	cmd := exec.Command("rsync", "-a", sourcePath, targetPath)
+	cmd := exec.Command(rsyncBin, "-a", sourcePath, targetPath)
 	cmd.Stdout = output
 	cmd.Stderr = output
 	if err := cmd.Run(); err != nil {
@@ -249,7 +254,7 @@ func (e RsyncEngine) Restore(job config.Job, target string, output io.Writer) er
 	return nil
 }
 
-func ensureResticRepo(job config.Job, output io.Writer) error {
+func ensureResticRepo(job config.Job, resticBin string, output io.Writer) error {
 	// For local repositories, the presence of the 'config' file indicates an
 	// initialised repo. This avoids running 'restic snapshots' as a probe,
 	// which would produce misleading errors (e.g. wrong password → init attempt).
@@ -259,10 +264,10 @@ func ensureResticRepo(job config.Job, output io.Writer) error {
 	}
 
 	fmt.Fprintln(output, "Restic repository not found, initialising...")
-	initCmd := exec.Command("restic", "-r", job.Destination.Path, "init")
+	initCmd := exec.Command(resticBin, "-r", job.Destination.Path, "init")
 	initCmd.Stdout = output
 	initCmd.Stderr = output
-	initCmd.Env = append(os.Environ(),
+	initCmd.Env = buildEnv(
 		"RESTIC_PASSWORD="+job.Secrets.ResticPassword,
 		"AWS_ACCESS_KEY_ID="+job.Secrets.AWSAccessKeyID,
 		"AWS_SECRET_ACCESS_KEY="+job.Secrets.AWSSecretAccessKey,
