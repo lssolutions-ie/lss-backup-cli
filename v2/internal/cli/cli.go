@@ -15,6 +15,7 @@ import (
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/app"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/daemon"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/engines"
 	healthchecksPkg "github.com/lssolutions-ie/lss-backup-cli/v2/internal/healthchecks"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/installmanifest"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/jobs"
@@ -500,6 +501,7 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 		_, action, err := prompter.Select("Manage Backup Job", []string{
 			"Run Backup Now",
 			"Restore Backup",
+			"List Snapshots",
 			"Edit Backup",
 			"Configure Schedule",
 			"Configure Retention",
@@ -524,6 +526,10 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 		case "Restore Backup":
 			if err := runRestoreWizard(paths, prompter, job.ID); err != nil {
 				fmt.Println("Restore failed:", err)
+			}
+		case "List Snapshots":
+			if err := runListSnapshots(paths, job.ID); err != nil {
+				fmt.Println("List snapshots failed:", err)
 			}
 		case "Configure Schedule":
 			updatedJob, err := jobs.Load(paths, job.ID)
@@ -794,6 +800,22 @@ func runRestoreWizard(paths app.Paths, prompter ui.Prompter, id string) error {
 
 	service := runner.NewService()
 	return service.Restore(job, target)
+}
+
+func runListSnapshots(paths app.Paths, id string) error {
+	job, err := jobs.Load(paths, id)
+	if err != nil {
+		return err
+	}
+
+	registry := engines.NewRegistry()
+	engine, err := registry.Get(job.Program)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("")
+	return engine.Snapshots(job, os.Stdout)
 }
 
 func configureSchedule(prompter ui.Prompter, job config.Job) error {

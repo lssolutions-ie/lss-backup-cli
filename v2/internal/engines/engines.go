@@ -18,6 +18,7 @@ type Engine interface {
 	Name() string
 	Run(job config.Job, output io.Writer) error
 	Restore(job config.Job, target string, output io.Writer) error
+	Snapshots(job config.Job, output io.Writer) error
 }
 
 type ResticEngine struct{}
@@ -125,6 +126,28 @@ func (e ResticEngine) Restore(job config.Job, target string, output io.Writer) e
 	return nil
 }
 
+func (e ResticEngine) Snapshots(job config.Job, output io.Writer) error {
+	if strings.TrimSpace(job.Secrets.ResticPassword) == "" {
+		return fmt.Errorf("RESTIC_PASSWORD is required for restic jobs")
+	}
+	if _, err := exec.LookPath("restic"); err != nil {
+		return fmt.Errorf("restic is not installed or not on PATH")
+	}
+
+	cmd := exec.Command("restic", "-r", job.Destination.Path, "snapshots")
+	cmd.Stdout = output
+	cmd.Stderr = output
+	cmd.Env = append(os.Environ(),
+		"RESTIC_PASSWORD="+job.Secrets.ResticPassword,
+		"AWS_ACCESS_KEY_ID="+job.Secrets.AWSAccessKeyID,
+		"AWS_SECRET_ACCESS_KEY="+job.Secrets.AWSSecretAccessKey,
+	)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("restic snapshots failed: %w", err)
+	}
+	return nil
+}
+
 type Registry struct {
 	engines map[string]Engine
 }
@@ -198,6 +221,11 @@ func (e RsyncEngine) Run(job config.Job, output io.Writer) error {
 		return fmt.Errorf("rsync failed: %w", err)
 	}
 
+	return nil
+}
+
+func (e RsyncEngine) Snapshots(job config.Job, output io.Writer) error {
+	fmt.Fprintln(output, "rsync does not support snapshots. Each backup overwrites the previous copy at the destination.")
 	return nil
 }
 
