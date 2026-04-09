@@ -461,10 +461,34 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 }
 
 func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
+	// 1. Always list jobs first.
+	if err := printJobs(paths); err != nil {
+		fmt.Println("List failed:", err)
+	}
+
+	// 2. Bail out early if there are no jobs.
+	allJobs, err := jobs.List(paths)
+	if err != nil {
+		return err
+	}
+	if len(allJobs) == 0 {
+		fmt.Println("")
+		fmt.Println("Warning: no backup jobs found. Create a backup job first.")
+		fmt.Print("Press Enter to continue...")
+		fmt.Scanln()
+		return nil
+	}
+
+	// 3. Select a job.
+	job, err := selectJob(paths, prompter)
+	if err != nil {
+		return err
+	}
+
+	// 4. Per-job action loop.
 	for {
 		fmt.Println("")
-		_, action, err := prompter.Select("Manage Backup", []string{
-			"List Backup Jobs",
+		_, action, err := prompter.Select("Manage: "+job.Name, []string{
 			"Run Backup Now",
 			"Restore Backup",
 			"List Snapshots",
@@ -480,36 +504,6 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 		})
 		if err != nil {
 			return err
-		}
-
-		switch action {
-		case "List Backup Jobs":
-			if err := printJobs(paths); err != nil {
-				fmt.Println("List failed:", err)
-			}
-			continue
-		case "Export Backup Job":
-			if err := runExportWizard(paths, prompter); err != nil {
-				fmt.Println("Export failed:", err)
-			}
-			continue
-		case "Delete Backup":
-			if err := runRemoveSelectWizard(paths, prompter); err != nil {
-				fmt.Println("Delete failed:", err)
-			}
-			continue
-		case "Back To Main Menu":
-			return nil
-		}
-
-		// All remaining actions require a selected job.
-		job, err := selectJob(paths, prompter)
-		if err != nil {
-			return err
-		}
-		if job.ID == "" {
-			fmt.Println("There are no backup jobs to manage.")
-			continue
 		}
 
 		switch action {
@@ -564,6 +558,27 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			if err := validateJob(paths, job.ID); err != nil {
 				fmt.Println("Validation failed:", err)
 			}
+		case "Export Backup Job":
+			targetDir, err := prompter.Ask("Export to directory", validateAbsolutePath)
+			if err != nil {
+				fmt.Println("Export failed:", err)
+				continue
+			}
+			if err := jobs.Export(paths, job.ID, targetDir); err != nil {
+				fmt.Println("Export failed:", err)
+				continue
+			}
+			fmt.Printf("Exported job %q to %s\n", job.ID, targetDir)
+			fmt.Println("Files: job.toml, secrets.env")
+			fmt.Println("Keep secrets.env safe — it contains your backup passwords.")
+		case "Delete Backup":
+			if err := removeJob(paths, prompter, job.ID); err != nil {
+				fmt.Println("Delete failed:", err)
+				continue
+			}
+			return nil
+		case "Back To Main Menu":
+			return nil
 		}
 	}
 }
