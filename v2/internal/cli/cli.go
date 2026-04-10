@@ -708,16 +708,17 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			}
 			pauseForEnter()
 		case "Restore Backup":
-			if err := runRestoreWizard(paths, prompter, job.ID); err != nil {
+			if err := runRestoreWizard(paths, prompter, job.ID); err != nil && !errors.Is(err, errCancelled) {
 				ui.StatusError(err.Error())
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("restore failed: %s (%s) — %v", job.ID, job.Name, err))
 				audit.Record(job.JobDir, "Restore", fmt.Sprintf("FAILED: %v", err))
-			} else {
+				pauseForEnter()
+			} else if err == nil {
 				ui.StatusOK("Restore completed successfully.")
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("restore completed: %s (%s)", job.ID, job.Name))
 				audit.Record(job.JobDir, "Restore", "completed successfully")
+				pauseForEnter()
 			}
-			pauseForEnter()
 		case "List Snapshots":
 			if err := runListSnapshots(paths, job.ID); err != nil {
 				ui.StatusError(err.Error())
@@ -1610,7 +1611,7 @@ func runRestoreWizard(paths app.Paths, prompter ui.Prompter, id string) error {
 		return err
 	}
 	if snapshotID == "" {
-		return nil // user cancelled
+		return errCancelled
 	}
 
 	service := runner.NewService()
