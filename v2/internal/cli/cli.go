@@ -751,6 +751,7 @@ func runSettingsWizard(paths app.Paths, prompter ui.Prompter) error {
 			"Manage Notification Channels",
 			"Backup LSS Backup Configuration",
 			"Configure Management Console",
+			"Restart Daemon",
 			"Check For Updates",
 		})
 		if err != nil {
@@ -773,6 +774,18 @@ func runSettingsWizard(paths app.Paths, prompter ui.Prompter) error {
 			pauseForEnter()
 		case "Configure Management Console":
 			ui.StatusWarn("Not yet implemented.")
+			pauseForEnter()
+		case "Restart Daemon":
+			ui.Println2("Restarting daemon...")
+			daemon.RestartService()
+			time.Sleep(2 * time.Second)
+			if daemon.IsRunning() {
+				fmt.Println()
+				ui.StatusOK("Daemon is running.")
+			} else {
+				fmt.Println()
+				ui.StatusWarn("Daemon did not start — check Task Scheduler or service logs.")
+			}
 			pauseForEnter()
 		case "Check For Updates":
 			if err := runCheckForUpdates(paths, prompter); err != nil {
@@ -934,6 +947,13 @@ func printJobs(paths app.Paths) error {
 	if err != nil {
 		return err
 	}
+
+	if daemon.IsRunning() {
+		ui.StatusOK("Daemon: running")
+	} else {
+		ui.StatusWarn("Daemon: not running — scheduled jobs will not fire")
+	}
+	fmt.Println()
 
 	if len(items) == 0 {
 		ui.Println2("No backup jobs configured.")
