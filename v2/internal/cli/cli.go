@@ -320,7 +320,9 @@ func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Promp
 		return err
 	} else if ok {
 		if job.Schedule, err = promptSchedule(prompter); err != nil {
-			return err
+			if err != errCancelled {
+				return err
+			}
 		}
 		changed = true
 	}
@@ -1033,6 +1035,9 @@ func runListSnapshots(paths app.Paths, id string) error {
 
 func configureSchedule(prompter ui.Prompter, job config.Job) error {
 	schedule, err := promptSchedule(prompter)
+	if err == errCancelled {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -1137,6 +1142,10 @@ func promptSchedule(prompter ui.Prompter) (config.Schedule, error) {
 		})
 		if err != nil {
 			return config.Schedule{}, err
+		}
+
+		if idx == -1 {
+			return config.Schedule{}, errCancelled
 		}
 
 		switch idx {
