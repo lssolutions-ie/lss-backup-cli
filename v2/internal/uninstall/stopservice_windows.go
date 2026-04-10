@@ -49,9 +49,24 @@ func killDaemonProcess() {
 
 func unregisterDaemonService() {
 	fmt.Println("Unregistering daemon task...")
-	cmd := exec.Command("schtasks", "/Delete", "/TN", windowsTaskName, "/F")
-	if err := cmd.Run(); err != nil {
-		fmt.Printf("Warning: could not remove scheduled task: %v\n", err)
+
+	// Try directly first — works when the CLI is already running as admin.
+	if err := exec.Command("schtasks", "/Delete", "/TN", windowsTaskName, "/F").Run(); err == nil {
+		fmt.Println("Scheduled task removed.")
+		return
+	}
+
+	// Fall back to an elevated PowerShell subprocess (triggers a UAC prompt).
+	// Required when the user runs the uninstaller from a non-admin shell and
+	// the task was registered as SYSTEM.
+	psScript := `Unregister-ScheduledTask -TaskPath "\LSS Backup\" -TaskName "LSS Backup Daemon" -Confirm:$false`
+	elevateCmd := fmt.Sprintf(
+		`Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NonInteractive -NoProfile -Command "%s"'`,
+		psScript,
+	)
+	if err := exec.Command("powershell.exe", "-NonInteractive", "-NoProfile", "-Command", elevateCmd).Run(); err != nil {
+		fmt.Println("Warning: could not remove scheduled task. Remove it manually from Task Scheduler.")
+		fmt.Printf("  Task path: \\LSS Backup\\  Task name: LSS Backup Daemon\n")
 	} else {
 		fmt.Println("Scheduled task removed.")
 	}

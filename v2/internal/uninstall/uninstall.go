@@ -3,6 +3,7 @@ package uninstall
 import (
 	"archive/zip"
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -63,7 +64,7 @@ func Run() error {
 			removeManagedDependencies(manifest)
 		}
 	} else {
-		if os.IsNotExist(manifestErr) {
+		if errors.Is(manifestErr, os.ErrNotExist) {
 			fmt.Println("Install manifest not found, skipping dependency removal.")
 		} else {
 			fmt.Println("Could not read install manifest, skipping dependency removal:", manifestErr)
