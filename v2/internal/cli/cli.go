@@ -93,7 +93,13 @@ func runMenu(paths app.Paths) error {
 
 	for {
 		ui.ClearScreen()
-		ui.Header("LSS Backup CLI  " + version.Current)
+		ui.HeaderNoTrail("LSS Backup CLI  " + version.Current)
+		if daemon.IsRunning() {
+			ui.StatusOK("Daemon: running")
+		} else {
+			ui.StatusWarn("Daemon: not running — scheduled jobs will not fire")
+		}
+		fmt.Println()
 
 		_, choice, err := prompter.Select("", []string{
 			"Create Backup",

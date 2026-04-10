@@ -51,6 +51,14 @@ func Header(title string) {
 	fmt.Println()
 }
 
+// HeaderNoTrail renders the same title block but without the trailing blank line.
+// Use when content should follow immediately below the rule line.
+func HeaderNoTrail(title string) {
+	fmt.Println()
+	fmt.Printf("  %s%s%s\n", colYellow, title, colReset)
+	fmt.Printf("  %s%s%s\n", colCyan, ruleLine, colReset)
+}
+
 // SectionHeader renders a section divider within a screen (no screen clear).
 func SectionHeader(title string) {
 	fmt.Println()
