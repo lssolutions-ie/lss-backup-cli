@@ -1,7 +1,7 @@
 #Requires -RunAsAdministrator
 $ErrorActionPreference = "Stop"
 
-# Force TLS 1.2 — required for go.dev and GitHub on Windows Server 2016.
+# Force TLS 1.2 - required for go.dev and GitHub on Windows Server 2016.
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 # Fallback versions used when winget is not available.
@@ -176,7 +176,7 @@ $manifest = [ordered]@{
     dependencies    = $deps
 }
 
-# Write without BOM — PowerShell 5.x Set-Content -Encoding UTF8 writes a BOM
+# Write without BOM - PowerShell 5.x Set-Content -Encoding UTF8 writes a BOM
 # which breaks Go's JSON parser. Use .NET directly for BOM-free UTF-8.
 $enc = New-Object System.Text.UTF8Encoding $false
 [System.IO.File]::WriteAllText($ManifestPath, ($manifest | ConvertTo-Json -Depth 5), $enc)
@@ -195,9 +195,9 @@ Refresh-Path
 # Ask whether to run the daemon as SYSTEM or the current user.
 Write-Host ""
 Write-Host "Daemon account:"
-Write-Host "  1. SYSTEM (recommended for servers/production) — runs at startup regardless"
+Write-Host "  1. SYSTEM (recommended for servers/production) - runs at startup regardless"
 Write-Host "     of who is logged in, full privilege, no PATH issues from user installs."
-Write-Host "  2. Current user ($env:USERNAME) — inherits your PATH, easier for development"
+Write-Host "  2. Current user ($env:USERNAME) - inherits your PATH, easier for development"
 Write-Host "     and testing. Requires you to be logged in for the daemon to run."
 Write-Host ""
 $modeChoice = Read-Host "Select mode [1/2] (default: 1)"

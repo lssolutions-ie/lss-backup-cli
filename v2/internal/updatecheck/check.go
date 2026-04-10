@@ -265,33 +265,36 @@ func findV2Dir(root string) (string, error) {
 }
 
 func runInstaller(moduleDir string) error {
-	switch runtime.GOOS {
-	case "windows":
-		installer := filepath.Join(moduleDir, "install-cli.ps1")
-		cmd := exec.Command("powershell", "-ExecutionPolicy", "Bypass", "-File", installer)
-		cmd.Dir = moduleDir
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("run Windows installer: %w", err)
-		}
-		return nil
-	default:
-		installer := filepath.Join(moduleDir, "install-cli.sh")
-		if err := os.Chmod(installer, 0o755); err != nil {
-			return fmt.Errorf("make installer executable: %w", err)
-		}
-		cmd := exec.Command(installer)
-		cmd.Dir = moduleDir
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("run installer: %w", err)
-		}
-		return nil
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve current executable path: %w", err)
 	}
+	exePath, err = filepath.EvalSymlinks(exePath)
+	if err != nil {
+		return fmt.Errorf("resolve symlinks for executable: %w", err)
+	}
+
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		return fmt.Errorf("go binary not found on PATH — cannot build update: %w", err)
+	}
+
+	ext := ""
+	if runtime.GOOS == "windows" {
+		ext = ".exe"
+	}
+	newBin := filepath.Join(moduleDir, "lss-backup-cli-new"+ext)
+
+	fmt.Println("  Building updated binary...")
+	buildCmd := exec.Command(goBin, "build", "-o", newBin, "./cmd/lss-backup")
+	buildCmd.Dir = moduleDir
+	buildCmd.Stdout = os.Stdout
+	buildCmd.Stderr = os.Stderr
+	if err := buildCmd.Run(); err != nil {
+		return fmt.Errorf("build updated binary: %w", err)
+	}
+
+	return replaceBinary(exePath, newBin)
 }
 
 func parseSemVersion(raw string) (semVersion, bool) {
