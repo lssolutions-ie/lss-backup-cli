@@ -168,39 +168,59 @@ func fetchTags() ([]githubTag, error) {
 }
 
 func downloadBinary(url, targetPath string) error {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("User-Agent", "lss-backup-cli-updater")
-
 	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("download update: %w", err)
-	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusNotFound {
+	// Retry up to 4 times with increasing delays to handle GitHub CDN propagation
+	// lag that can cause a brief 404 immediately after a release is published.
+	delays := []time.Duration{0, 5 * time.Second, 10 * time.Second, 20 * time.Second}
+	var lastStatus int
+
+	for attempt, delay := range delays {
+		if delay > 0 {
+			fmt.Printf("  Retrying in %s (attempt %d/4)...\n", delay, attempt+1)
+			time.Sleep(delay)
+		}
+
+		req, err := http.NewRequest(http.MethodGet, url, nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("User-Agent", "lss-backup-cli-updater")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("download update: %w", err)
+		}
+
+		if resp.StatusCode == http.StatusOK {
+			defer resp.Body.Close()
+			target, err := os.OpenFile(targetPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
+			if err != nil {
+				return fmt.Errorf("create temp binary: %w", err)
+			}
+			defer target.Close()
+
+			const maxBytes = 100 * 1024 * 1024 // 100 MB
+			if _, err := io.Copy(target, io.LimitReader(resp.Body, maxBytes)); err != nil {
+				return fmt.Errorf("write binary: %w", err)
+			}
+			return nil
+		}
+
+		lastStatus = resp.StatusCode
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			// Non-404 errors are not retryable.
+			return fmt.Errorf("download update: unexpected status %s", resp.Status)
+		}
+	}
+
+	if lastStatus == http.StatusNotFound {
 		return fmt.Errorf("no pre-built binary available for %s/%s — download manually from https://github.com/%s/releases",
 			runtime.GOOS, runtime.GOARCH, version.Repository)
 	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download update: unexpected status %s", resp.Status)
-	}
-
-	target, err := os.OpenFile(targetPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
-	if err != nil {
-		return fmt.Errorf("create temp binary: %w", err)
-	}
-	defer target.Close()
-
-	const maxBytes = 100 * 1024 * 1024 // 100 MB
-	if _, err := io.Copy(target, io.LimitReader(resp.Body, maxBytes)); err != nil {
-		return fmt.Errorf("write binary: %w", err)
-	}
-
-	return nil
+	return fmt.Errorf("download update: unexpected status %d", lastStatus)
 }
 
 func parseSemVersion(raw string) (semVersion, bool) {
