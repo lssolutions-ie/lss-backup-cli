@@ -1784,11 +1784,9 @@ func configureNotifications(prompter ui.Prompter, job config.Job) error {
 }
 
 func configureRetention(prompter ui.Prompter, job config.Job) error {
-	fmt.Println("")
-	fmt.Println("Configure Retention")
-	fmt.Println("-------------------")
-	fmt.Printf("Job: %s | %s | %s\n\n", job.ID, job.Program, job.Name)
-	fmt.Printf("Current policy: %s\n", retentionPkg.Describe(job.Retention))
+	ui.SectionHeader("Configure Retention")
+	ui.KeyValue("Job:", fmt.Sprintf("%s | %s | %s", job.ID, job.Program, job.Name))
+	ui.KeyValue("Current policy:", retentionPkg.Describe(job.Retention))
 
 	r, err := promptRetention(prompter, job.Program, job.Schedule)
 	if errors.Is(err, errCancelled) {
