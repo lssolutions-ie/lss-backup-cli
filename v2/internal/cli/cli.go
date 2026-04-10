@@ -1403,8 +1403,8 @@ func showStructuredLogNewestFirst(path, title string) {
 	printLogTable(rows, auditPageSize)
 }
 
-// showTextFile displays a run log file top-to-bottom as a Time | Message table.
-// Lines without a recognisable timestamp are shown with an empty time column.
+// showTextFile displays a run log file top-to-bottom as plain wrapped text.
+// Run logs (restic/rsync output) have no timestamps so the Time column is omitted.
 func showTextFile(path, title string) {
 	ui.ClearScreen()
 	ui.Header(title)
@@ -1414,12 +1414,52 @@ func showTextFile(path, title string) {
 		return
 	}
 
-	rows := make([]logRow, len(lines))
-	for i, l := range lines {
-		rows[i] = parseLogLine(l)
+	printRawLog(lines, logViewPageSize)
+}
+
+// printRawLog displays lines as word-wrapped plain text with pagination.
+// No Time column — used for run logs that carry no timestamps.
+func printRawLog(lines []string, pageSize int) {
+	const rowIndent = "  "
+	tw := termWidth()
+	if tw > 160 {
+		tw = 160
+	}
+	maxWidth := tw - len(rowIndent)
+	if maxWidth < 20 {
+		maxWidth = 20
 	}
 
-	printLogTable(rows, logViewPageSize)
+	total := len(lines)
+	shown := 0
+	for shown < total {
+		end := shown + pageSize
+		if end > total {
+			end = total
+		}
+
+		fmt.Println()
+		for _, l := range lines[shown:end] {
+			msg := normaliseMsg(l)
+			wrapped := wrapMessage(msg, maxWidth)
+			fmt.Printf("%s%s\n", rowIndent, wrapped[0])
+			for _, cont := range wrapped[1:] {
+				fmt.Printf("%s%s\n", rowIndent, cont)
+			}
+		}
+		fmt.Println()
+		shown = end
+
+		if shown < total {
+			fmt.Println()
+			fmt.Printf("  Showing %d of %d lines. Press Enter for more, or type 'q' to stop: ", shown, total)
+			var input string
+			fmt.Scanln(&input)
+			if strings.ToLower(strings.TrimSpace(input)) == "q" {
+				return
+			}
+		}
+	}
 }
 
 // printLogTable renders rows as a Time | Message table with pagination.
