@@ -427,14 +427,12 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 	}
 	excludeFile = cleanPath(excludeFile)
 
-	destinationPath, err := prompter.Ask("Local destination directory", validateDestinationPath)
+	destinationBase, err := prompter.Ask("Local destination directory", validateDestinationPath)
 	if err != nil {
 		return err
 	}
-	destinationPath = cleanPath(destinationPath)
-	if _, statErr := os.Stat(destinationPath); os.IsNotExist(statErr) {
-		ui.Println2("Note: " + destinationPath + " does not exist yet — it will be created automatically.")
-	}
+	destinationPath := filepath.Join(cleanPath(destinationBase), jobID)
+	ui.Println2("Backup will be stored in: " + destinationPath)
 
 	rsyncNoPerms := false
 	if program == "rsync" {
