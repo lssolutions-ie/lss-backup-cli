@@ -372,14 +372,16 @@ func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Promp
 	}
 
 	if !changed {
-		fmt.Println("No changes made.")
+		ui.StatusWarn("No changes made.")
+		pauseForEnter()
 		return nil
 	}
 
 	if err := jobs.Save(job); err != nil {
 		return err
 	}
-	fmt.Println("Job updated.")
+	ui.StatusOK("Job updated.")
+	pauseForEnter()
 	return nil
 }
 
@@ -553,14 +555,15 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 		} else {
 			ui.StatusOK("Backup completed successfully.")
 		}
+		pauseForEnter()
 	case "Initialise Repository Only":
 		if err := initRepoOnly(paths, job); err != nil {
 			ui.StatusError("Init failed: " + err.Error())
 		} else {
 			ui.StatusOK("Repository initialised successfully.")
 		}
+		pauseForEnter()
 	}
-	fmt.Println()
 	return nil
 }
 
@@ -1097,7 +1100,8 @@ func configureSchedule(prompter ui.Prompter, job config.Job) error {
 	if err := jobs.Save(job); err != nil {
 		return err
 	}
-	fmt.Println("Schedule updated.")
+	ui.StatusOK("Schedule updated.")
+	pauseForEnter()
 	return nil
 }
 
@@ -1110,7 +1114,8 @@ func configureNotifications(prompter ui.Prompter, job config.Job) error {
 	if err := jobs.Save(job); err != nil {
 		return err
 	}
-	fmt.Println("Notifications updated.")
+	ui.StatusOK("Notifications updated.")
+	pauseForEnter()
 	return nil
 }
 
@@ -1129,7 +1134,8 @@ func configureRetention(prompter ui.Prompter, job config.Job) error {
 	if err := jobs.Save(job); err != nil {
 		return err
 	}
-	fmt.Println("Retention updated.")
+	ui.StatusOK("Retention updated.")
+	pauseForEnter()
 	return nil
 }
 
@@ -1142,13 +1148,15 @@ func removeJob(paths app.Paths, prompter ui.Prompter, id string) error {
 		return err
 	}
 	if choice != "Yes - remove backup job" {
-		fmt.Println("Remove cancelled.")
+		ui.StatusWarn("Remove cancelled.")
+		pauseForEnter()
 		return nil
 	}
 	if err := jobs.Delete(paths, id); err != nil {
 		return err
 	}
-	fmt.Println("Backup job removed.")
+	ui.StatusOK("Backup job removed.")
+	pauseForEnter()
 	return nil
 }
 
