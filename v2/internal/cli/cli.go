@@ -98,7 +98,7 @@ func runMenu(paths app.Paths) error {
 				if err == errCancelled {
 					fmt.Println()
 					ui.StatusWarn("Backup job creation cancelled.")
-					time.Sleep(5 * time.Second)
+					pauseForEnter()
 				} else {
 					ui.StatusError(err.Error())
 					pauseForEnter()
