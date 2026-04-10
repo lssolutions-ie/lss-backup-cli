@@ -315,7 +315,7 @@ func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Promp
 
 	changed := false
 
-	if ok, err := prompter.Confirm(fmt.Sprintf("Name [%q] — change?", job.Name)); err != nil {
+	if ok, err := prompter.Confirm(fmt.Sprintf("Name [%s] — change?", job.Name)); err != nil {
 		return err
 	} else if ok {
 		if job.Name, err = prompter.Ask("New name", validateNonEmpty("name")); err != nil {
@@ -324,7 +324,7 @@ func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Promp
 		changed = true
 	}
 
-	if ok, err := prompter.Confirm(fmt.Sprintf("Program [%q] — change?", job.Program)); err != nil {
+	if ok, err := prompter.Confirm(fmt.Sprintf("Program [%s] — change?", job.Program)); err != nil {
 		return err
 	} else if ok {
 		if _, job.Program, err = prompter.Select("Select backup program", availablePrograms()); err != nil {
@@ -350,7 +350,7 @@ func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Promp
 		}
 	}
 
-	if ok, err := prompter.Confirm(fmt.Sprintf("Source path [%q] — change?", job.Source.Path)); err != nil {
+	if ok, err := prompter.Confirm(fmt.Sprintf("Source path [%s] — change?", job.Source.Path)); err != nil {
 		return err
 	} else if ok {
 		newSource, err := prompter.Ask("New source path", validateExistingDirectory)
@@ -376,7 +376,7 @@ func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Promp
 		changed = true
 	}
 
-	if ok, err := prompter.Confirm(fmt.Sprintf("Destination path [%q] — change?", job.Destination.Path)); err != nil {
+	if ok, err := prompter.Confirm(fmt.Sprintf("Destination path [%s] — change?", job.Destination.Path)); err != nil {
 		return err
 	} else if ok {
 		newDest, err := prompter.Ask("New destination path", validateDestinationPath)
@@ -464,9 +464,9 @@ func describeSchedule(s config.Schedule) string {
 		return fmt.Sprintf("monthly on day %d at %02d:%02d", s.DayOfMonth, s.Hour, s.Minute)
 	case "cron":
 		if desc, err := cronSchedule.ValidateCron(s.CronExpression); err == nil {
-			return fmt.Sprintf("cron %q — %s", s.CronExpression, desc)
+			return fmt.Sprintf("cron \"%s\" — %s", s.CronExpression, desc)
 		}
-		return fmt.Sprintf("cron %q", s.CronExpression)
+		return fmt.Sprintf("cron \"%s\"", s.CronExpression)
 	default:
 		return s.Mode
 	}
