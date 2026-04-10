@@ -1,6 +1,7 @@
 package engines
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -9,16 +10,31 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/retention"
 )
 
+// Snapshot represents a single restic snapshot.
+type Snapshot struct {
+	ID       string    `json:"id"`
+	ShortID  string    `json:"short_id"`
+	Time     time.Time `json:"time"`
+	Paths    []string  `json:"paths"`
+	Hostname string    `json:"hostname"`
+	Username string    `json:"username"`
+}
+
 type Engine interface {
 	Name() string
 	Init(job config.Job, output io.Writer) error
 	Run(job config.Job, output io.Writer) error
-	Restore(job config.Job, target string, output io.Writer) error
+	// Restore restores snapshotID ("latest" or a short/full snapshot ID) to target.
+	Restore(job config.Job, snapshotID string, target string, output io.Writer) error
+	// ListSnapshots returns structured snapshot metadata. Returns empty slice for
+	// engines that do not support snapshots (e.g. rsync).
+	ListSnapshots(job config.Job) ([]Snapshot, error)
 	Snapshots(job config.Job, output io.Writer) error
 }
 
@@ -116,7 +132,7 @@ func runForget(job config.Job, resticBin string, output io.Writer) error {
 	return nil
 }
 
-func (e ResticEngine) Restore(job config.Job, target string, output io.Writer) error {
+func (e ResticEngine) Restore(job config.Job, snapshotID string, target string, output io.Writer) error {
 	if strings.TrimSpace(job.Secrets.ResticPassword) == "" {
 		return fmt.Errorf("RESTIC_PASSWORD is required for restic jobs")
 	}
@@ -127,8 +143,11 @@ func (e ResticEngine) Restore(job config.Job, target string, output io.Writer) e
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return fmt.Errorf("create restore target: %w", err)
 	}
+	if snapshotID == "" {
+		snapshotID = "latest"
+	}
 
-	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "restore", "latest", "--target", target)
+	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "restore", snapshotID, "--target", target)
 	cmd.Stdout = output
 	cmd.Stderr = output
 	cmd.Env = buildEnv(
@@ -140,6 +159,33 @@ func (e ResticEngine) Restore(job config.Job, target string, output io.Writer) e
 		return fmt.Errorf("restic restore failed: %w", err)
 	}
 	return nil
+}
+
+func (e ResticEngine) ListSnapshots(job config.Job) ([]Snapshot, error) {
+	if strings.TrimSpace(job.Secrets.ResticPassword) == "" {
+		return nil, fmt.Errorf("RESTIC_PASSWORD is required for restic jobs")
+	}
+	resticBin, err := lookPath("restic")
+	if err != nil {
+		return nil, err
+	}
+
+	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "snapshots", "--json")
+	cmd.Env = buildEnv(
+		"RESTIC_PASSWORD="+job.Secrets.ResticPassword,
+		"AWS_ACCESS_KEY_ID="+job.Secrets.AWSAccessKeyID,
+		"AWS_SECRET_ACCESS_KEY="+job.Secrets.AWSSecretAccessKey,
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("restic snapshots failed: %w", err)
+	}
+
+	var snapshots []Snapshot
+	if err := json.Unmarshal(out, &snapshots); err != nil {
+		return nil, fmt.Errorf("parse snapshots: %w", err)
+	}
+	return snapshots, nil
 }
 
 func (e ResticEngine) Snapshots(job config.Job, output io.Writer) error {
@@ -256,7 +302,11 @@ func (e RsyncEngine) Snapshots(job config.Job, output io.Writer) error {
 	return nil
 }
 
-func (e RsyncEngine) Restore(job config.Job, target string, output io.Writer) error {
+func (e RsyncEngine) ListSnapshots(job config.Job) ([]Snapshot, error) {
+	return nil, nil // rsync has no snapshot history
+}
+
+func (e RsyncEngine) Restore(job config.Job, snapshotID string, target string, output io.Writer) error {
 	rsyncBin, err := lookPath("rsync")
 	if err != nil {
 		return err

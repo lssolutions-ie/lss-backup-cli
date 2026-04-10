@@ -86,7 +86,7 @@ func (s Service) Run(job config.Job) (RunResult, error) {
 	return result, nil
 }
 
-func (s Service) Restore(job config.Job, target string) error {
+func (s Service) Restore(job config.Job, snapshotID string, target string) error {
 	if err := validateSupportedSlice(job); err != nil {
 		return err
 	}
@@ -103,9 +103,10 @@ func (s Service) Restore(job config.Job, target string) error {
 	defer closeLog()
 
 	fmt.Fprintf(writer, "Starting restore for job %s (%s)\n", job.ID, engine.Name())
+	fmt.Fprintf(writer, "Snapshot: %s\n", snapshotID)
 	fmt.Fprintf(writer, "Restore target: %s\n", target)
 
-	if err := engine.Restore(job, target, writer); err != nil {
+	if err := engine.Restore(job, snapshotID, target, writer); err != nil {
 		fmt.Fprintf(writer, "Restore failed: %v\n", err)
 		return fmt.Errorf("restore for job %s (%s) failed; see log %s: %w", job.ID, engine.Name(), logFile, err)
 	}

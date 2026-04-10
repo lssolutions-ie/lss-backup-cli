@@ -1111,8 +1111,153 @@ func runRestoreWizard(paths app.Paths, prompter ui.Prompter, id string) error {
 		return err
 	}
 
+	// rsync has no snapshot history — restore directly.
+	if job.Program != "restic" {
+		service := runner.NewService()
+		fmt.Println()
+		ui.Divider()
+		fmt.Println()
+		err := service.Restore(job, "latest", target)
+		fmt.Println()
+		ui.Divider()
+		return err
+	}
+
+	// Ask for a date filter to narrow down the snapshot list.
+	snapshotID, err := promptSnapshotPicker(prompter, job)
+	if err != nil {
+		return err
+	}
+	if snapshotID == "" {
+		return nil // user cancelled
+	}
+
 	service := runner.NewService()
-	return service.Restore(job, target)
+	fmt.Println()
+	ui.Divider()
+	fmt.Println()
+	err = service.Restore(job, snapshotID, target)
+	fmt.Println()
+	ui.Divider()
+	return err
+}
+
+type snapshotDateRange struct {
+	From time.Time
+	To   time.Time
+}
+
+func promptSnapshotPicker(prompter ui.Prompter, job config.Job) (string, error) {
+	_, filterChoice, err := prompter.Select("Filter snapshots by date", []string{
+		"Today",
+		"This Week",
+		"This Month",
+		"This Year",
+		"Custom Date (DD/MM/YYYY)",
+	})
+	if err != nil {
+		return "", err
+	}
+	if filterChoice == "" {
+		return "", nil
+	}
+
+	dr, err := resolveSnapshotDateRange(filterChoice, prompter)
+	if err != nil {
+		return "", err
+	}
+
+	ui.Println2("Loading snapshots...")
+	registry := engines.NewRegistry()
+	engine, err := registry.Get(job.Program)
+	if err != nil {
+		return "", err
+	}
+	all, err := engine.ListSnapshots(job)
+	if err != nil {
+		return "", err
+	}
+
+	// Filter by date range.
+	var filtered []engines.Snapshot
+	for _, s := range all {
+		if !s.Time.Before(dr.From) && s.Time.Before(dr.To) {
+			filtered = append(filtered, s)
+		}
+	}
+
+	if len(filtered) == 0 {
+		ui.StatusWarn("No snapshots found for the selected period.")
+		pauseForEnter()
+		return "", nil
+	}
+
+	// Sort newest first.
+	sort.Slice(filtered, func(i, j int) bool {
+		return filtered[i].Time.After(filtered[j].Time)
+	})
+
+	options := make([]string, len(filtered))
+	for i, s := range filtered {
+		options[i] = fmt.Sprintf("%s  [%s]  %s",
+			s.Time.Local().Format("02/01/2006  15:04:05"),
+			s.ShortID,
+			strings.Join(s.Paths, ", "),
+		)
+	}
+
+	idx, _, err := prompter.Select(
+		fmt.Sprintf("%d snapshot(s) found — select one to restore", len(filtered)),
+		options,
+	)
+	if err != nil {
+		return "", err
+	}
+	if idx == -1 {
+		return "", nil
+	}
+
+	return filtered[idx].ShortID, nil
+}
+
+func resolveSnapshotDateRange(choice string, prompter ui.Prompter) (snapshotDateRange, error) {
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	switch choice {
+	case "Today":
+		return snapshotDateRange{From: today, To: now.Add(time.Minute)}, nil
+	case "This Week":
+		wd := int(now.Weekday())
+		if wd == 0 {
+			wd = 7
+		}
+		monday := today.AddDate(0, 0, -(wd - 1))
+		return snapshotDateRange{From: monday, To: now.Add(time.Minute)}, nil
+	case "This Month":
+		return snapshotDateRange{
+			From: time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()),
+			To:   now.Add(time.Minute),
+		}, nil
+	case "This Year":
+		return snapshotDateRange{
+			From: time.Date(now.Year(), 1, 1, 0, 0, 0, 0, now.Location()),
+			To:   now.Add(time.Minute),
+		}, nil
+	case "Custom Date (DD/MM/YYYY)":
+		dateStr, err := prompter.Ask("Enter date (DD/MM/YYYY)", func(s string) error {
+			if _, err := time.Parse("02/01/2006", s); err != nil {
+				return fmt.Errorf("use DD/MM/YYYY format — e.g. 10/04/2026")
+			}
+			return nil
+		})
+		if err != nil {
+			return snapshotDateRange{}, err
+		}
+		t, _ := time.ParseInLocation("02/01/2006", dateStr, now.Location())
+		return snapshotDateRange{From: t, To: t.AddDate(0, 0, 1)}, nil
+	}
+	return snapshotDateRange{}, fmt.Errorf("unknown filter: %s", choice)
 }
 
 func runListSnapshots(paths app.Paths, id string) error {
