@@ -1054,28 +1054,49 @@ func printJobs(paths app.Paths) error {
 	} else {
 		ui.StatusWarn("Daemon: not running — scheduled jobs will not fire")
 	}
-	fmt.Println()
 
 	if len(items) == 0 {
+		fmt.Println()
 		ui.Println2("No backup jobs configured.")
 		return nil
 	}
 
-	for i, item := range items {
-		if i > 0 {
-			fmt.Println()
+	const ind = "  "
+	const colID = 10
+	const colProg = 8
+	const colName = 22
+	const colLast = 26
+
+	fmt.Println()
+	fmt.Printf("%s%-*s  %-*s  %-*s  %-*s  %s\n", ind,
+		colID, "ID",
+		colProg, "Program",
+		colName, "Name",
+		colLast, "Last Run",
+		"Next Run",
+	)
+	fmt.Printf("%s%s  %s  %s  %s  %s\n", ind,
+		strings.Repeat("─", colID),
+		strings.Repeat("─", colProg),
+		strings.Repeat("─", colName),
+		strings.Repeat("─", colLast),
+		strings.Repeat("─", 24),
+	)
+
+	for _, item := range items {
+		name := item.Name
+		if len(name) > colName {
+			name = name[:colName-1] + "…"
 		}
-		fmt.Printf("  %s  %s  %s\n", ui.Bold(item.ID), item.Program, item.Name)
-		lr := item.LastRun
-		if lr == nil {
-			ui.Println2("  Last run: never")
-		} else if lr.Status == "success" {
-			ui.StatusOK("Last:  " + formatLastRun(lr))
-		} else {
-			ui.StatusError("Last:  " + formatLastRun(lr))
-		}
-		ui.Println2("  Next:  " + formatNextRun(item.NextRun))
+		fmt.Printf("%s%-*s  %-*s  %-*s  %-*s  %s\n", ind,
+			colID, item.ID,
+			colProg, item.Program,
+			colName, name,
+			colLast, formatLastRun(item.LastRun),
+			formatNextRunShort(item.NextRun),
+		)
 	}
+	fmt.Println()
 	return nil
 }
 
@@ -1938,7 +1959,7 @@ func selectJob(paths app.Paths, prompter ui.Prompter) (config.Job, error) {
 	options := make([]string, 0, len(items)+1)
 	lookup := make(map[string]string, len(items))
 	for _, item := range items {
-		label := fmt.Sprintf("%s | %s | %s | %s", item.ID, item.Program, item.Name, formatLastRun(item.LastRun))
+		label := fmt.Sprintf("%s — %s", item.ID, item.Name)
 		options = append(options, label)
 		lookup[label] = item.ID
 	}
@@ -2460,6 +2481,18 @@ func formatNextRun(r *runner.NextRunResult) string {
 		)
 	}
 	return fmt.Sprintf("%s (in %s)", due.Format("2006-01-02 15:04"), time.Until(r.NextRun).Round(time.Minute))
+}
+
+// formatNextRunShort returns a compact next-run string for table display.
+func formatNextRunShort(r *runner.NextRunResult) string {
+	if r == nil {
+		return "—"
+	}
+	now := time.Now()
+	if r.NextRun.Before(now) {
+		return "OVERDUE"
+	}
+	return fmt.Sprintf("%s (in %s)", r.NextRun.Local().Format("2006-01-02 15:04"), time.Until(r.NextRun).Round(time.Minute))
 }
 
 func validateAbsolutePath(value string) error {
