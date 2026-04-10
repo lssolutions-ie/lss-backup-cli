@@ -1479,18 +1479,32 @@ func printLogTable(rows []logRow, pageSize int) {
 		fmt.Println()
 		fmt.Printf("%s%-*s%s%s\n", rowIndent, timeCol, "Time", sep, "Message")
 		fmt.Printf("%s%-*s%s%s\n", rowIndent, timeCol, divTime, sep, divMsg)
-		for _, r := range rows[shown:end] {
+		blankTime := strings.Repeat(" ", timeCol)
+		prevTime := ""
+		for i, r := range rows[shown:end] {
+			// Within a same-second group, suppress the timestamp after the first row.
 			t := r.time
-			if t == "" {
-				t = strings.Repeat(" ", timeCol)
+			isNewGroup := t != prevTime
+			if !isNewGroup {
+				t = blankTime
 			}
+			if t == "" {
+				t = blankTime
+			}
+			prevTime = r.time
+
+			// Blank line before each new group (but not before the very first).
+			if isNewGroup && i > 0 {
+				fmt.Println()
+			}
+
 			msgLines := wrapMessage(r.message, msgWidth)
 			fmt.Printf("%s%-*s%s%s\n", rowIndent, timeCol, t, sep, msgLines[0])
 			for _, cont := range msgLines[1:] {
 				fmt.Printf("%s%s\n", contIndent, cont)
 			}
-			fmt.Println()
 		}
+		fmt.Println()
 		shown = end
 
 		if shown < total {
