@@ -56,6 +56,9 @@ func Run(args []string) error {
 		if len(args) == 1 && args[0] == "--uninstall" {
 			return uninstall.Run()
 		}
+		if len(args) == 1 && args[0] == "--update" {
+			return runUpdateCLI(paths)
+		}
 		if len(args) == 1 && args[0] == "daemon" {
 			return daemon.Run(paths)
 		}
@@ -187,6 +190,41 @@ func runCheckForUpdates(paths app.Paths, prompter ui.Prompter) error {
 	ui.Println2("Press Enter to exit...")
 	fmt.Scanln()
 	os.Exit(0)
+	return nil
+}
+
+// runUpdateCLI is the non-interactive update path triggered by --update.
+// It checks for a new release and installs it without prompting.
+func runUpdateCLI(paths app.Paths) error {
+	fmt.Printf("LSS Backup CLI %s — checking for updates...\n", version.Current)
+	fmt.Println()
+
+	result, err := updatecheck.Check()
+	if err != nil {
+		return err
+	}
+
+	if !result.UpdateAvailable {
+		ui.StatusOK(result.Message)
+		return nil
+	}
+
+	ui.StatusWarn(result.Message)
+	fmt.Println()
+	fmt.Println("  Updating does not remove existing backup jobs or configuration data.")
+	fmt.Println()
+
+	ui.Println2("Downloading and installing " + result.LatestVersion + "...")
+	if err := updatecheck.Install(result); err != nil {
+		return err
+	}
+
+	activitylog.Log(paths.LogsDir, fmt.Sprintf("update installed: %s", result.LatestVersion))
+	daemon.RestartService()
+	fmt.Println()
+	ui.StatusOK("Update installed successfully.")
+	fmt.Println()
+	ui.Println2("Please restart LSS Backup CLI to use the new version.")
 	return nil
 }
 
