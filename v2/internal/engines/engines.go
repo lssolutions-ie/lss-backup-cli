@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/executil"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/retention"
 )
 
@@ -85,6 +86,7 @@ func (e ResticEngine) Run(job config.Job, output io.Writer) error {
 		resticArgs = append(resticArgs, "--exclude-file="+job.Source.ExcludeFile)
 	}
 	cmd := exec.Command(resticBin, resticArgs...)
+	executil.HideWindow(cmd)
 	cmd.Stdout = output
 	cmd.Stderr = output
 	cmd.Env = buildEnv(
@@ -119,6 +121,7 @@ func runForget(job config.Job, resticBin string, output io.Writer) error {
 	fmt.Fprintln(output, "Running retention cleanup (restic forget --prune)...")
 	args := append([]string{"-r", job.Destination.Path, "forget", "--prune"}, flags...)
 	cmd := exec.Command(resticBin, args...)
+	executil.HideWindow(cmd)
 	cmd.Stdout = output
 	cmd.Stderr = output
 	cmd.Env = buildEnv(
@@ -148,6 +151,7 @@ func (e ResticEngine) Restore(job config.Job, snapshotID string, target string, 
 	}
 
 	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "restore", snapshotID, "--target", target)
+	executil.HideWindow(cmd)
 	cmd.Stdout = output
 	cmd.Stderr = output
 	cmd.Env = buildEnv(
@@ -171,6 +175,7 @@ func (e ResticEngine) ListSnapshots(job config.Job) ([]Snapshot, error) {
 	}
 
 	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "snapshots", "--json")
+	executil.HideWindow(cmd)
 	cmd.Env = buildEnv(
 		"RESTIC_PASSWORD="+job.Secrets.ResticPassword,
 		"AWS_ACCESS_KEY_ID="+job.Secrets.AWSAccessKeyID,
@@ -198,6 +203,7 @@ func (e ResticEngine) Snapshots(job config.Job, output io.Writer) error {
 	}
 
 	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "snapshots")
+	executil.HideWindow(cmd)
 	cmd.Stdout = output
 	cmd.Stderr = output
 	cmd.Env = buildEnv(
@@ -282,6 +288,7 @@ func (e RsyncEngine) Run(job config.Job, output io.Writer) error {
 	rsyncArgs = append(rsyncArgs, sourcePath, destinationPath)
 
 	cmd := exec.Command(rsyncBin, rsyncArgs...)
+	executil.HideWindow(cmd)
 	cmd.Stdout = output
 	cmd.Stderr = output
 
@@ -319,6 +326,7 @@ func (e RsyncEngine) Restore(job config.Job, snapshotID string, target string, o
 	targetPath := filepath.Clean(target) + string(os.PathSeparator)
 
 	cmd := exec.Command(rsyncBin, "-a", sourcePath, targetPath)
+	executil.HideWindow(cmd)
 	cmd.Stdout = output
 	cmd.Stderr = output
 	if err := cmd.Run(); err != nil {
@@ -338,6 +346,7 @@ func ensureResticRepo(job config.Job, resticBin string, output io.Writer) error 
 
 	fmt.Fprintln(output, "Restic repository not found, initialising...")
 	initCmd := exec.Command(resticBin, "-r", job.Destination.Path, "init")
+	executil.HideWindow(initCmd)
 	initCmd.Stdout = output
 	initCmd.Stderr = output
 	initCmd.Env = buildEnv(
