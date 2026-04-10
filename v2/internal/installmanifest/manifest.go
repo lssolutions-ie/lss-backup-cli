@@ -24,6 +24,7 @@ type Manifest struct {
 	JobsDir        string       `json:"jobs_dir"`
 	LogsDir        string       `json:"logs_dir"`
 	StateDir       string       `json:"state_dir"`
+	DaemonAccount  string       `json:"daemon_account,omitempty"`
 	Dependencies   []Dependency `json:"dependencies"`
 }
 

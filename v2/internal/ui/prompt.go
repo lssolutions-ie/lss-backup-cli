@@ -22,7 +22,7 @@ func NewPrompter() Prompter {
 
 func (p Prompter) Ask(question string, validate func(string) error) (string, error) {
 	for {
-		fmt.Printf("%s: ", question)
+		fmt.Printf("  %s: ", question)
 		text, err := p.reader.ReadString('\n')
 		if err != nil {
 			return "", err
@@ -31,7 +31,7 @@ func (p Prompter) Ask(question string, validate func(string) error) (string, err
 		text = strings.TrimSpace(text)
 		if validate != nil {
 			if err := validate(text); err != nil {
-				fmt.Println("Invalid input:", err)
+				fmt.Printf("  %s[!]%s %v\n", colRed, colReset, err)
 				continue
 			}
 		}
@@ -58,7 +58,7 @@ func (p Prompter) Confirm(question string) (bool, error) {
 // Falls back to plain Ask if stdin is not a terminal (e.g. piped input).
 func (p Prompter) AskPassword(question string) (string, error) {
 	for {
-		fmt.Printf("%s: ", question)
+		fmt.Printf("  %s: ", question)
 		if term.IsTerminal(int(os.Stdin.Fd())) {
 			password, err := term.ReadPassword(int(os.Stdin.Fd()))
 			fmt.Println()
@@ -67,7 +67,7 @@ func (p Prompter) AskPassword(question string) (string, error) {
 			}
 			value := strings.TrimSpace(string(password))
 			if value == "" {
-				fmt.Println("Password cannot be empty.")
+				fmt.Printf("  %s[!]%s Password cannot be empty.\n", colRed, colReset)
 				continue
 			}
 			return value, nil
@@ -79,7 +79,7 @@ func (p Prompter) AskPassword(question string) (string, error) {
 		}
 		value := strings.TrimSpace(text)
 		if value == "" {
-			fmt.Println("Password cannot be empty.")
+			fmt.Printf("  %s[!]%s Password cannot be empty.\n", colRed, colReset)
 			continue
 		}
 		return value, nil
@@ -92,24 +92,32 @@ func (p Prompter) Select(title string, options []string) (int, string, error) {
 	}
 
 	for {
-		fmt.Println(title)
-		for i, option := range options {
-			fmt.Printf("%d. %s\n", i+1, option)
+		if title != "" {
+			fmt.Printf("  %s%s%s\n", colBold, title, colReset)
+			fmt.Println()
 		}
+		for i, option := range options {
+			fmt.Printf("  %s%d)%s  %s\n", colBold, i+1, colReset, option)
+		}
+		fmt.Println()
+		Divider()
+		fmt.Println()
 
-		answer, err := p.Ask("Select option number (Enter to go back)", func(value string) error {
-			if strings.TrimSpace(value) == "" {
+		answer, err := p.Ask(
+			fmt.Sprintf("Choose [1-%d] or Enter to go back", len(options)),
+			func(value string) error {
+				if strings.TrimSpace(value) == "" {
+					return nil
+				}
+				number, err := strconv.Atoi(value)
+				if err != nil {
+					return fmt.Errorf("enter a number")
+				}
+				if number < 1 || number > len(options) {
+					return fmt.Errorf("enter a number between 1 and %d", len(options))
+				}
 				return nil
-			}
-			number, err := strconv.Atoi(value)
-			if err != nil {
-				return fmt.Errorf("enter a number")
-			}
-			if number < 1 || number > len(options) {
-				return fmt.Errorf("enter a number between 1 and %d", len(options))
-			}
-			return nil
-		})
+			})
 		if err != nil {
 			return -1, "", err
 		}

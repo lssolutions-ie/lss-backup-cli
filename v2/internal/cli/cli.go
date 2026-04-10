@@ -65,11 +65,10 @@ func runMenu(paths app.Paths) error {
 	prompter := ui.NewPrompter()
 
 	for {
-		fmt.Println("")
-		fmt.Println("LSS Backup CLI v2")
-		fmt.Println("=================")
+		ui.ClearScreen()
+		ui.Header("LSS Backup CLI  " + version.Current)
 
-		_, choice, err := prompter.Select("Main Menu", []string{
+		_, choice, err := prompter.Select("", []string{
 			"Create Backup",
 			"Manage Backup",
 			"Import Backup",
@@ -106,31 +105,35 @@ func runMenu(paths app.Paths) error {
 			runAbout()
 		case "Exit":
 			activitylog.Log(paths.LogsDir, "program exited")
-			fmt.Println("Good bye.")
+			ui.Println2("Good bye.")
 			return nil
 		}
 	}
 }
 
 func runCheckForUpdates(paths app.Paths, prompter ui.Prompter) error {
-	fmt.Println("")
-	fmt.Println("Check For Updates")
-	fmt.Println("-----------------")
+	ui.SectionHeader("Check For Updates")
 
 	result, err := updatecheck.Check()
 	if err != nil {
 		return err
 	}
 
-	fmt.Println(result.Message)
+	if result.UpdateAvailable {
+		ui.StatusWarn(result.Message)
+	} else {
+		ui.StatusOK(result.Message)
+	}
 	if result.LatestVersion != "" {
-		fmt.Println("Latest GitHub tag:", result.LatestVersion)
+		ui.Println2("Latest: " + result.LatestVersion)
 	}
 	if !result.UpdateAvailable {
 		return nil
 	}
 
-	fmt.Println("Updating LSS Backup CLI does not remove existing backup jobs or configuration data.")
+	fmt.Println()
+	ui.Println2("Updating does not remove existing backup jobs or configuration data.")
+	fmt.Println()
 
 	_, installChoice, err := prompter.Select("Would you like to install this update now?", []string{
 		"Yes, install update now",
@@ -143,66 +146,63 @@ func runCheckForUpdates(paths app.Paths, prompter ui.Prompter) error {
 		return nil
 	}
 
-	fmt.Println("Downloading and installing update...")
+	ui.Println2("Downloading and installing update...")
 	if err := updatecheck.Install(result); err != nil {
 		return err
 	}
 
 	activitylog.Log(paths.LogsDir, fmt.Sprintf("update installed: %s", result.LatestVersion))
-	fmt.Println("Update installed successfully.")
-	fmt.Println("Restarting backup daemon...")
+	ui.StatusOK("Update installed successfully.")
+	ui.Println2("Restarting backup daemon...")
 	daemon.RestartService()
-	fmt.Println("Please restart LSS Backup CLI to use the new version.")
+	ui.Println2("Please restart LSS Backup CLI to use the new version.")
 	os.Exit(0)
 	return nil
 }
 
 func runAbout() {
-	fmt.Println("")
-	fmt.Println("About LSS Backup CLI")
-	fmt.Println("====================")
-	fmt.Printf("Version:  %s\n", version.Current)
-	fmt.Printf("Platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
-	fmt.Printf("Go:       %s\n", runtime.Version())
-	fmt.Println("")
+	ui.SectionHeader("About LSS Backup CLI")
+	ui.KeyValue("Version:", version.Current)
+	ui.KeyValue("Platform:", runtime.GOOS+"/"+runtime.GOARCH)
+	ui.KeyValue("Go:", runtime.Version())
 
 	rp, err := platform.CurrentRuntimePaths()
 	if err != nil {
-		fmt.Println("Paths: unavailable —", err)
+		ui.Println2("")
+		ui.StatusMissing("Paths unavailable: " + err.Error())
 	} else {
-		fmt.Println("Paths")
-		fmt.Println("-----")
-		fmt.Printf("  Binary:   %s\n", rp.BinPath)
-		fmt.Printf("  Config:   %s\n", rp.ConfigDir)
-		fmt.Printf("  Jobs:     %s\n", rp.JobsDir)
-		fmt.Printf("  Logs:     %s\n", rp.LogsDir)
-		fmt.Printf("  State:    %s\n", rp.StateDir)
-		fmt.Printf("  Manifest: %s\n", rp.ManifestPath)
-		fmt.Println("")
+		ui.SectionHeader("Paths")
+		ui.KeyValue("Binary:", rp.BinPath)
+		ui.KeyValue("Config:", rp.ConfigDir)
+		ui.KeyValue("Jobs:", rp.JobsDir)
+		ui.KeyValue("Logs:", rp.LogsDir)
+		ui.KeyValue("State:", rp.StateDir)
+		ui.KeyValue("Manifest:", rp.ManifestPath)
 
 		manifest, merr := installmanifest.Load(rp.ManifestPath)
-		if merr != nil {
-			fmt.Println("Install manifest: not found or unreadable")
-		} else {
-			fmt.Println("Installation")
-			fmt.Println("------------")
-			fmt.Printf("  Installed at:    %s\n", manifest.InstalledAt)
-			fmt.Printf("  Package manager: %s\n", manifest.PackageManager)
-			fmt.Println("")
-			fmt.Println("Dependencies")
-			fmt.Println("------------")
-			for _, dep := range manifest.Dependencies {
-				installed := "pre-existing"
-				if dep.InstalledByProgram {
-					installed = "installed by this program"
+		if merr == nil {
+			ui.SectionHeader("Installation")
+			ui.KeyValue("Installed at:", manifest.InstalledAt)
+			ui.KeyValue("Package manager:", manifest.PackageManager)
+			if manifest.DaemonAccount != "" {
+				ui.KeyValue("Daemon account:", manifest.DaemonAccount)
+			}
+			if len(manifest.Dependencies) > 0 {
+				ui.SectionHeader("Dependencies")
+				for _, dep := range manifest.Dependencies {
+					installed := "pre-existing"
+					if dep.InstalledByProgram {
+						installed = "installed by this program"
+					}
+					fmt.Printf("  %-10s  %-8s  %s  (%s)\n", dep.Name, dep.Manager, dep.PackageID, installed)
 				}
-				fmt.Printf("  %-10s  %-8s  %s  (%s)\n", dep.Name, dep.Manager, dep.PackageID, installed)
 			}
 		}
 	}
 
-	fmt.Println("")
-	fmt.Printf("Repository: https://github.com/%s\n", version.Repository)
+	fmt.Println()
+	ui.KeyValue("Repository:", "https://github.com/"+version.Repository)
+	fmt.Println()
 }
 
 func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Prompter) error {
@@ -211,11 +211,9 @@ func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Promp
 		return err
 	}
 
-	fmt.Println("")
-	fmt.Println("Edit Backup")
-	fmt.Println("-----------")
-	fmt.Printf("Job: %s | %s | %s\n", job.ID, job.Program, job.Name)
-	fmt.Println("")
+	ui.SectionHeader("Edit Backup")
+	fmt.Printf("  %s  %s  %s\n", ui.Bold(job.ID), job.Program, job.Name)
+	fmt.Println()
 
 	changed := false
 
@@ -373,9 +371,7 @@ func describeSchedule(s config.Schedule) string {
 }
 
 func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
-	fmt.Println("")
-	fmt.Println("Create Backup Job")
-	fmt.Println("-----------------")
+	ui.SectionHeader("Create Backup Job")
 
 	jobID, err := prompter.Ask("Backup job ID", validateJobID(paths))
 	if err != nil {
@@ -477,18 +473,21 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 
 	activitylog.Log(paths.LogsDir, fmt.Sprintf("job created: %s (%s)", job.ID, job.Name))
 	daemon.TriggerReload(paths.StateDir)
-	fmt.Println("")
-	fmt.Println("Backup job created successfully.")
-	fmt.Println("Job ID:", job.ID)
-	fmt.Println("Job file:", job.JobFile)
-	fmt.Println("Secrets file:", job.SecretsFile)
+	fmt.Println()
+	ui.StatusOK("Backup job created successfully.")
+	ui.KeyValue("Job ID:", job.ID)
+	ui.KeyValue("Job file:", job.JobFile)
+	ui.KeyValue("Secrets file:", job.SecretsFile)
+	fmt.Println()
 	return nil
 }
 
 func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 	// 1. Always list jobs first.
+	ui.ClearScreen()
+	ui.Header("Manage Backup")
 	if err := printJobs(paths); err != nil {
-		fmt.Println("List failed:", err)
+		ui.StatusError("Could not list jobs: " + err.Error())
 	}
 
 	// 2. Bail out early if there are no jobs.
@@ -497,14 +496,16 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 		return err
 	}
 	if len(allJobs) == 0 {
-		fmt.Println("")
-		fmt.Println("Warning: no backup jobs found. Create a backup job first.")
-		fmt.Print("Press Enter to continue...")
+		fmt.Println()
+		ui.StatusWarn("No backup jobs found. Create a backup job first.")
+		fmt.Println()
+		ui.Println2("Press Enter to continue...")
 		fmt.Scanln()
 		return nil
 	}
 
 	// 3. Select a job.
+	fmt.Println()
 	job, err := selectJob(paths, prompter)
 	if err != nil {
 		return err
@@ -517,8 +518,10 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 
 	// 4. Per-job action loop.
 	for {
-		fmt.Println("")
-		_, action, err := prompter.Select("Manage: "+job.Name, []string{
+		ui.ClearScreen()
+		ui.Header("Manage: " + job.Name)
+		printJobBrief(job)
+		_, action, err := prompter.Select("", []string{
 			"Run Backup Now",
 			"Restore Backup",
 			"List Snapshots",
@@ -640,8 +643,9 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 
 func runSettingsWizard(paths app.Paths, prompter ui.Prompter) error {
 	for {
-		fmt.Println("")
-		_, action, err := prompter.Select("Settings", []string{
+		ui.ClearScreen()
+		ui.Header("Settings")
+		_, action, err := prompter.Select("", []string{
 			"Manage Notification Channels",
 			"Backup LSS Backup Configuration",
 			"Configure Management Console",
@@ -688,10 +692,9 @@ func runRemoveSelectWizard(paths app.Paths, prompter ui.Prompter) error {
 }
 
 func runImportWizard(paths app.Paths, prompter ui.Prompter) error {
-	fmt.Println("")
-	fmt.Println("Import Previous Backup")
-	fmt.Println("----------------------")
-	fmt.Println("Provide a path to job.toml (v2) or a *-Configuration.env (v1 legacy).")
+	ui.SectionHeader("Import Backup")
+	ui.Println2("Provide a path to job.toml (v2) or a *-Configuration.env (v1 legacy).")
+	fmt.Println()
 
 	configFile, err := prompter.Ask("Path to config file", func(value string) error {
 		if err := validateAbsolutePath(value); err != nil {
@@ -822,20 +825,36 @@ func printJobs(paths app.Paths) error {
 		return err
 	}
 
-	fmt.Println("")
-	fmt.Println("Backup Jobs")
-	fmt.Println("-----------")
 	if len(items) == 0 {
-		fmt.Println("No jobs found.")
+		ui.Println2("No backup jobs configured.")
 		return nil
 	}
 
-	for _, item := range items {
-		fmt.Printf("%s | %s | %s\n", item.ID, item.Program, item.Name)
-		fmt.Printf("  Last run: %s\n", formatLastRun(item.LastRun))
-		fmt.Printf("  Next run: %s\n", formatNextRun(item.NextRun))
+	for i, item := range items {
+		if i > 0 {
+			fmt.Println()
+		}
+		fmt.Printf("  %s  %s  %s\n", ui.Bold(item.ID), item.Program, item.Name)
+		lr := item.LastRun
+		if lr == nil {
+			ui.Println2("  Last run: never")
+		} else if lr.Status == "success" {
+			ui.StatusOK("Last:  " + formatLastRun(lr))
+		} else {
+			ui.StatusError("Last:  " + formatLastRun(lr))
+		}
+		ui.Println2("  Next:  " + formatNextRun(item.NextRun))
 	}
 	return nil
+}
+
+// printJobBrief shows a one-line job summary — used at the top of the per-job manage loop.
+func printJobBrief(job config.Job) {
+	ui.KeyValue("ID:", job.ID)
+	ui.KeyValue("Program:", job.Program)
+	ui.KeyValue("Source:", job.Source.Path)
+	ui.KeyValue("Destination:", job.Destination.Path)
+	fmt.Println()
 }
 
 func showJob(paths app.Paths, id string) error {
@@ -844,14 +863,17 @@ func showJob(paths app.Paths, id string) error {
 		return err
 	}
 
-	fmt.Println("")
-	fmt.Printf("Job ID: %s\n", job.ID)
-	fmt.Printf("Name: %s\n", job.Name)
-	fmt.Printf("Program: %s\n", job.Program)
-	fmt.Printf("Job file: %s\n", job.JobFile)
-	fmt.Printf("Secrets file: %s\n", job.SecretsFile)
-	fmt.Println("")
+	ui.SectionHeader("Job Configuration")
+	ui.KeyValue("Job ID:", job.ID)
+	ui.KeyValue("Name:", job.Name)
+	ui.KeyValue("Program:", job.Program)
+	ui.KeyValue("Job file:", job.JobFile)
+	ui.KeyValue("Secrets file:", job.SecretsFile)
+	fmt.Println()
+	ui.Divider()
+	fmt.Println()
 	fmt.Print(job.Raw)
+	fmt.Println()
 	return nil
 }
 
@@ -871,12 +893,12 @@ func validateJob(paths app.Paths, id string) error {
 	errs := jobs.ValidateLayout(job)
 	if len(errs) > 0 {
 		for _, validationErr := range errs {
-			fmt.Println("-", validationErr)
+			ui.StatusMissing(validationErr.Error())
 		}
 		return fmt.Errorf("job %s failed validation", job.ID)
 	}
 
-	fmt.Printf("Job %s passed current validation.\n", job.ID)
+	ui.StatusOK("Job " + job.ID + " passed validation.")
 	return nil
 }
 
