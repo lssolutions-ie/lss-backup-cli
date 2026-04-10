@@ -1934,7 +1934,6 @@ func selectJobTable(paths app.Paths, prompter ui.Prompter) (config.Job, error) {
 	const ind = "  "
 	headerIndent := strings.Repeat(" ", prefixWidth)
 
-	fmt.Println()
 	fmt.Printf("%s%s%-*s  %-*s  %-*s  %-*s  %s\n", ind, headerIndent,
 		colID, "ID",
 		colProg, "Program",
@@ -1955,12 +1954,12 @@ func selectJobTable(paths app.Paths, prompter ui.Prompter) (config.Job, error) {
 		if len(name) > colName {
 			name = name[:colName-1] + "…"
 		}
-		fmt.Printf("%s%s  %-*s  %-*s  %-*s  %-*s  %s\n", ind,
+		fmt.Printf("%s%s  %-*s  %-*s  %-*s  %s  %s\n", ind,
 			ui.Bold(fmt.Sprintf("%d)", i+1)),
 			colID, item.ID,
 			colProg, item.Program,
 			colName, name,
-			colLast, formatLastRun(item.LastRun),
+			lastRunCell(item.LastRun, colLast),
 			formatNextRunShort(item.NextRun),
 		)
 	}
@@ -2473,6 +2472,27 @@ func formatLastRun(r *runner.RunResult) string {
 		return "never run"
 	}
 	return fmt.Sprintf("%s %s", r.Status, r.FinishedAt.Local().Format("2006-01-02 15:04"))
+}
+
+// lastRunCell returns a colWidth-visible-char padded cell with a coloured dot indicator.
+// ANSI codes and the UTF-8 dot (●, 3 bytes, 1 visible col) are accounted for manually
+// so that %-*s padding in the caller stays aligned.
+func lastRunCell(r *runner.RunResult, colWidth int) string {
+	if r == nil {
+		// plain ASCII — %-*s works fine here
+		return fmt.Sprintf("%-*s", colWidth, "never run")
+	}
+	var dot string
+	if r.Status == "success" {
+		dot = ui.Green("●")
+	} else {
+		dot = ui.Red("●")
+	}
+	date := r.FinishedAt.Local().Format("2006-01-02 15:04")
+	// Visible: 1 (dot) + 1 (space) + len(date) = 18 chars
+	visLen := 1 + 1 + len(date)
+	pad := strings.Repeat(" ", max(0, colWidth-visLen))
+	return dot + " " + date + pad
 }
 
 func formatNextRun(r *runner.NextRunResult) string {
