@@ -24,6 +24,7 @@ trap 'rm -rf "$BUILD_DIR"' EXIT
 
 PLATFORMS=(
   "windows amd64 .exe"
+  "windows arm64 .exe"
   "darwin  amd64 "
   "darwin  arm64 "
   "linux   amd64 "
