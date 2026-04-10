@@ -206,6 +206,7 @@ func runUpdateCLI(paths app.Paths) error {
 
 	if !result.UpdateAvailable {
 		ui.StatusOK(result.Message)
+		fmt.Println()
 		return nil
 	}
 
