@@ -407,11 +407,11 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 		return err
 	}
 
-	_, program, err := prompter.Select("Select backup program", append(availablePrograms(), "Cancel — return to main menu"))
+	_, program, err := prompter.Select("Select backup program", availablePrograms())
 	if err != nil {
 		return err
 	}
-	if program == "Cancel — return to main menu" {
+	if program == "" {
 		return errCancelled
 	}
 
