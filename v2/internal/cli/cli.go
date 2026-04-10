@@ -257,9 +257,11 @@ func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Promp
 	if ok, err := prompter.Confirm(fmt.Sprintf("Source path [%q] — change?", job.Source.Path)); err != nil {
 		return err
 	} else if ok {
-		if job.Source.Path, err = prompter.Ask("New source path", validateExistingDirectory); err != nil {
+		newSource, err := prompter.Ask("New source path", validateExistingDirectory)
+		if err != nil {
 			return err
 		}
+		job.Source.Path = cleanPath(newSource)
 		changed = true
 	}
 
@@ -281,8 +283,13 @@ func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Promp
 	if ok, err := prompter.Confirm(fmt.Sprintf("Destination path [%q] — change?", job.Destination.Path)); err != nil {
 		return err
 	} else if ok {
-		if job.Destination.Path, err = prompter.Ask("New destination path", validateAbsolutePath); err != nil {
+		newDest, err := prompter.Ask("New destination path", validateDestinationPath)
+		if err != nil {
 			return err
+		}
+		job.Destination.Path = cleanPath(newDest)
+		if _, statErr := os.Stat(job.Destination.Path); os.IsNotExist(statErr) {
+			fmt.Printf("Note: %s does not exist yet — it will be created automatically.\n", job.Destination.Path)
 		}
 		changed = true
 	}
@@ -392,15 +399,21 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 	if err != nil {
 		return err
 	}
+	sourcePath = cleanPath(sourcePath)
 
 	excludeFile, err := prompter.Ask("Exclude file path (leave blank for none)", validateOptionalExistingFile)
 	if err != nil {
 		return err
 	}
+	excludeFile = cleanPath(excludeFile)
 
-	destinationPath, err := prompter.Ask("Local destination directory", validateAbsolutePath)
+	destinationPath, err := prompter.Ask("Local destination directory", validateDestinationPath)
 	if err != nil {
 		return err
+	}
+	destinationPath = cleanPath(destinationPath)
+	if _, statErr := os.Stat(destinationPath); os.IsNotExist(statErr) {
+		fmt.Printf("Note: %s does not exist yet — it will be created automatically.\n", destinationPath)
 	}
 
 	rsyncNoPerms := false
@@ -1325,16 +1338,31 @@ func validateNonEmpty(label string) func(string) error {
 	}
 }
 
+// cleanPath strips surrounding quotes (common when pasting from File Explorer,
+// cmd, or PowerShell) and normalises separators and trailing slashes.
+func cleanPath(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+		value = value[1 : len(value)-1]
+		value = strings.TrimSpace(value)
+	}
+	if value == "" {
+		return value
+	}
+	return filepath.Clean(value)
+}
+
 func validateOptionalExistingFile(value string) error {
 	if strings.TrimSpace(value) == "" {
 		return nil
 	}
+	value = cleanPath(value)
 	if !filepath.IsAbs(value) {
 		return fmt.Errorf("path must be absolute")
 	}
 	info, err := os.Stat(value)
 	if err != nil {
-		return fmt.Errorf("file does not exist")
+		return fmt.Errorf("file does not exist: %s", value)
 	}
 	if info.IsDir() {
 		return fmt.Errorf("path must be a file, not a directory")
@@ -1343,15 +1371,27 @@ func validateOptionalExistingFile(value string) error {
 }
 
 func validateExistingDirectory(value string) error {
+	value = cleanPath(value)
 	if !filepath.IsAbs(value) {
-		return fmt.Errorf("path must be absolute")
+		return fmt.Errorf("path must be absolute (e.g. C:\\Users\\...)")
 	}
 	info, err := os.Stat(value)
 	if err != nil {
-		return fmt.Errorf("directory does not exist")
+		return fmt.Errorf("directory does not exist: %s", value)
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("path must be a directory")
+		return fmt.Errorf("path must be a directory, not a file")
+	}
+	return nil
+}
+
+func validateDestinationPath(value string) error {
+	value = cleanPath(value)
+	if value == "" {
+		return fmt.Errorf("path cannot be empty")
+	}
+	if !filepath.IsAbs(value) {
+		return fmt.Errorf("path must be absolute (e.g. C:\\Backup\\...)")
 	}
 	return nil
 }
@@ -1420,7 +1460,8 @@ func formatNextRun(r *runner.NextRunResult) string {
 }
 
 func validateAbsolutePath(value string) error {
-	if strings.TrimSpace(value) == "" {
+	value = cleanPath(value)
+	if value == "" {
 		return fmt.Errorf("path cannot be empty")
 	}
 	if !filepath.IsAbs(value) {
