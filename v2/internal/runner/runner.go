@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -175,6 +176,34 @@ func (b bestEffortWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// lineIndentWriter prefixes every new line with a fixed string.
+// Used to indent engine output on stdout so it aligns with the UI's 2-space convention.
+type lineIndentWriter struct {
+	w      io.Writer
+	prefix []byte
+	bol    bool // true when we are at the start of a new line
+}
+
+func newLineIndentWriter(w io.Writer, prefix string) *lineIndentWriter {
+	return &lineIndentWriter{w: w, prefix: []byte(prefix), bol: true}
+}
+
+func (l *lineIndentWriter) Write(p []byte) (int, error) {
+	var buf bytes.Buffer
+	for _, b := range p {
+		if l.bol {
+			buf.Write(l.prefix)
+			l.bol = false
+		}
+		buf.WriteByte(b)
+		if b == '\n' {
+			l.bol = true
+		}
+	}
+	l.w.Write(buf.Bytes()) //nolint:errcheck
+	return len(p), nil
+}
+
 func prepareLog(job config.Job) (string, io.Writer, func(), error) {
 	logDir := filepath.Join(job.JobDir, "logs")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
@@ -187,7 +216,7 @@ func prepareLog(job config.Job) (string, io.Writer, func(), error) {
 		return "", nil, nil, fmt.Errorf("create log file: %w", err)
 	}
 
-	writer := io.MultiWriter(bestEffortWriter{os.Stdout}, file)
+	writer := io.MultiWriter(newLineIndentWriter(bestEffortWriter{os.Stdout}, "  "), file)
 	closeFn := func() {
 		_ = file.Close()
 	}
