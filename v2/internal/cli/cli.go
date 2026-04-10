@@ -1240,7 +1240,7 @@ func showJobAuditLog(job config.Job) {
 		if e.Detail != "" {
 			msg = fmt.Sprintf("%-26s  %s", e.Action, e.Detail)
 		}
-		rows[i] = logRow{time: e.Time.Format("2006-01-02 15:04:05"), message: msg}
+		rows[i] = logRow{time: e.Time.Format("02-01-2006 15:04:05"), message: msg}
 	}
 	printLogTable(rows, auditPageSize)
 }
@@ -1284,10 +1284,11 @@ type logRow struct {
 }
 
 // parseLogLine splits a line into (timestamp, message).
-// Handles two formats:
+// Handles three formats:
 //
-//	activity/audit: "2006-01-02 15:04:05  message..."
-//	daemon (Go log): "2006/01/02 15:04:05 message..."
+//	new activity/audit (DD-MM-YYYY): "02-01-2006 15:04:05  message..."
+//	old activity/audit (YYYY-MM-DD): "2006-01-02 15:04:05  message..." — normalised to DD-MM-YYYY
+//	daemon (Go log):                 "2006/01/02 15:04:05 message..."   — normalised to DD-MM-YYYY
 //
 // Lines that don't match either format are returned with time="" and the full
 // line as the message.
@@ -1295,13 +1296,18 @@ type logRow struct {
 var multiSpace = regexp.MustCompile(`  +`)
 
 func parseLogLine(line string) logRow {
-	// activity/audit format: 19-char timestamp + double space
-	if len(line) > 21 && line[4] == '-' && line[7] == '-' && line[10] == ' ' && line[19] == ' ' && line[20] == ' ' {
+	// New activity/audit format: DD-MM-YYYY HH:MM:SS  message
+	if len(line) > 21 && line[2] == '-' && line[5] == '-' && line[10] == ' ' && line[19] == ' ' && line[20] == ' ' {
 		return logRow{time: line[:19], message: normaliseMsg(line[21:])}
 	}
-	// daemon/Go log format: "2006/01/02 15:04:05 "
+	// Old activity/audit format: YYYY-MM-DD HH:MM:SS  message — reformat to DD-MM-YYYY
+	if len(line) > 21 && line[4] == '-' && line[7] == '-' && line[10] == ' ' && line[19] == ' ' && line[20] == ' ' {
+		ts := line[8:10] + "-" + line[5:7] + "-" + line[0:4] + " " + line[11:19]
+		return logRow{time: ts, message: normaliseMsg(line[21:])}
+	}
+	// Daemon/Go log format: YYYY/MM/DD HH:MM:SS message — reformat to DD-MM-YYYY
 	if len(line) > 20 && line[4] == '/' && line[7] == '/' && line[10] == ' ' && line[19] == ' ' {
-		ts := strings.ReplaceAll(line[:10], "/", "-") + " " + line[11:19]
+		ts := line[8:10] + "-" + line[5:7] + "-" + line[0:4] + " " + line[11:19]
 		return logRow{time: ts, message: normaliseMsg(line[20:])}
 	}
 	return logRow{time: "", message: line}
@@ -1590,7 +1596,7 @@ func promptSnapshotPicker(prompter ui.Prompter, job config.Job) (string, error) 
 		"This Week",
 		"This Month",
 		"This Year",
-		"Custom Date (DD/MM/YYYY)",
+		"Custom Date (DD-MM-YYYY)",
 	})
 	if err != nil {
 		return "", err
@@ -1637,7 +1643,7 @@ func promptSnapshotPicker(prompter ui.Prompter, job config.Job) (string, error) 
 	options := make([]string, len(filtered))
 	for i, s := range filtered {
 		options[i] = fmt.Sprintf("%s  [%s]  %s",
-			s.Time.Local().Format("02/01/2006  15:04:05"),
+			s.Time.Local().Format("02-01-2006  15:04:05"),
 			s.ShortID,
 			strings.Join(s.Paths, ", "),
 		)
@@ -1681,17 +1687,17 @@ func resolveSnapshotDateRange(choice string, prompter ui.Prompter) (snapshotDate
 			From: time.Date(now.Year(), 1, 1, 0, 0, 0, 0, now.Location()),
 			To:   now.Add(time.Minute),
 		}, nil
-	case "Custom Date (DD/MM/YYYY)":
-		dateStr, err := prompter.Ask("Enter date (DD/MM/YYYY)", func(s string) error {
-			if _, err := time.Parse("02/01/2006", s); err != nil {
-				return fmt.Errorf("use DD/MM/YYYY format — e.g. 10/04/2026")
+	case "Custom Date (DD-MM-YYYY)":
+		dateStr, err := prompter.Ask("Enter date (DD-MM-YYYY)", func(s string) error {
+			if _, err := time.Parse("02-01-2006", s); err != nil {
+				return fmt.Errorf("use DD-MM-YYYY format — e.g. 10-04-2026")
 			}
 			return nil
 		})
 		if err != nil {
 			return snapshotDateRange{}, err
 		}
-		t, _ := time.ParseInLocation("02/01/2006", dateStr, now.Location())
+		t, _ := time.ParseInLocation("02-01-2006", dateStr, now.Location())
 		return snapshotDateRange{From: t, To: t.AddDate(0, 0, 1)}, nil
 	}
 	return snapshotDateRange{}, fmt.Errorf("unknown filter: %s", choice)
@@ -1733,7 +1739,7 @@ func runListSnapshots(paths app.Paths, id string) error {
 	for _, s := range snapshots {
 		fmt.Printf("  %-10s  %-19s  %-20s  %s\n",
 			s.ShortID,
-			s.Time.Local().Format("2006-01-02  15:04:05"),
+			s.Time.Local().Format("02-01-2006  15:04:05"),
 			s.Hostname,
 			strings.Join(s.Paths, ", "),
 		)
@@ -2476,7 +2482,7 @@ func formatLastRun(r *runner.RunResult) string {
 	if r == nil {
 		return "never run"
 	}
-	return fmt.Sprintf("%s %s", r.Status, r.FinishedAt.Local().Format("2006-01-02 15:04"))
+	return fmt.Sprintf("%s %s", r.Status, r.FinishedAt.Local().Format("02-01-2006 15:04"))
 }
 
 // lastRunCell returns a colWidth-visible-char padded cell with a coloured dot indicator.
@@ -2493,7 +2499,7 @@ func lastRunCell(r *runner.RunResult, colWidth int) string {
 	} else {
 		dot = ui.Red("●")
 	}
-	date := r.FinishedAt.Local().Format("2006-01-02 15:04")
+	date := r.FinishedAt.Local().Format("02-01-2006 15:04")
 	// Visible: 1 (dot) + 1 (space) + len(date) = 18 chars
 	visLen := 1 + 1 + len(date)
 	pad := strings.Repeat(" ", max(0, colWidth-visLen))
@@ -2510,10 +2516,10 @@ func formatNextRun(r *runner.NextRunResult) string {
 		overdue := now.Sub(r.NextRun).Round(time.Minute)
 		return fmt.Sprintf("OVERDUE by %s — daemon may not be running (last updated %s)",
 			overdue,
-			r.UpdatedAt.Local().Format("2006-01-02 15:04"),
+			r.UpdatedAt.Local().Format("02-01-2006 15:04"),
 		)
 	}
-	return fmt.Sprintf("%s (in %s)", due.Format("2006-01-02 15:04"), time.Until(r.NextRun).Round(time.Minute))
+	return fmt.Sprintf("%s (in %s)", due.Format("02-01-2006 15:04"), time.Until(r.NextRun).Round(time.Minute))
 }
 
 // formatNextRunShort returns a compact next-run string for table display.
@@ -2525,7 +2531,7 @@ func formatNextRunShort(r *runner.NextRunResult) string {
 	if r.NextRun.Before(now) {
 		return "OVERDUE"
 	}
-	return fmt.Sprintf("%s (in %s)", r.NextRun.Local().Format("2006-01-02 15:04"), time.Until(r.NextRun).Round(time.Minute))
+	return fmt.Sprintf("%s (in %s)", r.NextRun.Local().Format("02-01-2006 15:04"), time.Until(r.NextRun).Round(time.Minute))
 }
 
 func validateAbsolutePath(value string) error {

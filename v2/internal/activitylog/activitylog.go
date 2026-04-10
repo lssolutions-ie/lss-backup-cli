@@ -15,7 +15,7 @@ const (
 	activityMaxLines  = 10000
 	activityTrimTo    = 8000
 	auditRetainYears  = 8
-	timeFormat        = "2006-01-02 15:04:05"
+	timeFormat        = "02-01-2006 15:04:05"
 )
 
 // Log appends a timestamped entry to {logsDir}/activity.log.
@@ -120,7 +120,7 @@ func pruneAuditEvents(path string) {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		// Lines start with "2006-01-02 15:04:05  ..."
+		// Lines start with "02-01-2006 15:04:05  ..."
 		ts := ""
 		if len(line) >= len(timeFormat) {
 			ts = line[:len(timeFormat)]

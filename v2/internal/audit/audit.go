@@ -17,7 +17,7 @@ type Entry struct {
 }
 
 const logFileName = "audit.log"
-const timeFormat = "2006-01-02 15:04:05"
+const timeFormat = "02-01-2006 15:04:05"
 
 // Record appends a single entry to the job's audit log.
 // jobDir is the job's directory (e.g. /etc/lss-backup/jobs/my-job).
