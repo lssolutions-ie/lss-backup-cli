@@ -196,9 +196,9 @@ func runAbout() {
 	ui.KeyValue("Platform:", runtime.GOOS+"/"+runtime.GOARCH)
 	ui.KeyValue("Go:", runtime.Version())
 	if daemon.IsRunning() {
-		ui.KeyValue("Daemon:", "running")
+		ui.KeyValue("Daemon:", ui.Green("running"))
 	} else {
-		ui.KeyValue("Daemon:", "not running")
+		ui.KeyValue("Daemon:", ui.Red("not running"))
 	}
 
 	rp, err := platform.CurrentRuntimePaths()

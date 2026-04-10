@@ -26,6 +26,12 @@ func setColors() {
 // Bold wraps s in bold ANSI codes. Returns s unchanged when colors are disabled.
 func Bold(s string) string { return colBold + s + colReset }
 
+// Green wraps s in green ANSI codes. Returns s unchanged when colors are disabled.
+func Green(s string) string { return colGreen + s + colReset }
+
+// Red wraps s in red ANSI codes. Returns s unchanged when colors are disabled.
+func Red(s string) string { return colRed + s + colReset }
+
 const ruleLine = "──────────────────────────────────────────────────"
 
 // ClearScreen clears the terminal using ANSI escape codes.
