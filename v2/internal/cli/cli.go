@@ -678,9 +678,10 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			return err
 		}
 
-		if action != "" {
-			activitylog.Log(paths.LogsDir, fmt.Sprintf("manage %s (%s): %s", job.ID, job.Name, action))
+		if action == "" {
+			return nil
 		}
+		activitylog.Log(paths.LogsDir, fmt.Sprintf("manage %s (%s): %s", job.ID, job.Name, action))
 
 		switch action {
 		case "Run Backup Now":
@@ -1035,6 +1036,10 @@ func printJobBrief(job config.Job) {
 	ui.KeyValue("Program:", job.Program)
 	ui.KeyValue("Source:", job.Source.Path)
 	ui.KeyValue("Destination:", job.Destination.Path)
+	lr, _ := runner.LoadLastRun(job.JobDir)
+	ui.KeyValue("Last Run:", formatLastRun(lr))
+	nr, _ := runner.LoadNextRun(job.JobDir)
+	ui.KeyValue("Next Run:", formatNextRun(nr))
 	fmt.Println()
 }
 
