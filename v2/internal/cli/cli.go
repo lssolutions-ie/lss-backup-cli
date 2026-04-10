@@ -151,14 +151,23 @@ func runCheckForUpdates(paths app.Paths, prompter ui.Prompter) error {
 
 	ui.Println2("Downloading and installing update...")
 	if err := updatecheck.Install(result); err != nil {
-		return err
+		fmt.Println()
+		ui.StatusError(err.Error())
+		fmt.Println()
+		ui.Println2("Press Enter to return to the menu...")
+		fmt.Scanln()
+		return nil
 	}
 
 	activitylog.Log(paths.LogsDir, fmt.Sprintf("update installed: %s", result.LatestVersion))
 	ui.StatusOK("Update installed successfully.")
 	ui.Println2("Restarting backup daemon...")
 	daemon.RestartService()
+	fmt.Println()
 	ui.Println2("Please restart LSS Backup CLI to use the new version.")
+	fmt.Println()
+	ui.Println2("Press Enter to exit...")
+	fmt.Scanln()
 	os.Exit(0)
 	return nil
 }
@@ -715,7 +724,10 @@ func runSettingsWizard(paths app.Paths, prompter ui.Prompter) error {
 			fmt.Println("Final behavior should configure connection to a central server that observes and tracks backups.")
 		case "Check For Updates":
 			if err := runCheckForUpdates(paths, prompter); err != nil {
-				fmt.Println("Update check failed:", err)
+				ui.StatusError(err.Error())
+				fmt.Println()
+				ui.Println2("Press Enter to continue...")
+				fmt.Scanln()
 			}
 		case "Back To Main Menu":
 			return nil
