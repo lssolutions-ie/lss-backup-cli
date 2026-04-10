@@ -33,7 +33,7 @@ import (
 
 var jobIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
-var errCancelled = errors.New("cancelled")
+var errCancelled = ui.ErrCancelled
 
 // pauseForEnter prints a prompt and waits for the user to press Enter.
 // Use this before returning from any screen that shows output the user should read.
@@ -94,9 +94,15 @@ func runMenu(paths app.Paths) error {
 
 		switch choice {
 		case "Create Backup":
-			if err := runCreateWizard(paths, prompter); err != nil && err != errCancelled {
-				ui.StatusError(err.Error())
-				pauseForEnter()
+			if err := runCreateWizard(paths, prompter); err != nil {
+				if err == errCancelled {
+					fmt.Println()
+					ui.StatusWarn("Backup job creation cancelled.")
+					time.Sleep(5 * time.Second)
+				} else {
+					ui.StatusError(err.Error())
+					pauseForEnter()
+				}
 			}
 		case "Manage Backup":
 			if err := runManageWizard(paths, prompter); err != nil {
@@ -398,6 +404,8 @@ func describeSchedule(s config.Schedule) string {
 
 func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 	ui.SectionHeader("Create Backup Job")
+	ui.Println2("Press Enter at any step to cancel job creation.")
+	fmt.Println()
 
 	jobID, err := prompter.Ask("Backup job ID", validateJobID(paths))
 	if err != nil {
@@ -423,11 +431,24 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 	}
 	sourcePath = cleanPath(sourcePath)
 
-	excludeFile, err := prompter.Ask("Exclude file path (leave blank for none)", validateOptionalExistingFile)
+	var excludeFile string
+	_, hasExclude, err := prompter.Select("Exclude specific files or directories?", []string{
+		"No",
+		"Yes — specify an exclude file",
+	})
 	if err != nil {
 		return err
 	}
-	excludeFile = cleanPath(excludeFile)
+	if hasExclude == "" {
+		return errCancelled
+	}
+	if strings.HasPrefix(hasExclude, "Yes") {
+		excludeFile, err = prompter.Ask("Path to exclude file", validateExistingFile)
+		if err != nil {
+			return err
+		}
+		excludeFile = cleanPath(excludeFile)
+	}
 
 	destinationBase, err := prompter.Ask("Local destination directory", validateDestinationPath)
 	if err != nil {
@@ -1212,17 +1233,17 @@ func promptSchedule(prompter ui.Prompter) (config.Schedule, error) {
 			ui.Println2("  @daily               Every day at midnight")
 			ui.Println2("  @hourly              Every hour")
 			fmt.Println()
-			expr, err := prompter.Ask("Cron expression", nil)
+			expr, err := prompter.Ask("Cron expression", func(v string) error {
+				_, err := cronSchedule.ValidateCron(v)
+				return err
+			})
+			if err == errCancelled {
+				continue // back to schedule select
+			}
 			if err != nil {
 				return config.Schedule{}, err
 			}
-			desc, err := cronSchedule.ValidateCron(expr)
-			if err != nil {
-				fmt.Println()
-				ui.StatusError("Invalid: " + err.Error())
-				fmt.Println()
-				continue
-			}
+			desc, _ := cronSchedule.ValidateCron(expr)
 			fmt.Println()
 			ui.StatusOK("Schedule: " + desc)
 			fmt.Println()
@@ -1244,8 +1265,7 @@ func promptNotifications(prompter ui.Prompter) (config.Notifications, error) {
 	if hcChoice == "Yes" {
 		notify.HealthchecksEnabled = true
 
-		ui.Println2("Healthchecks domain (press Enter for " + healthchecksPkg.DefaultDomain + "):")
-		domain, err := prompter.Ask("Domain", nil)
+		domain, err := prompter.AskOptional("Healthchecks domain (Enter for " + healthchecksPkg.DefaultDomain + ")")
 		if err != nil {
 			return config.Notifications{}, err
 		}
@@ -1469,10 +1489,7 @@ func cleanPath(value string) string {
 	return filepath.Clean(value)
 }
 
-func validateOptionalExistingFile(value string) error {
-	if strings.TrimSpace(value) == "" {
-		return nil
-	}
+func validateExistingFile(value string) error {
 	value = cleanPath(value)
 	if !filepath.IsAbs(value) {
 		return fmt.Errorf("path must be absolute")
@@ -1485,6 +1502,13 @@ func validateOptionalExistingFile(value string) error {
 		return fmt.Errorf("path must be a file, not a directory")
 	}
 	return nil
+}
+
+func validateOptionalExistingFile(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return validateExistingFile(value)
 }
 
 func validateExistingDirectory(value string) error {
