@@ -223,7 +223,7 @@ func prepareLogInDir(job config.Job, subdir string) (string, io.Writer, func(), 
 		return "", nil, nil, fmt.Errorf("create log directory: %w", err)
 	}
 
-	logFile := filepath.Join(logDir, time.Now().Format("2006-01-02--15-04-05")+".log")
+	logFile := filepath.Join(logDir, time.Now().Format("02-01-2006--15-04-05")+".log")
 	file, err := os.Create(logFile)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("create log file: %w", err)
