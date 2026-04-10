@@ -128,6 +128,9 @@ func runCheckForUpdates(paths app.Paths, prompter ui.Prompter) error {
 		ui.Println2("Latest: " + result.LatestVersion)
 	}
 	if !result.UpdateAvailable {
+		fmt.Println()
+		ui.Println2("Press Enter to return to the menu...")
+		fmt.Scanln()
 		return nil
 	}
 
