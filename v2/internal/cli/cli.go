@@ -650,10 +650,11 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			if err := runRestoreWizard(paths, prompter, job.ID); err != nil {
 				ui.StatusError(err.Error())
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("restore failed: %s (%s) — %v", job.ID, job.Name, err))
-				pauseForEnter()
 			} else {
+				ui.StatusOK("Restore completed successfully.")
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("restore completed: %s (%s)", job.ID, job.Name))
 			}
+			pauseForEnter()
 		case "List Snapshots":
 			if err := runListSnapshots(paths, job.ID); err != nil {
 				ui.StatusError(err.Error())
@@ -739,7 +740,8 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			pauseForEnter()
 		case "Delete Backup":
 			if err := removeJob(paths, prompter, job.ID); err != nil {
-				fmt.Println("Delete failed:", err)
+				ui.StatusError("Delete failed: " + err.Error())
+				pauseForEnter()
 				continue
 			}
 			activitylog.Log(paths.LogsDir, fmt.Sprintf("job deleted: %s (%s)", job.ID, job.Name))
@@ -874,7 +876,8 @@ func runImportV2(paths app.Paths, prompter ui.Prompter, jobFile string) error {
 
 	activitylog.Log(paths.LogsDir, fmt.Sprintf("job imported (v2): %s (%s)", job.ID, job.Name))
 	daemon.TriggerReload(paths.StateDir)
-	fmt.Println("Imported backup job:", job.ID)
+	ui.StatusOK("Imported backup job: " + job.ID)
+	pauseForEnter()
 	return nil
 }
 
@@ -916,14 +919,16 @@ func runImportLegacy(paths app.Paths, prompter ui.Prompter, envFile string) erro
 
 	activitylog.Log(paths.LogsDir, fmt.Sprintf("job imported (v1): %s (%s)", job.ID, job.Name))
 	daemon.TriggerReload(paths.StateDir)
-	fmt.Println("")
-	fmt.Println("Backup job imported from v1 config.")
-	fmt.Println("Job ID:", job.ID)
-	fmt.Println("Job file:", job.JobFile)
-	fmt.Println("Secrets file:", job.SecretsFile)
+	fmt.Println()
+	ui.StatusOK("Backup job imported from v1 config.")
+	ui.KeyValue("Job ID:", job.ID)
+	ui.KeyValue("Job file:", job.JobFile)
+	ui.KeyValue("Secrets file:", job.SecretsFile)
 	if len(result.Warnings) > 0 {
-		fmt.Println("Review the warnings above and verify the job configuration before running.")
+		fmt.Println()
+		ui.StatusWarn("Review the warnings above and verify the job configuration before running.")
 	}
+	pauseForEnter()
 	return nil
 }
 
