@@ -35,6 +35,14 @@ var jobIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 var errCancelled = errors.New("cancelled")
 
+// pauseForEnter prints a prompt and waits for the user to press Enter.
+// Use this before returning from any screen that shows output the user should read.
+func pauseForEnter() {
+	fmt.Println()
+	ui.Println2("Press Enter to continue...")
+	fmt.Scanln()
+}
+
 func Run(args []string) error {
 	paths, err := app.DiscoverPaths()
 	if err != nil {
@@ -87,19 +95,23 @@ func runMenu(paths app.Paths) error {
 		switch choice {
 		case "Create Backup":
 			if err := runCreateWizard(paths, prompter); err != nil && err != errCancelled {
-				fmt.Println("Create job failed:", err)
+				ui.StatusError(err.Error())
+				pauseForEnter()
 			}
 		case "Manage Backup":
 			if err := runManageWizard(paths, prompter); err != nil {
-				fmt.Println("Manage job failed:", err)
+				ui.StatusError(err.Error())
+				pauseForEnter()
 			}
 		case "Import Backup":
 			if err := runImportWizard(paths, prompter); err != nil {
-				fmt.Println("Import failed:", err)
+				ui.StatusError(err.Error())
+				pauseForEnter()
 			}
 		case "Settings":
 			if err := runSettingsWizard(paths, prompter); err != nil {
-				fmt.Println("Settings failed:", err)
+				ui.StatusError(err.Error())
+				pauseForEnter()
 			}
 		case "About":
 			runAbout()
@@ -214,7 +226,7 @@ func runAbout() {
 
 	fmt.Println()
 	ui.KeyValue("Repository:", "https://github.com/"+version.Repository)
-	fmt.Println()
+	pauseForEnter()
 }
 
 func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Prompter) error {
@@ -599,25 +611,29 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 		switch action {
 		case "Run Backup Now":
 			if err := runJobByID(paths, job.ID); err != nil {
-				fmt.Println("Run failed:", err)
+				ui.StatusError(err.Error())
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("manual run failed: %s (%s) — %v", job.ID, job.Name, err))
 			} else {
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("manual run completed: %s (%s)", job.ID, job.Name))
 			}
+			pauseForEnter()
 		case "Restore Backup":
 			if err := runRestoreWizard(paths, prompter, job.ID); err != nil {
-				fmt.Println("Restore failed:", err)
+				ui.StatusError(err.Error())
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("restore failed: %s (%s) — %v", job.ID, job.Name, err))
+				pauseForEnter()
 			} else {
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("restore completed: %s (%s)", job.ID, job.Name))
 			}
 		case "List Snapshots":
 			if err := runListSnapshots(paths, job.ID); err != nil {
-				fmt.Println("List snapshots failed:", err)
+				ui.StatusError(err.Error())
 			}
+			pauseForEnter()
 		case "Edit Backup":
 			if err := runReconfigureBackupWizard(paths, job.ID, prompter); err != nil {
-				fmt.Println("Edit failed:", err)
+				ui.StatusError(err.Error())
+				pauseForEnter()
 			} else {
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("job edited: %s (%s)", job.ID, job.Name))
 				daemon.TriggerReload(paths.StateDir)
@@ -625,11 +641,13 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 		case "Configure Schedule":
 			updatedJob, err := jobs.Load(paths, job.ID)
 			if err != nil {
-				fmt.Println("Reload failed:", err)
+				ui.StatusError(err.Error())
+				pauseForEnter()
 				continue
 			}
 			if err := configureSchedule(prompter, updatedJob); err != nil {
-				fmt.Println("Schedule update failed:", err)
+				ui.StatusError(err.Error())
+				pauseForEnter()
 			} else {
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("schedule updated: %s (%s)", job.ID, job.Name))
 				daemon.TriggerReload(paths.StateDir)
@@ -637,11 +655,13 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 		case "Configure Retention":
 			updatedJob, err := jobs.Load(paths, job.ID)
 			if err != nil {
-				fmt.Println("Reload failed:", err)
+				ui.StatusError(err.Error())
+				pauseForEnter()
 				continue
 			}
 			if err := configureRetention(prompter, updatedJob); err != nil {
-				fmt.Println("Retention update failed:", err)
+				ui.StatusError(err.Error())
+				pauseForEnter()
 			} else {
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("retention updated: %s (%s)", job.ID, job.Name))
 				daemon.TriggerReload(paths.StateDir)
@@ -649,37 +669,45 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 		case "Configure Notifications":
 			updatedJob, err := jobs.Load(paths, job.ID)
 			if err != nil {
-				fmt.Println("Reload failed:", err)
+				ui.StatusError(err.Error())
+				pauseForEnter()
 				continue
 			}
 			if err := configureNotifications(prompter, updatedJob); err != nil {
-				fmt.Println("Notification update failed:", err)
+				ui.StatusError(err.Error())
+				pauseForEnter()
 			} else {
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("notifications updated: %s (%s)", job.ID, job.Name))
 				daemon.TriggerReload(paths.StateDir)
 			}
 		case "Show Job Configuration":
 			if err := showJob(paths, job.ID); err != nil {
-				fmt.Println("Show failed:", err)
+				ui.StatusError(err.Error())
 			}
+			pauseForEnter()
 		case "Validate Job":
 			if err := validateJob(paths, job.ID); err != nil {
-				fmt.Println("Validation failed:", err)
+				ui.StatusError(err.Error())
 			}
+			pauseForEnter()
 		case "Export Backup Job":
 			targetDir, err := prompter.Ask("Export to directory", validateAbsolutePath)
 			if err != nil {
-				fmt.Println("Export failed:", err)
+				ui.StatusError(err.Error())
+				pauseForEnter()
 				continue
 			}
 			if err := jobs.Export(paths, job.ID, targetDir); err != nil {
-				fmt.Println("Export failed:", err)
+				ui.StatusError(err.Error())
+				pauseForEnter()
 				continue
 			}
-			activitylog.Log(paths.LogsDir, fmt.Sprintf("job exported: %s (%s) → %s", job.ID, job.Name, targetDir))
-			fmt.Printf("Exported job %q to %s\n", job.ID, targetDir)
-			fmt.Println("Files: job.toml, secrets.env")
-			fmt.Println("Keep secrets.env safe — it contains your backup passwords.")
+			activitylog.Log(paths.LogsDir, fmt.Sprintf("job exported: %s (%s) -> %s", job.ID, job.Name, targetDir))
+			fmt.Println()
+			ui.StatusOK(fmt.Sprintf("Exported to %s", targetDir))
+			ui.Println2("Files: job.toml, secrets.env")
+			ui.StatusWarn("Keep secrets.env safe — it contains your backup passwords.")
+			pauseForEnter()
 		case "Delete Backup":
 			if err := removeJob(paths, prompter, job.ID); err != nil {
 				fmt.Println("Delete failed:", err)
@@ -715,19 +743,18 @@ func runSettingsWizard(paths app.Paths, prompter ui.Prompter) error {
 
 		switch action {
 		case "Manage Notification Channels":
-			fmt.Println("Notification channel management is a skeleton for now.")
+			ui.StatusWarn("Not yet implemented.")
+			pauseForEnter()
 		case "Backup LSS Backup Configuration":
-			fmt.Println("Backup LSS Backup Configuration is a skeleton for now.")
-			fmt.Println("Final behavior should back up jobs, logs, secrets, passwords, and all other recovery-critical data.")
+			ui.StatusWarn("Not yet implemented.")
+			pauseForEnter()
 		case "Configure Management Console":
-			fmt.Println("Configure Management Console is a skeleton for now.")
-			fmt.Println("Final behavior should configure connection to a central server that observes and tracks backups.")
+			ui.StatusWarn("Not yet implemented.")
+			pauseForEnter()
 		case "Check For Updates":
 			if err := runCheckForUpdates(paths, prompter); err != nil {
 				ui.StatusError(err.Error())
-				fmt.Println()
-				ui.Println2("Press Enter to continue...")
-				fmt.Scanln()
+				pauseForEnter()
 			}
 		case "Back To Main Menu":
 			return nil
