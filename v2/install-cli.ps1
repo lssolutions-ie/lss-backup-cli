@@ -161,6 +161,8 @@ finally {
     Pop-Location
 }
 
+$daemonAccount = if ($RunAsSystem) { "SYSTEM" } else { "$env:USERDOMAIN\$env:USERNAME" }
+
 $manifest = [ordered]@{
     os              = "windows"
     installed_at    = [DateTime]::UtcNow.ToString("o")
@@ -170,6 +172,7 @@ $manifest = [ordered]@{
     jobs_dir        = $JobsDir
     logs_dir        = $LogsDir
     state_dir       = $StateDir
+    daemon_account  = $daemonAccount
     dependencies    = $deps
 }
 
@@ -189,7 +192,24 @@ if ($machinePath -notlike "*$BinDir*") {
 }
 Refresh-Path
 
-# Register and start the daemon as a Task Scheduler task running as SYSTEM.
+# Ask whether to run the daemon as SYSTEM or the current user.
+Write-Host ""
+Write-Host "Daemon account:"
+Write-Host "  1. SYSTEM (recommended for servers/production) — runs at startup regardless"
+Write-Host "     of who is logged in, full privilege, no PATH issues from user installs."
+Write-Host "  2. Current user ($env:USERNAME) — inherits your PATH, easier for development"
+Write-Host "     and testing. Requires you to be logged in for the daemon to run."
+Write-Host ""
+$modeChoice = Read-Host "Select mode [1/2] (default: 1)"
+$RunAsSystem = ($modeChoice.Trim() -ne "2")
+
+if ($RunAsSystem) {
+    Write-Host "Installing daemon as SYSTEM."
+} else {
+    Write-Host "Installing daemon as $env:USERNAME."
+}
+
+# Register and start the daemon as a Task Scheduler task.
 # -Force overwrites any existing task (handles reinstall/update).
 $TaskPath = "\LSS Backup\"
 $TaskName = "LSS Backup Daemon"
@@ -201,17 +221,27 @@ $TaskName = "LSS Backup Daemon"
 # can call FreeConsole(), causing the daemon to exit cleanly (exit code 0).
 # A hidden PowerShell parent owns the console; the Go binary inherits it but
 # never receives a close event.
-$action    = New-ScheduledTaskAction `
+$action   = New-ScheduledTaskAction `
     -Execute "powershell.exe" `
     -Argument "-NonInteractive -NoProfile -WindowStyle Hidden -Command `"& '$BinPath' daemon`""
-$trigger   = New-ScheduledTaskTrigger -AtStartup
-$settings  = New-ScheduledTaskSettingsSet `
+$trigger  = New-ScheduledTaskTrigger -AtStartup
+$settings = New-ScheduledTaskSettingsSet `
     -RestartCount 3 `
     -RestartInterval (New-TimeSpan -Minutes 1) `
     -StartWhenAvailable `
     -MultipleInstances IgnoreNew `
     -ExecutionTimeLimit ([System.TimeSpan]::Zero)
-$principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
+
+if ($RunAsSystem) {
+    $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
+} else {
+    # S4U allows the task to run as the user without a stored password.
+    # The task inherits the user's full environment including PATH.
+    $principal = New-ScheduledTaskPrincipal `
+        -UserId "$env:USERDOMAIN\$env:USERNAME" `
+        -RunLevel Highest `
+        -LogonType S4U
+}
 
 Register-ScheduledTask `
     -TaskPath $TaskPath `
@@ -225,6 +255,7 @@ Register-ScheduledTask `
 # Stop any existing instance before starting fresh (reinstall case).
 Stop-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction SilentlyContinue
 Start-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName
-Write-Host "Daemon task registered and started (Task Scheduler)"
+$modeLabel = if ($RunAsSystem) { "SYSTEM" } else { $env:USERNAME }
+Write-Host "Daemon task registered and started as $modeLabel (Task Scheduler)"
 
 Write-Host "Install manifest written to $ManifestPath"
