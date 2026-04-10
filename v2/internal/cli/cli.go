@@ -409,7 +409,7 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 	}
 	destinationPath = cleanPath(destinationPath)
 	if _, statErr := os.Stat(destinationPath); os.IsNotExist(statErr) {
-		fmt.Printf("Note: %s does not exist yet — it will be created automatically.\n", destinationPath)
+		ui.Println2("Note: " + destinationPath + " does not exist yet — it will be created automatically.")
 	}
 
 	rsyncNoPerms := false
@@ -473,13 +473,46 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 
 	activitylog.Log(paths.LogsDir, fmt.Sprintf("job created: %s (%s)", job.ID, job.Name))
 	daemon.TriggerReload(paths.StateDir)
+
 	fmt.Println()
-	ui.StatusOK("Backup job created successfully.")
+	ui.StatusOK("Wizard complete — backup job created successfully.")
 	ui.KeyValue("Job ID:", job.ID)
 	ui.KeyValue("Job file:", job.JobFile)
-	ui.KeyValue("Secrets file:", job.SecretsFile)
+	fmt.Println()
+
+	_, nextAction, err := prompter.Select("What would you like to do next?", []string{
+		"Run Backup Now",
+		"Initialise Repository Only",
+		"Back to Main Menu",
+	})
+	if err != nil || nextAction == "" || nextAction == "Back to Main Menu" {
+		return nil
+	}
+	switch nextAction {
+	case "Run Backup Now":
+		if err := runJobByID(paths, job.ID); err != nil {
+			ui.StatusError("Run failed: " + err.Error())
+		} else {
+			ui.StatusOK("Backup completed successfully.")
+		}
+	case "Initialise Repository Only":
+		if err := initRepoOnly(paths, job); err != nil {
+			ui.StatusError("Init failed: " + err.Error())
+		} else {
+			ui.StatusOK("Repository initialised successfully.")
+		}
+	}
 	fmt.Println()
 	return nil
+}
+
+func initRepoOnly(paths app.Paths, job config.Job) error {
+	registry := engines.NewRegistry()
+	engine, err := registry.Get(job.Program)
+	if err != nil {
+		return err
+	}
+	return engine.Init(job, os.Stdout)
 }
 
 func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
@@ -1103,18 +1136,18 @@ func promptSchedule(prompter ui.Prompter) (config.Schedule, error) {
 			return config.Schedule{Mode: "monthly", Hour: hour, Minute: minute, DayOfMonth: dom}, nil
 
 		case 4: // Custom Schedule (Cron)
+			ui.SectionHeader("Custom Schedule (Cron)")
+			ui.Println2("Format:  MINUTE  HOUR  DAY-OF-MONTH  MONTH  DAY-OF-WEEK")
 			fmt.Println()
-			fmt.Println("Cron format:  MINUTE  HOUR  DAY-OF-MONTH  MONTH  DAY-OF-WEEK")
-			fmt.Println()
-			fmt.Println("  Expression           Meaning")
-			fmt.Println("  0 17 * * *           Every day at 17:00")
-			fmt.Println("  0 9,17 * * 1-5       Every weekday at 09:00 and 17:00")
-			fmt.Println("  30 8 * * 1,3,5       Mon, Wed, Fri at 08:30")
-			fmt.Println("  */15 * * * *         Every 15 minutes")
-			fmt.Println("  0 */4 * * *          Every 4 hours")
-			fmt.Println("  0 0 1 * *            1st of every month at midnight")
-			fmt.Println("  @daily               Every day at midnight")
-			fmt.Println("  @hourly              Every hour")
+			ui.Println2("  Expression           Meaning")
+			ui.Println2("  0 17 * * *           Every day at 17:00")
+			ui.Println2("  0 9,17 * * 1-5       Every weekday at 09:00 and 17:00")
+			ui.Println2("  30 8 * * 1,3,5       Mon, Wed, Fri at 08:30")
+			ui.Println2("  */15 * * * *         Every 15 minutes")
+			ui.Println2("  0 */4 * * *          Every 4 hours")
+			ui.Println2("  0 0 1 * *            1st of every month at midnight")
+			ui.Println2("  @daily               Every day at midnight")
+			ui.Println2("  @hourly              Every hour")
 			fmt.Println()
 			expr, err := prompter.Ask("Cron expression", nil)
 			if err != nil {
@@ -1122,23 +1155,24 @@ func promptSchedule(prompter ui.Prompter) (config.Schedule, error) {
 			}
 			desc, err := cronSchedule.ValidateCron(expr)
 			if err != nil {
-				fmt.Printf("\nInvalid: %v\n\n", err)
+				fmt.Println()
+				ui.StatusError("Invalid: " + err.Error())
+				fmt.Println()
 				continue
 			}
-			fmt.Printf("\nSchedule: %s\n\n", desc)
+			fmt.Println()
+			ui.StatusOK("Schedule: " + desc)
+			fmt.Println()
 			return config.Schedule{Mode: "cron", CronExpression: expr}, nil
 		}
 	}
 }
 
 func promptNotifications(prompter ui.Prompter) (config.Notifications, error) {
-	fmt.Println("")
-	fmt.Println("Notifications")
-	fmt.Println("-------------")
+	ui.SectionHeader("Notifications")
 
 	var notify config.Notifications
 
-	// --- Healthchecks ---
 	_, hcChoice, err := prompter.Select("Enable Healthchecks.io monitoring?", []string{"No", "Yes"})
 	if err != nil {
 		return config.Notifications{}, err
@@ -1147,7 +1181,7 @@ func promptNotifications(prompter ui.Prompter) (config.Notifications, error) {
 	if hcChoice == "Yes" {
 		notify.HealthchecksEnabled = true
 
-		fmt.Printf("Healthchecks domain (press Enter for %s):\n", healthchecksPkg.DefaultDomain)
+		ui.Println2("Healthchecks domain (press Enter for " + healthchecksPkg.DefaultDomain + "):")
 		domain, err := prompter.Ask("Domain", nil)
 		if err != nil {
 			return config.Notifications{}, err
@@ -1163,20 +1197,18 @@ func promptNotifications(prompter ui.Prompter) (config.Notifications, error) {
 		}
 		notify.HealthchecksID = strings.TrimSpace(id)
 
-		fmt.Printf("  Ping URL: %s/ping/%s\n", notify.HealthchecksDomain, notify.HealthchecksID)
+		ui.Println2("Ping URL: " + notify.HealthchecksDomain + "/ping/" + notify.HealthchecksID)
 	}
 
 	return notify, nil
 }
 
 func promptRetention(prompter ui.Prompter, program string, sched config.Schedule) (config.Retention, error) {
-	fmt.Println("")
-	fmt.Println("Retention Policy")
-	fmt.Println("----------------")
+	ui.SectionHeader("Retention Policy")
 
 	if program != "restic" {
-		fmt.Println("Retention policies apply to restic only.")
-		fmt.Println("rsync mirrors the source exactly — deleted source files are removed from the destination on the next run.")
+		ui.Println2("Retention policies apply to restic only.")
+		ui.Println2("rsync mirrors the source exactly — deleted source files are removed from the destination on the next run.")
 		return config.Retention{Mode: "none"}, nil
 	}
 
@@ -1192,8 +1224,8 @@ func promptRetention(prompter ui.Prompter, program string, sched config.Schedule
 	switch {
 	case strings.HasPrefix(choice, "Keep everything"):
 		r := config.Retention{Mode: "none"}
-		fmt.Println("")
-		fmt.Println(retentionPkg.Describe(r))
+		fmt.Println()
+		ui.Println2(retentionPkg.Describe(r))
 		return r, nil
 
 	case strings.HasPrefix(choice, "Keep last N"):
@@ -1207,11 +1239,12 @@ func promptRetention(prompter ui.Prompter, program string, sched config.Schedule
 }
 
 func promptKeepLast(prompter ui.Prompter) (config.Retention, error) {
-	fmt.Println("")
-	fmt.Println("How many backups to keep?")
-	fmt.Println("  7  = one week of daily backups")
-	fmt.Println("  14 = two weeks of daily backups")
-	fmt.Println("  30 = one month of daily backups")
+	fmt.Println()
+	ui.Println2("How many backups to keep?")
+	ui.Println2("  7  = one week of daily backups")
+	ui.Println2("  14 = two weeks of daily backups")
+	ui.Println2("  30 = one month of daily backups")
+	fmt.Println()
 
 	raw, err := prompter.Ask("Number of backups to keep", func(s string) error {
 		if n, err := strconv.Atoi(s); err != nil || n < 1 {
@@ -1224,8 +1257,8 @@ func promptKeepLast(prompter ui.Prompter) (config.Retention, error) {
 	}
 	n, _ := strconv.Atoi(raw)
 	r := config.Retention{Mode: "keep-last", KeepLast: n}
-	fmt.Println("")
-	fmt.Println(retentionPkg.Describe(r))
+	fmt.Println()
+	ui.StatusOK(retentionPkg.Describe(r))
 	return r, nil
 }
 
@@ -1252,19 +1285,19 @@ func promptKeepWithin(prompter ui.Prompter) (config.Retention, error) {
 		return config.Retention{}, err
 	}
 	r := config.Retention{Mode: "keep-within", KeepWithin: raw + unitSuffix}
-	fmt.Println("")
-	fmt.Println(retentionPkg.Describe(r))
+	fmt.Println()
+	ui.StatusOK(retentionPkg.Describe(r))
 	return r, nil
 }
 
 func promptTiered(prompter ui.Prompter, sched config.Schedule) (config.Retention, error) {
-	fmt.Println("")
-	fmt.Println("Set how many snapshots to keep at each granularity.")
-	fmt.Println("Enter 0 to skip a tier.")
-	fmt.Println("")
+	fmt.Println()
+	ui.Println2("Set how many snapshots to keep at each granularity.")
+	ui.Println2("Enter 0 to skip a tier.")
+	fmt.Println()
 
 	askTier := func(label, hint string) (int, error) {
-		fmt.Println(hint)
+		ui.Println2(hint)
 		raw, err := prompter.Ask(label, func(s string) error {
 			if _, err := strconv.Atoi(s); err != nil {
 				return fmt.Errorf("enter a whole number (0 to skip)")
@@ -1312,14 +1345,13 @@ func promptTiered(prompter ui.Prompter, sched config.Schedule) (config.Retention
 
 	// Only surface the high-frequency window question when the schedule warrants it.
 	if cronSchedule.IsHighFrequency(sched) {
-		fmt.Println("")
-		fmt.Println("Your job runs more than once per day.")
-		fmt.Println("Without a granularity window, all snapshots from a given day collapse")
-		fmt.Println("to one at end of day — you lose the ability to restore to a specific")
-		fmt.Println("point within that day.")
-		fmt.Println("")
-		fmt.Println("You can preserve every snapshot for a short window before thinning begins.")
-		fmt.Println("Example: 2 keeps every individual snapshot from the last 2 days.")
+		fmt.Println()
+		ui.StatusWarn("Your job runs more than once per day.")
+		ui.Println2("Without a granularity window, all snapshots from a given day collapse")
+		ui.Println2("to one at end of day — you lose the ability to restore to a specific point within that day.")
+		fmt.Println()
+		ui.Println2("You can preserve every snapshot for a short window before thinning begins.")
+		ui.Println2("Example: 2 keeps every individual snapshot from the last 2 days.")
 
 		raw, err := askTier("Keep full granularity for the last N days (0 to skip)",
 			"  0 = thinning starts immediately, all sub-daily snapshots beyond today are collapsed")
@@ -1331,8 +1363,8 @@ func promptTiered(prompter ui.Prompter, sched config.Schedule) (config.Retention
 		}
 	}
 
-	fmt.Println("")
-	fmt.Println(retentionPkg.Describe(r))
+	fmt.Println()
+	ui.StatusOK(retentionPkg.Describe(r))
 	return r, nil
 }
 

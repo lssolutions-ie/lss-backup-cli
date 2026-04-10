@@ -16,6 +16,7 @@ import (
 
 type Engine interface {
 	Name() string
+	Init(job config.Job, output io.Writer) error
 	Run(job config.Job, output io.Writer) error
 	Restore(job config.Job, target string, output io.Writer) error
 	Snapshots(job config.Job, output io.Writer) error
@@ -25,6 +26,19 @@ type ResticEngine struct{}
 
 func (e ResticEngine) Name() string {
 	return "restic"
+}
+
+// Init ensures the restic repository exists at the destination, creating it if needed.
+// It does not run a backup — useful for testing credentials and the destination path.
+func (e ResticEngine) Init(job config.Job, output io.Writer) error {
+	resticBin, err := lookPath("restic")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(job.Destination.Path, 0o755); err != nil {
+		return fmt.Errorf("create destination path: %w", err)
+	}
+	return ensureResticRepo(job, resticBin, output)
 }
 
 func (e ResticEngine) Run(job config.Job, output io.Writer) error {
@@ -185,6 +199,15 @@ type RsyncEngine struct{}
 
 func (e RsyncEngine) Name() string {
 	return "rsync"
+}
+
+// Init creates the destination directory. rsync has no repository concept.
+func (e RsyncEngine) Init(job config.Job, output io.Writer) error {
+	if err := os.MkdirAll(job.Destination.Path, 0o755); err != nil {
+		return fmt.Errorf("create destination directory: %w", err)
+	}
+	fmt.Fprintf(output, "Destination directory ready: %s\n", job.Destination.Path)
+	return nil
 }
 
 func (e RsyncEngine) Run(job config.Job, output io.Writer) error {
