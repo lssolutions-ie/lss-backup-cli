@@ -1157,10 +1157,10 @@ func runSystemLogBrowser(paths app.Paths, prompter ui.Prompter) {
 			showAuditEvents(paths)
 			pauseForEnter()
 		case "Activity Log":
-			showTextFileNewestFirst(filepath.Join(paths.LogsDir, "activity.log"), "Activity Log")
+			showStructuredLogNewestFirst(filepath.Join(paths.LogsDir, "activity.log"), "Activity Log")
 			pauseForEnter()
 		case "Daemon Log":
-			showTextFileNewestFirst(filepath.Join(paths.StateDir, "daemon.log"), "Daemon Log")
+			showStructuredLogNewestFirst(filepath.Join(paths.StateDir, "daemon.log"), "Daemon Log")
 			pauseForEnter()
 		case "Job Run Logs":
 			runJobRunLogBrowserGlobal(paths, prompter)
@@ -1187,7 +1187,12 @@ func showAuditEvents(paths app.Paths) {
 		return
 	}
 
-	showLinesNewestFirst(entries)
+	lines := entries
+	rows := make([]logRow, len(lines))
+	for i, l := range lines {
+		rows[len(lines)-1-i] = parseLogLine(l)
+	}
+	printLogTable(rows, auditPageSize)
 }
 
 // runJobRunLogBrowserGlobal lets the user pick any job then browse its run logs.
@@ -1271,37 +1276,15 @@ func showJobAuditLog(job config.Job) {
 		reversed[len(entries)-1-i] = e
 	}
 
-	total := len(reversed)
-	shown := 0
-	for shown < total {
-		end := shown + auditPageSize
-		if end > total {
-			end = total
+	rows := make([]logRow, len(reversed))
+	for i, e := range reversed {
+		msg := e.Action
+		if e.Detail != "" {
+			msg = fmt.Sprintf("%-26s  %s", e.Action, e.Detail)
 		}
-		fmt.Println()
-		fmt.Printf("  %-19s  %-26s  %s\n", "Time", "Action", "Detail")
-		fmt.Printf("  %-19s  %-26s  %s\n", strings.Repeat("-", 19), strings.Repeat("-", 26), strings.Repeat("-", 40))
-		for _, e := range reversed[shown:end] {
-			fmt.Printf("  %-19s  %-26s  %s\n",
-				e.Time.Format("2006-01-02 15:04:05"),
-				e.Action,
-				e.Detail,
-			)
-		}
-		shown = end
-		if shown < total {
-			fmt.Println()
-			fmt.Printf("  Showing %d of %d entries. ", shown, total)
-			fmt.Print("Press Enter for more, or type 'q' to stop: ")
-			var input string
-			fmt.Scanln(&input)
-			if strings.ToLower(strings.TrimSpace(input)) == "q" {
-				return
-			}
-		}
+		rows[i] = logRow{time: e.Time.Format("2006-01-02 15:04:05"), message: msg}
 	}
-	fmt.Println()
-	fmt.Printf("  Total: %d entries.\n", total)
+	printLogTable(rows, auditPageSize)
 }
 
 // pickAndViewLogFile lists *.log files in dir (newest first), lets the user
@@ -1334,24 +1317,47 @@ func pickAndViewLogFile(prompter ui.Prompter, dir string, label string) {
 	pauseForEnter()
 }
 
-// ── Generic text file viewers ─────────────────────────────────────────────────
+// ── Generic log viewers ───────────────────────────────────────────────────────
 
-// showTextFileNewestFirst reads a line-based log file and displays it newest-first.
-func showTextFileNewestFirst(path, title string) {
-	ui.ClearScreen()
-	ui.Header(title)
+// logRow is a parsed log line split into timestamp and message.
+type logRow struct {
+	time    string
+	message string
+}
 
+// parseLogLine splits a line into (timestamp, message).
+// Handles two formats:
+//
+//	activity/audit: "2006-01-02 15:04:05  message..."
+//	daemon (Go log): "2006/01/02 15:04:05 message..."
+//
+// Lines that don't match either format are returned with time="" and the full
+// line as the message.
+func parseLogLine(line string) logRow {
+	// activity/audit format: 19-char timestamp + double space
+	if len(line) > 21 && line[4] == '-' && line[7] == '-' && line[10] == ' ' && line[19] == ' ' && line[20] == ' ' {
+		return logRow{time: line[:19], message: strings.TrimSpace(line[21:])}
+	}
+	// daemon/Go log format: "2006/01/02 15:04:05 "
+	if len(line) > 20 && line[4] == '/' && line[7] == '/' && line[10] == ' ' && line[19] == ' ' {
+		ts := strings.ReplaceAll(line[:10], "/", "-") + " " + line[11:19]
+		return logRow{time: ts, message: strings.TrimSpace(line[20:])}
+	}
+	return logRow{time: "", message: line}
+}
+
+// readLogLines reads a file and returns non-empty lines. Shows error/warning on screen.
+func readLogLines(path string) ([]string, bool) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		fmt.Println()
 		ui.StatusWarn("Log file does not exist yet.")
-		return
+		return nil, false
 	}
 	if err != nil {
 		ui.StatusError("Could not read log: " + err.Error())
-		return
+		return nil, false
 	}
-
 	var lines []string
 	for _, l := range strings.Split(string(data), "\n") {
 		if strings.TrimSpace(l) != "" {
@@ -1361,74 +1367,77 @@ func showTextFileNewestFirst(path, title string) {
 	if len(lines) == 0 {
 		fmt.Println()
 		ui.StatusWarn("Log is empty.")
+		return nil, false
+	}
+	return lines, true
+}
+
+// showStructuredLogNewestFirst reads a timestamped log file and displays it as a
+// Time | Message table, newest-first.
+func showStructuredLogNewestFirst(path, title string) {
+	ui.ClearScreen()
+	ui.Header(title)
+
+	lines, ok := readLogLines(path)
+	if !ok {
 		return
 	}
 
-	showLinesNewestFirst(lines)
+	// Reverse so newest is first.
+	rows := make([]logRow, len(lines))
+	for i, l := range lines {
+		rows[len(lines)-1-i] = parseLogLine(l)
+	}
+
+	printLogTable(rows, auditPageSize)
 }
 
-// showTextFile displays a file top-to-bottom (natural order), paginated.
-// Used for run logs where chronological order matters.
+// showTextFile displays a run log file top-to-bottom as a Time | Message table.
+// Lines without a recognisable timestamp are shown with an empty time column.
 func showTextFile(path, title string) {
 	ui.ClearScreen()
 	ui.Header(title)
 
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		fmt.Println()
-		ui.StatusWarn("Log file does not exist.")
-		return
-	}
-	if err != nil {
-		ui.StatusError("Could not read log: " + err.Error())
+	lines, ok := readLogLines(path)
+	if !ok {
 		return
 	}
 
-	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	total := len(lines)
-	shown := 0
-	for shown < total {
-		end := shown + logViewPageSize
-		if end > total {
-			end = total
-		}
-		fmt.Println()
-		for _, l := range lines[shown:end] {
-			fmt.Printf("  %s\n", l)
-		}
-		shown = end
-		if shown < total {
-			fmt.Println()
-			fmt.Printf("  -- line %d of %d -- Press Enter for more, or type 'q' to stop: ", shown, total)
-			var input string
-			fmt.Scanln(&input)
-			if strings.ToLower(strings.TrimSpace(input)) == "q" {
-				return
-			}
-		}
+	rows := make([]logRow, len(lines))
+	for i, l := range lines {
+		rows[i] = parseLogLine(l)
 	}
-	fmt.Println()
-	fmt.Printf("  End of log (%d lines).\n", total)
+
+	printLogTable(rows, logViewPageSize)
 }
 
-// showLinesNewestFirst pages through lines in reverse order.
-func showLinesNewestFirst(lines []string) {
-	reversed := make([]string, len(lines))
-	for i, l := range lines {
-		reversed[len(lines)-1-i] = l
-	}
-	total := len(reversed)
+// printLogTable renders rows as a Time | Message table with pagination.
+func printLogTable(rows []logRow, pageSize int) {
+	const timeCol = 19
+	const sep = "  "
+	divTime := strings.Repeat("-", timeCol)
+	divMsg := strings.Repeat("-", 60)
+
+	total := len(rows)
 	shown := 0
 	for shown < total {
-		end := shown + auditPageSize
+		end := shown + pageSize
 		if end > total {
 			end = total
 		}
+
 		fmt.Println()
-		for _, l := range reversed[shown:end] {
-			fmt.Printf("  %s\n", l)
+		fmt.Printf("  %-*s%s%s\n", timeCol, "Time", sep, "Message")
+		fmt.Printf("  %-*s%s%s\n", timeCol, divTime, sep, divMsg)
+		for _, r := range rows[shown:end] {
+			t := r.time
+			if t == "" {
+				t = strings.Repeat(" ", timeCol)
+			}
+			fmt.Printf("  %-*s%s%s\n", timeCol, t, sep, r.message)
 		}
 		shown = end
+
 		if shown < total {
 			fmt.Println()
 			fmt.Printf("  Showing %d of %d entries. Press Enter for more, or type 'q' to stop: ", shown, total)
@@ -1981,7 +1990,7 @@ func promptRetention(prompter ui.Prompter, program string, sched config.Schedule
 		return r, nil
 
 	case strings.HasPrefix(choice, "Keep last N"):
-		return promptKeepLast(prompter)
+		return promptKeepLast(prompter, sched)
 
 	case strings.HasPrefix(choice, "Smart tiered"):
 		return promptTiered(prompter, sched)
@@ -1990,12 +1999,65 @@ func promptRetention(prompter ui.Prompter, program string, sched config.Schedule
 	return config.Retention{Mode: "none"}, nil
 }
 
-func promptKeepLast(prompter ui.Prompter) (config.Retention, error) {
+// keepLastHints returns 3 contextual N=X hints based on the schedule interval.
+// Falls back to daily-based hints when the schedule is unknown/manual.
+func keepLastHints(sched config.Schedule) []string {
+	interval := cronSchedule.ApproxIntervalSeconds(sched)
+	if interval <= 0 {
+		// Manual or unknown — show daily-based defaults.
+		return []string{
+			"7  = one week of daily backups",
+			"14 = two weeks of daily backups",
+			"30 = one month of daily backups",
+		}
+	}
+
+	type period struct {
+		secs  int64
+		label string
+	}
+	periods := []period{
+		{60, "one minute"},
+		{3600, "one hour"},
+		{86400, "one day"},
+		{7 * 86400, "one week"},
+		{30 * 86400, "one month"},
+		{365 * 86400, "one year"},
+	}
+
+	// Pick three periods that are meaningfully larger than the interval.
+	var hints []string
+	for _, p := range periods {
+		if p.secs <= interval {
+			continue
+		}
+		n := p.secs / interval
+		if n < 2 {
+			continue
+		}
+		hints = append(hints, fmt.Sprintf("%-4d = %s", n, p.label))
+		if len(hints) == 3 {
+			break
+		}
+	}
+
+	if len(hints) == 0 {
+		// Interval >= 1 year — just show a couple of meaningful values.
+		return []string{
+			"2  = two backups",
+			"5  = five backups",
+			"12 = twelve backups",
+		}
+	}
+	return hints
+}
+
+func promptKeepLast(prompter ui.Prompter, sched config.Schedule) (config.Retention, error) {
 	fmt.Println()
 	ui.Println2("How many backups to keep?")
-	ui.Println2("  7  = one week of daily backups")
-	ui.Println2("  14 = two weeks of daily backups")
-	ui.Println2("  30 = one month of daily backups")
+	for _, hint := range keepLastHints(sched) {
+		ui.Println2("  " + hint)
+	}
 	fmt.Println()
 
 	raw, err := prompter.Ask("Number of backups to keep", func(s string) error {

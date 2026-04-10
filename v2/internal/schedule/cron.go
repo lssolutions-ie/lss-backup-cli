@@ -34,6 +34,29 @@ func IsHighFrequency(s config.Schedule) bool {
 	return second.Sub(first) < 24*time.Hour
 }
 
+// ApproxIntervalSeconds returns the approximate number of seconds between runs
+// for the given schedule. Returns 0 if the schedule is manual or unparseable.
+func ApproxIntervalSeconds(s config.Schedule) int64 {
+	expr, ok := ToCronExpression(s)
+	if !ok {
+		return 0
+	}
+	sched, err := cron.ParseStandard(expr)
+	if err != nil {
+		return 0
+	}
+	now := time.Now()
+	first := sched.Next(now)
+	if first.IsZero() {
+		return 0
+	}
+	second := sched.Next(first)
+	if second.IsZero() {
+		return 0
+	}
+	return int64(second.Sub(first).Seconds())
+}
+
 // Describe returns a plain-English description of a Schedule.
 // Returns "manual (no schedule)" for manual/empty schedules.
 func Describe(s config.Schedule) string {
