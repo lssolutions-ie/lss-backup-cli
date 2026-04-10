@@ -130,8 +130,9 @@ func (p Prompter) Select(title string, options []string) (int, string, error) {
 			fmt.Printf("  %s%s%s\n", colBold, title, colReset)
 			fmt.Println()
 		}
+		width := len(strconv.Itoa(len(options)))
 		for i, option := range options {
-			fmt.Printf("  %s%d)%s  %s\n", colBold, i+1, colReset, option)
+			fmt.Printf("  %s%*d)%s  %s\n", colBold, width, i+1, colReset, option)
 		}
 		fmt.Println()
 		Divider()
