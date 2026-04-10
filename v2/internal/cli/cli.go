@@ -1335,17 +1335,26 @@ type logRow struct {
 //
 // Lines that don't match either format are returned with time="" and the full
 // line as the message.
+// multiSpace matches runs of two or more spaces.
+var multiSpace = regexp.MustCompile(`  +`)
+
 func parseLogLine(line string) logRow {
 	// activity/audit format: 19-char timestamp + double space
 	if len(line) > 21 && line[4] == '-' && line[7] == '-' && line[10] == ' ' && line[19] == ' ' && line[20] == ' ' {
-		return logRow{time: line[:19], message: strings.TrimSpace(line[21:])}
+		return logRow{time: line[:19], message: normaliseMsg(line[21:])}
 	}
 	// daemon/Go log format: "2006/01/02 15:04:05 "
 	if len(line) > 20 && line[4] == '/' && line[7] == '/' && line[10] == ' ' && line[19] == ' ' {
 		ts := strings.ReplaceAll(line[:10], "/", "-") + " " + line[11:19]
-		return logRow{time: ts, message: strings.TrimSpace(line[20:])}
+		return logRow{time: ts, message: normaliseMsg(line[20:])}
 	}
 	return logRow{time: "", message: line}
+}
+
+// normaliseMsg trims leading/trailing space and collapses internal runs of
+// multiple spaces to a single space, cleaning up log.Printf padding artefacts.
+func normaliseMsg(s string) string {
+	return multiSpace.ReplaceAllString(strings.TrimSpace(s), " ")
 }
 
 // readLogLines reads a file and returns non-empty lines. Shows error/warning on screen.
