@@ -1049,12 +1049,6 @@ func printJobs(paths app.Paths) error {
 		return err
 	}
 
-	if daemon.IsRunning() {
-		ui.StatusOK("Daemon: running")
-	} else {
-		ui.StatusWarn("Daemon: not running — scheduled jobs will not fire")
-	}
-
 	if len(items) == 0 {
 		fmt.Println()
 		ui.Println2("No backup jobs configured.")
