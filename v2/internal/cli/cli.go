@@ -160,9 +160,9 @@ func runCheckForUpdates(paths app.Paths, prompter ui.Prompter) error {
 	}
 
 	activitylog.Log(paths.LogsDir, fmt.Sprintf("update installed: %s", result.LatestVersion))
-	ui.StatusOK("Update installed successfully.")
-	ui.Println2("Restarting backup daemon...")
 	daemon.RestartService()
+	fmt.Println()
+	ui.StatusOK("Update installed successfully.")
 	fmt.Println()
 	ui.Println2("Please restart LSS Backup CLI to use the new version.")
 	fmt.Println()
