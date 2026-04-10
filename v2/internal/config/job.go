@@ -96,6 +96,12 @@ func LoadJob(jobDir string) (Job, error) {
 		job.ID = filepath.Base(jobDir)
 	}
 
+	// Normalize paths: fix any accumulated extra backslashes from the previous
+	// double-escaping bug where parseString did not unescape \\ sequences.
+	job.Source.Path = normalizePath(job.Source.Path)
+	job.Source.ExcludeFile = normalizePath(job.Source.ExcludeFile)
+	job.Destination.Path = normalizePath(job.Destination.Path)
+
 	secrets, err := LoadSecrets(job.SecretsFile)
 	if err != nil {
 		return Job{}, err
@@ -339,9 +345,36 @@ func LoadSecrets(path string) (Secrets, error) {
 func parseString(value string) string {
 	value = strings.TrimSpace(value)
 	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+		// Use strconv.Unquote to correctly handle escape sequences such as \\.
+		// Previously this just stripped the outer quotes, which left \\ in the
+		// string instead of decoding it to \, causing paths to accumulate extra
+		// backslashes on every save.
+		if unquoted, err := strconv.Unquote(value); err == nil {
+			return unquoted
+		}
 		return value[1 : len(value)-1]
 	}
 	return value
+}
+
+// normalizePath collapses consecutive backslashes in a Windows path caused by
+// the previous double-escaping bug. UNC paths (\\server\share) are preserved.
+// On non-Windows platforms the path is returned unchanged.
+func normalizePath(s string) string {
+	if s == "" || !strings.Contains(s, `\\`) {
+		return s
+	}
+	// Preserve leading \\ for UNC paths, normalise the rest.
+	prefix := ""
+	rest := s
+	if strings.HasPrefix(s, `\\`) {
+		prefix = `\\`
+		rest = s[2:]
+	}
+	for strings.Contains(rest, `\\`) {
+		rest = strings.ReplaceAll(rest, `\\`, `\`)
+	}
+	return prefix + rest
 }
 
 func parseBool(value string) (bool, error) {

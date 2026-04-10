@@ -1272,8 +1272,38 @@ func runListSnapshots(paths app.Paths, id string) error {
 		return err
 	}
 
-	fmt.Println("")
-	return engine.Snapshots(job, os.Stdout)
+	snapshots, err := engine.ListSnapshots(job)
+	if err != nil {
+		// Fallback to raw engine output if structured listing fails.
+		fmt.Println()
+		return engine.Snapshots(job, os.Stdout)
+	}
+
+	if len(snapshots) == 0 {
+		fmt.Println()
+		ui.StatusWarn("No snapshots found.")
+		return nil
+	}
+
+	// Sort newest first.
+	sort.Slice(snapshots, func(i, j int) bool {
+		return snapshots[i].Time.After(snapshots[j].Time)
+	})
+
+	fmt.Println()
+	fmt.Printf("  %-10s  %-19s  %-20s  %s\n", "ID", "Time", "Host", "Paths")
+	fmt.Printf("  %s\n", strings.Repeat("─", 76))
+	for _, s := range snapshots {
+		fmt.Printf("  %-10s  %-19s  %-20s  %s\n",
+			s.ShortID,
+			s.Time.Local().Format("2006-01-02  15:04:05"),
+			s.Hostname,
+			strings.Join(s.Paths, ", "),
+		)
+	}
+	fmt.Printf("  %s\n", strings.Repeat("─", 76))
+	fmt.Printf("  %d snapshot(s)\n", len(snapshots))
+	return nil
 }
 
 func configureSchedule(prompter ui.Prompter, job config.Job) error {
