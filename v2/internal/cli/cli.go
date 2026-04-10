@@ -1807,6 +1807,9 @@ func configureSchedule(prompter ui.Prompter, job config.Job) error {
 
 func configureNotifications(prompter ui.Prompter, job config.Job) error {
 	notifications, err := promptNotifications(prompter)
+	if errors.Is(err, errCancelled) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -1824,9 +1827,12 @@ func configureRetention(prompter ui.Prompter, job config.Job) error {
 	fmt.Println("Configure Retention")
 	fmt.Println("-------------------")
 	fmt.Printf("Job: %s | %s | %s\n\n", job.ID, job.Program, job.Name)
-	fmt.Printf("Current policy: %s\n\n", retentionPkg.Describe(job.Retention))
+	fmt.Printf("Current policy: %s\n", retentionPkg.Describe(job.Retention))
 
 	r, err := promptRetention(prompter, job.Program, job.Schedule)
+	if errors.Is(err, errCancelled) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -2054,9 +2060,12 @@ func promptNotifications(prompter ui.Prompter) (config.Notifications, error) {
 
 	var notify config.Notifications
 
-	_, hcChoice, err := prompter.Select("Enable Healthchecks.io monitoring?", []string{"No", "Yes"})
+	idx, hcChoice, err := prompter.Select("Enable Healthchecks.io monitoring?", []string{"No", "Yes"})
 	if err != nil {
 		return config.Notifications{}, err
+	}
+	if idx == -1 {
+		return config.Notifications{}, errCancelled
 	}
 
 	if hcChoice == "Yes" {
@@ -2092,13 +2101,16 @@ func promptRetention(prompter ui.Prompter, program string, sched config.Schedule
 		return config.Retention{Mode: "none"}, nil
 	}
 
-	_, choice, err := prompter.Select("How should old backups be managed?", []string{
+	idx, choice, err := prompter.Select("How should old backups be managed?", []string{
 		"Keep everything            — never delete, repository grows over time",
 		"Keep last N backups        — always keep exactly N snapshots",
 		"Smart tiered (recommended) — daily, weekly, and monthly layers",
 	})
 	if err != nil {
 		return config.Retention{}, err
+	}
+	if idx == -1 {
+		return config.Retention{}, errCancelled
 	}
 
 	switch {
@@ -2115,7 +2127,7 @@ func promptRetention(prompter ui.Prompter, program string, sched config.Schedule
 		return promptTiered(prompter, sched)
 	}
 
-	return config.Retention{Mode: "none"}, nil
+	return config.Retention{}, errCancelled
 }
 
 // keepLastHints returns 3 contextual N=X hints based on the schedule interval.
