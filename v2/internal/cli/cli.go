@@ -225,7 +225,6 @@ func runUpdateCLI(paths app.Paths) error {
 	fmt.Println()
 	ui.StatusOK("Update installed successfully.")
 	fmt.Println()
-	ui.Println2("Please restart LSS Backup CLI to use the new version.")
 	return nil
 }
 
