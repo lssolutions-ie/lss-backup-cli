@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/installmanifest"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/platform"
@@ -252,9 +253,13 @@ func addFileToZip(writer *zip.Writer, sourcePath string, zipPath string) error {
 }
 
 func removeInstalledData(paths platform.RuntimePaths) {
-	safeRemove(paths.BinPath)
+	removeBinary(paths.BinPath)
 	safeRemove(paths.ConfigDir)
-	safeRemove(paths.LogsDir)
+	// LogsDir and StateDir are subdirs of ConfigDir; only try them separately
+	// if ConfigDir removal failed (they might already be gone).
+	if _, err := os.Stat(paths.LogsDir); err == nil {
+		safeRemove(paths.LogsDir)
+	}
 	if paths.StateDir != paths.ConfigDir && paths.StateDir != filepath.Join(paths.ConfigDir, "state") {
 		safeRemove(paths.StateDir)
 	}
@@ -306,6 +311,23 @@ func removeManagedDependencies(manifest installmanifest.Manifest) {
 	}
 }
 
+// removeBinary handles the running-binary case on Windows: the exe cannot be
+// deleted while it is executing, so we print a clear message and move on.
+// On other platforms it behaves like safeRemove.
+func removeBinary(target string) {
+	if runtime.GOOS != "windows" {
+		safeRemove(target)
+		return
+	}
+	if err := os.RemoveAll(target); err != nil {
+		fmt.Printf("Note: the binary could not be removed because it is currently running.\n")
+		fmt.Printf("      Delete it manually once you close this window:\n")
+		fmt.Printf("      %s\n", target)
+		return
+	}
+	fmt.Println("Removed:", target)
+}
+
 func safeRemove(target string) {
 	if target == "" || target == string(filepath.Separator) {
 		fmt.Printf("Warning: refusing to remove unsafe path: %q\n", target)
@@ -333,11 +355,25 @@ func safeRemove(target string) {
 		return
 	}
 
-	if err := os.RemoveAll(target); err != nil {
-		fmt.Printf("Warning: could not remove %s: %v\n", target, err)
-		if runtime.GOOS == "windows" {
-			fmt.Println("  (If this is the binary, delete it manually after exiting.)")
+	// On Windows, retry for up to 5 seconds in case a process is still
+	// releasing file handles after being killed.
+	var err error
+	attempts := 1
+	if runtime.GOOS == "windows" {
+		attempts = 5
+	}
+	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			time.Sleep(1 * time.Second)
 		}
+		err = os.RemoveAll(target)
+		if err == nil {
+			break
+		}
+	}
+
+	if err != nil {
+		fmt.Printf("Warning: could not remove %s: %v\n", target, err)
 		return
 	}
 
