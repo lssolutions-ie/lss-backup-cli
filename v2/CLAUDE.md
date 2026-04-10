@@ -13,7 +13,7 @@ rsync), runs them, logs results, and will eventually report to a central managem
 V2 is a clean rewrite of a v1 shell-script-based tool. The goal is durability, safety, and
 operator-friendliness over cleverness.
 
-**Version:** v2.1.73
+**Version:** v2.1.85
 **Module:** `github.com/lssolutions-ie/lss-backup-cli/v2`
 **Go version:** 1.25.0
 
@@ -451,6 +451,30 @@ not by OS-level cron or Task Scheduler entries.
 
 ---
 
+## Log Viewer Behaviour
+
+Two distinct display modes are used, depending on whether the log has timestamps:
+
+| Log type | Display function | Time column |
+|----------|-----------------|-------------|
+| `activity.log`, `audit-events.log`, `daemon.log` | `printLogTable` | Yes — 19-char timestamp, rows grouped by second with blank line between groups |
+| Job run logs (`logs/*.log`, `logs/restore/*.log`) | `printRawLog` | No — raw restic/rsync output has no timestamps; plain word-wrapped text |
+| Per-job `audit.log` | `printLogTable` | Yes |
+
+**`printLogTable` details:**
+- Terminal width detection via `golang.org/x/term`, capped at 160 (Windows console buffer width bug)
+- Rows with the same timestamp grouped together; blank line between groups, timestamp shown only on first row
+- `normaliseMsg()` collapses multiple consecutive spaces (fixes old `%-30s` padding artefacts in daemon log)
+- Word-wraps long messages with continuation indent aligned to the message column
+- Pagination: `auditPageSize` rows per page, prompt to continue or quit
+
+**`printRawLog` details:**
+- No Time/Message header or separator line
+- Word-wraps to terminal width (capped at 160) with 2-space indent
+- Pagination: `logViewPageSize` rows per page
+
+---
+
 ## Conventions & Patterns
 
 - **IDs:** `^[a-zA-Z0-9_-]+$` — used as directory names, must be unique.
@@ -464,6 +488,11 @@ not by OS-level cron or Task Scheduler entries.
   prevent writes to the log file.
 - **All screens pause** with "Press Enter to continue..." after any action that produces output —
   never jump back to menu without giving the user time to read.
+- **Cancel is always silent** — pressing Enter to go back from any Select prompt returns `errCancelled`
+  (aliased from `ui.ErrCancelled`). Callers must check `errors.Is(err, errCancelled)` and exit without
+  saving or printing a status message. Never let a cancel fall through to a save.
+- **`executil.HideWindow(cmd)`** must be called on every `exec.Command` in `engines.go` —
+  without it, subprocess console windows flash visibly on Windows when the daemon runs jobs.
 
 ---
 
@@ -478,7 +507,9 @@ not by OS-level cron or Task Scheduler entries.
   for any significant user action that should survive activity log rotation.
 - `audit.Record()` is best-effort and never returns an error — safe to call anywhere.
 - Log file retention is enforced lazily (on write/startup), not by a background job.
+- Any new `prompter.Select` call that triggers a save/action must check `idx == -1` and return
+  `errCancelled` before proceeding — the Select prompt returns `idx=-1, choice="", err=nil` on Enter.
 
 ---
 
-_Last updated: 2026-04-10_
+_Last updated: 2026-04-10 (v2.1.85)_
