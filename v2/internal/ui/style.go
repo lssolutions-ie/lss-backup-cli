@@ -72,6 +72,23 @@ func Divider() {
 	fmt.Printf("  %s%s%s\n", colCyan, ruleLine, colReset)
 }
 
+// StatusDot prints a coloured ● indicator + message.
+// color: "green" for running/ok states, "yellow" for warnings.
+func StatusDot(color, msg string) {
+	var dot string
+	switch color {
+	case "green":
+		dot = colGreen + "●" + colReset
+	case "yellow":
+		dot = colYellow + "●" + colReset
+	case "red":
+		dot = colRed + "●" + colReset
+	default:
+		dot = "●"
+	}
+	fmt.Printf("  %s  %s\n", dot, msg)
+}
+
 // StatusOK prints a green [OK] tag + message.
 func StatusOK(msg string) {
 	fmt.Printf("  %s[OK]%s      %s\n", colGreen, colReset, msg)

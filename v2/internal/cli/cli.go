@@ -95,9 +95,9 @@ func runMenu(paths app.Paths) error {
 		ui.ClearScreen()
 		ui.HeaderNoTrail("LSS Backup CLI  " + version.Current)
 		if daemon.IsRunning() {
-			ui.StatusOK("Daemon: running")
+			ui.StatusDot("green", "Daemon: running")
 		} else {
-			ui.StatusWarn("Daemon: not running — scheduled jobs will not fire")
+			ui.StatusDot("yellow", "Daemon: not running — scheduled jobs will not fire")
 		}
 		fmt.Println()
 
