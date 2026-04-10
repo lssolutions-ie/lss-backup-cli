@@ -284,6 +284,6 @@ func logSchedule(scheduled []scheduledJob) {
 	}
 	log.Printf("%d job(s) scheduled:", len(scheduled))
 	for _, sj := range scheduled {
-		log.Printf("  %-30s next run: %s", sj.job.ID, sj.nextRun.Format(time.RFC3339))
+		log.Printf("  %s — next run: %s", sj.job.ID, sj.nextRun.Format(time.RFC3339))
 	}
 }
