@@ -106,8 +106,14 @@ func lookPath(name string) (string, error) {
 			}
 			profileDir := filepath.Join(usersDir, userEntry.Name())
 
+			// Check winget Links directory (winget v1.6+).
+			candidate := filepath.Join(profileDir, `AppData\Local\Microsoft\WinGet\Links`, name+".exe")
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate, nil
+			}
+
 			// Check winget app execution aliases.
-			candidate := filepath.Join(profileDir, `AppData\Local\Microsoft\WindowsApps`, name+".exe")
+			candidate = filepath.Join(profileDir, `AppData\Local\Microsoft\WindowsApps`, name+".exe")
 			if _, err := os.Stat(candidate); err == nil {
 				return candidate, nil
 			}
@@ -119,7 +125,6 @@ func lookPath(name string) (string, error) {
 					if !pkgEntry.IsDir() || !strings.HasPrefix(strings.ToLower(pkgEntry.Name()), strings.ToLower(name)) {
 						continue
 					}
-					// Walk one level deeper for versioned subdirectories.
 					pkgDir := filepath.Join(packagesDir, pkgEntry.Name())
 					if verEntries, err := os.ReadDir(pkgDir); err == nil {
 						for _, verEntry := range verEntries {
@@ -127,7 +132,6 @@ func lookPath(name string) (string, error) {
 							if _, err := os.Stat(candidate); err == nil {
 								return candidate, nil
 							}
-							// Also check directly in the package dir.
 							candidate = filepath.Join(pkgDir, name+".exe")
 							if _, err := os.Stat(candidate); err == nil {
 								return candidate, nil
