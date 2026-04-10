@@ -12,6 +12,7 @@ import (
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/engines"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/healthchecks"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/logcleanup"
 )
 
 type Service struct {
@@ -97,7 +98,7 @@ func (s Service) Restore(job config.Job, snapshotID string, target string) error
 		return err
 	}
 
-	logFile, writer, closeLog, err := prepareLog(job)
+	logFile, writer, closeLog, err := prepareLogInDir(job, "restore")
 	if err != nil {
 		return err
 	}
@@ -205,7 +206,19 @@ func (l *lineIndentWriter) Write(p []byte) (int, error) {
 }
 
 func prepareLog(job config.Job) (string, io.Writer, func(), error) {
+	return prepareLogInDir(job, "")
+}
+
+const (
+	keepBackupLogs  = 30
+	keepRestoreLogs = 10
+)
+
+func prepareLogInDir(job config.Job, subdir string) (string, io.Writer, func(), error) {
 	logDir := filepath.Join(job.JobDir, "logs")
+	if subdir != "" {
+		logDir = filepath.Join(logDir, subdir)
+	}
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		return "", nil, nil, fmt.Errorf("create log directory: %w", err)
 	}
@@ -215,6 +228,13 @@ func prepareLog(job config.Job) (string, io.Writer, func(), error) {
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("create log file: %w", err)
 	}
+
+	// Trim old log files after creating the new one.
+	keep := keepBackupLogs
+	if subdir == "restore" {
+		keep = keepRestoreLogs
+	}
+	logcleanup.KeepLatestFiles(logDir, "*.log", keep)
 
 	writer := io.MultiWriter(newLineIndentWriter(bestEffortWriter{os.Stdout}, "  "), file)
 	closeFn := func() {

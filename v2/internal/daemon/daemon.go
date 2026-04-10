@@ -11,9 +11,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/activitylog"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/app"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/jobs"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/logcleanup"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/runner"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/schedule"
 	"github.com/robfig/cron/v3"
@@ -39,6 +41,7 @@ func Run(paths app.Paths) error {
 	// would be lost. Write to a file instead so the daemon's activity is visible.
 	if runtime.GOOS == "windows" {
 		logPath := filepath.Join(paths.StateDir, "daemon.log")
+		logcleanup.TrimFileLines(logPath, 5000, 4000)
 		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 		if err == nil {
 			log.SetOutput(f)
@@ -117,12 +120,15 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}) error 
 		case <-timerCh:
 			job := next.job
 			log.Printf("Starting job %s (%s)", job.ID, job.Name)
+			activitylog.Log(paths.LogsDir, fmt.Sprintf("scheduled run started: %s (%s)", job.ID, job.Name))
 
 			result, err := svc.Run(job)
 			if err != nil {
 				log.Printf("Job %s failed: %v", job.ID, err)
+				activitylog.Log(paths.LogsDir, fmt.Sprintf("scheduled run failed: %s (%s) — %v", job.ID, job.Name, err))
 			} else {
 				log.Printf("Job %s completed successfully in %ds", job.ID, result.DurationSeconds)
+				activitylog.Log(paths.LogsDir, fmt.Sprintf("scheduled run completed: %s (%s) — %ds", job.ID, job.Name, result.DurationSeconds))
 			}
 
 			newNext, err := nextRunAfter(job, time.Now())

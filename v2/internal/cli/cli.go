@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	osuser "os/user"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/activitylog"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/audit"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/app"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/daemon"
@@ -37,6 +39,18 @@ var errCancelled = ui.ErrCancelled
 
 // pauseForEnter prints a prompt and waits for the user to press Enter.
 // Use this before returning from any screen that shows output the user should read.
+// currentOSUser returns the logged-in OS username, or "unknown" if it cannot be determined.
+func currentOSUser() string {
+	u, err := osuser.Current()
+	if err != nil {
+		return "unknown"
+	}
+	if u.Username != "" {
+		return u.Username
+	}
+	return "unknown"
+}
+
 func pauseForEnter() {
 	fmt.Println()
 	ui.Println2("Press Enter to continue...")
@@ -84,6 +98,7 @@ func runMenu(paths app.Paths) error {
 			"Manage Backup",
 			"Import Backup",
 			"Settings",
+			"Audit Log",
 			"About",
 			"Exit",
 		})
@@ -122,6 +137,8 @@ func runMenu(paths app.Paths) error {
 				ui.StatusError(err.Error())
 				pauseForEnter()
 			}
+		case "Audit Log":
+			runSystemLogBrowser(paths, prompter)
 		case "About":
 			runAbout()
 		case "Exit":
@@ -561,7 +578,8 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 		return err
 	}
 
-	activitylog.Log(paths.LogsDir, fmt.Sprintf("job created: %s (%s)", job.ID, job.Name))
+	activitylog.Audit(paths.LogsDir, fmt.Sprintf("Job Created by user %q via interactive CLI: %s (%s) — engine: %s, source: %s", currentOSUser(), job.ID, job.Name, job.Program, job.Source.Path))
+	audit.Record(job.JobDir, "Job Created", fmt.Sprintf("engine: %s, source: %s", job.Program, job.Source.Path))
 	daemon.TriggerReload(paths.StateDir)
 
 	ui.ClearScreen()
@@ -664,6 +682,7 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			"Show Job Configuration",
 			"Validate Job",
 			"Export Backup Job",
+			"Audit Log (By User)",
 			"Delete Backup",
 			"Back To Main Menu",
 		})
@@ -680,17 +699,21 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			if err := runJobByID(paths, job.ID); err != nil {
 				ui.StatusError(err.Error())
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("manual run failed: %s (%s) — %v", job.ID, job.Name, err))
+				audit.Record(job.JobDir, "Run Backup", fmt.Sprintf("FAILED: %v", err))
 			} else {
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("manual run completed: %s (%s)", job.ID, job.Name))
+				audit.Record(job.JobDir, "Run Backup", "completed successfully")
 			}
 			pauseForEnter()
 		case "Restore Backup":
 			if err := runRestoreWizard(paths, prompter, job.ID); err != nil {
 				ui.StatusError(err.Error())
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("restore failed: %s (%s) — %v", job.ID, job.Name, err))
+				audit.Record(job.JobDir, "Restore", fmt.Sprintf("FAILED: %v", err))
 			} else {
 				ui.StatusOK("Restore completed successfully.")
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("restore completed: %s (%s)", job.ID, job.Name))
+				audit.Record(job.JobDir, "Restore", "completed successfully")
 			}
 			pauseForEnter()
 		case "List Snapshots":
@@ -704,6 +727,8 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 				pauseForEnter()
 			} else {
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("job edited: %s (%s)", job.ID, job.Name))
+				activitylog.Audit(paths.LogsDir, fmt.Sprintf("Job Modified by user %q via interactive CLI: %s (%s) — configuration edited", currentOSUser(), job.ID, job.Name))
+				audit.Record(job.JobDir, "Edit Job", "configuration saved")
 				daemon.TriggerReload(paths.StateDir)
 			}
 		case "Configure Schedule":
@@ -718,6 +743,9 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 				pauseForEnter()
 			} else {
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("schedule updated: %s (%s)", job.ID, job.Name))
+				reloaded, _ := jobs.Load(paths, job.ID)
+				activitylog.Audit(paths.LogsDir, fmt.Sprintf("Job Modified by user %q via interactive CLI: %s (%s) — schedule changed to: %s", currentOSUser(), job.ID, job.Name, cronSchedule.Describe(reloaded.Schedule)))
+				audit.Record(job.JobDir, "Configure Schedule", cronSchedule.Describe(reloaded.Schedule))
 				daemon.TriggerReload(paths.StateDir)
 			}
 		case "Configure Retention":
@@ -732,6 +760,9 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 				pauseForEnter()
 			} else {
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("retention updated: %s (%s)", job.ID, job.Name))
+				reloaded, _ := jobs.Load(paths, job.ID)
+				activitylog.Audit(paths.LogsDir, fmt.Sprintf("Job Modified by user %q via interactive CLI: %s (%s) — retention changed to: %s", currentOSUser(), job.ID, job.Name, reloaded.Retention.Mode))
+				audit.Record(job.JobDir, "Configure Retention", fmt.Sprintf("mode: %s", reloaded.Retention.Mode))
 				daemon.TriggerReload(paths.StateDir)
 			}
 		case "Configure Notifications":
@@ -746,6 +777,13 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 				pauseForEnter()
 			} else {
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("notifications updated: %s (%s)", job.ID, job.Name))
+				reloaded, _ := jobs.Load(paths, job.ID)
+				notifDetail := "disabled"
+				if reloaded.Notifications.HealthchecksEnabled {
+					notifDetail = fmt.Sprintf("healthchecks enabled (domain: %s)", reloaded.Notifications.HealthchecksDomain)
+				}
+				activitylog.Audit(paths.LogsDir, fmt.Sprintf("Job Modified by user %q via interactive CLI: %s (%s) — notifications: %s", currentOSUser(), job.ID, job.Name, notifDetail))
+				audit.Record(job.JobDir, "Configure Notifications", notifDetail)
 				daemon.TriggerReload(paths.StateDir)
 			}
 		case "Show Job Configuration":
@@ -771,18 +809,21 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 				continue
 			}
 			activitylog.Log(paths.LogsDir, fmt.Sprintf("job exported: %s (%s) -> %s", job.ID, job.Name, targetDir))
+			audit.Record(job.JobDir, "Export Job", fmt.Sprintf("exported to %s", targetDir))
 			fmt.Println()
 			ui.StatusOK(fmt.Sprintf("Exported to %s", targetDir))
 			ui.Println2("Files: job.toml, secrets.env")
 			ui.StatusWarn("Keep secrets.env safe — it contains your backup passwords.")
 			pauseForEnter()
+		case "Audit Log (By User)":
+			runJobLogBrowser(paths, prompter, job)
 		case "Delete Backup":
 			if err := removeJob(paths, prompter, job.ID); err != nil {
 				ui.StatusError("Delete failed: " + err.Error())
 				pauseForEnter()
 				continue
 			}
-			activitylog.Log(paths.LogsDir, fmt.Sprintf("job deleted: %s (%s)", job.ID, job.Name))
+			activitylog.Audit(paths.LogsDir, fmt.Sprintf("Job Deleted by user %q via interactive CLI: %s (%s) — destination: %s", currentOSUser(), job.ID, job.Name, job.Destination.Path))
 			daemon.TriggerReload(paths.StateDir)
 			return nil
 		case "Back To Main Menu":
@@ -1089,6 +1130,319 @@ func validateJob(paths app.Paths, id string) error {
 	return nil
 }
 
+const (
+	auditPageSize   = 30
+	logViewPageSize = 40
+)
+
+// ── System-level log browser (main menu) ─────────────────────────────────────
+
+func runSystemLogBrowser(paths app.Paths, prompter ui.Prompter) {
+	for {
+		ui.ClearScreen()
+		ui.Header("Audit Log")
+		_, choice, err := prompter.Select("", []string{
+			"System Audit Events",
+			"Activity Log",
+			"Daemon Log",
+			"Job Run Logs",
+			"Back",
+		})
+		if err != nil || choice == "Back" || choice == "" {
+			return
+		}
+
+		switch choice {
+		case "System Audit Events":
+			showAuditEvents(paths)
+			pauseForEnter()
+		case "Activity Log":
+			showTextFileNewestFirst(filepath.Join(paths.LogsDir, "activity.log"), "Activity Log")
+			pauseForEnter()
+		case "Daemon Log":
+			showTextFileNewestFirst(filepath.Join(paths.StateDir, "daemon.log"), "Daemon Log")
+			pauseForEnter()
+		case "Job Run Logs":
+			runJobRunLogBrowserGlobal(paths, prompter)
+		}
+	}
+}
+
+// showAuditEvents shows audit-events.log (significant user actions, 8-year retention).
+func showAuditEvents(paths app.Paths) {
+	ui.ClearScreen()
+	ui.Header("System Audit Events")
+	fmt.Println()
+	ui.Println2("Significant user actions — job created, deleted, modified.")
+	ui.Println2("Retained for 8 years.")
+
+	entries, err := activitylog.ReadAuditEvents(paths.LogsDir)
+	if err != nil {
+		ui.StatusError("Could not read audit events: " + err.Error())
+		return
+	}
+	if len(entries) == 0 {
+		fmt.Println()
+		ui.StatusWarn("No audit entries yet.")
+		return
+	}
+
+	showLinesNewestFirst(entries)
+}
+
+// runJobRunLogBrowserGlobal lets the user pick any job then browse its run logs.
+func runJobRunLogBrowserGlobal(paths app.Paths, prompter ui.Prompter) {
+	allJobs, err := jobs.LoadAll(paths)
+	if err != nil {
+		ui.StatusError("Could not load jobs: " + err.Error())
+		pauseForEnter()
+		return
+	}
+	if len(allJobs) == 0 {
+		ui.StatusWarn("No jobs found.")
+		pauseForEnter()
+		return
+	}
+
+	options := make([]string, 0, len(allJobs)+1)
+	byLabel := make(map[string]config.Job, len(allJobs))
+	for _, j := range allJobs {
+		label := fmt.Sprintf("%s — %s", j.ID, j.Name)
+		options = append(options, label)
+		byLabel[label] = j
+	}
+	sort.Strings(options)
+	options = append(options, "Back")
+
+	_, choice, err := prompter.Select("Select job", options)
+	if err != nil || choice == "Back" || choice == "" {
+		return
+	}
+	runJobLogBrowser(paths, prompter, byLabel[choice])
+}
+
+// ── Per-job log browser (manage backup menu) ─────────────────────────────────
+
+func runJobLogBrowser(paths app.Paths, prompter ui.Prompter, job config.Job) {
+	for {
+		ui.ClearScreen()
+		ui.Header("Logs: " + job.Name)
+		_, choice, err := prompter.Select("", []string{
+			"User Actions (Audit Log)",
+			"Backup Run Logs",
+			"Restore Logs",
+			"Back",
+		})
+		if err != nil || choice == "Back" || choice == "" {
+			return
+		}
+
+		switch choice {
+		case "User Actions (Audit Log)":
+			showJobAuditLog(job)
+			pauseForEnter()
+		case "Backup Run Logs":
+			pickAndViewLogFile(prompter, filepath.Join(job.JobDir, "logs"), "backup run")
+		case "Restore Logs":
+			pickAndViewLogFile(prompter, filepath.Join(job.JobDir, "logs", "restore"), "restore")
+		}
+	}
+}
+
+// showJobAuditLog shows the per-job audit.log as a formatted table.
+func showJobAuditLog(job config.Job) {
+	ui.ClearScreen()
+	ui.Header("User Actions: " + job.Name)
+
+	entries, err := audit.Read(job.JobDir)
+	if err != nil {
+		ui.StatusError("Could not read audit log: " + err.Error())
+		return
+	}
+	if len(entries) == 0 {
+		fmt.Println()
+		ui.StatusWarn("No audit entries yet. Actions taken via the menu will be recorded here.")
+		return
+	}
+
+	// Reverse so newest is first.
+	reversed := make([]audit.Entry, len(entries))
+	for i, e := range entries {
+		reversed[len(entries)-1-i] = e
+	}
+
+	total := len(reversed)
+	shown := 0
+	for shown < total {
+		end := shown + auditPageSize
+		if end > total {
+			end = total
+		}
+		fmt.Println()
+		fmt.Printf("  %-19s  %-26s  %s\n", "Time", "Action", "Detail")
+		fmt.Printf("  %-19s  %-26s  %s\n", strings.Repeat("-", 19), strings.Repeat("-", 26), strings.Repeat("-", 40))
+		for _, e := range reversed[shown:end] {
+			fmt.Printf("  %-19s  %-26s  %s\n",
+				e.Time.Format("2006-01-02 15:04:05"),
+				e.Action,
+				e.Detail,
+			)
+		}
+		shown = end
+		if shown < total {
+			fmt.Println()
+			fmt.Printf("  Showing %d of %d entries. ", shown, total)
+			fmt.Print("Press Enter for more, or type 'q' to stop: ")
+			var input string
+			fmt.Scanln(&input)
+			if strings.ToLower(strings.TrimSpace(input)) == "q" {
+				return
+			}
+		}
+	}
+	fmt.Println()
+	fmt.Printf("  Total: %d entries.\n", total)
+}
+
+// pickAndViewLogFile lists *.log files in dir (newest first), lets the user
+// pick one, then displays it page by page.
+func pickAndViewLogFile(prompter ui.Prompter, dir string, label string) {
+	matches, err := filepath.Glob(filepath.Join(dir, "*.log"))
+	if err != nil || len(matches) == 0 {
+		ui.ClearScreen()
+		fmt.Println()
+		ui.StatusWarn(fmt.Sprintf("No %s logs found.", label))
+		pauseForEnter()
+		return
+	}
+
+	// Newest first.
+	sort.Sort(sort.Reverse(sort.StringSlice(matches)))
+
+	options := make([]string, 0, len(matches)+1)
+	for _, m := range matches {
+		options = append(options, filepath.Base(m))
+	}
+	options = append(options, "Back")
+
+	_, choice, err := prompter.Select(fmt.Sprintf("Select %s log", label), options)
+	if err != nil || choice == "Back" || choice == "" {
+		return
+	}
+
+	showTextFile(filepath.Join(dir, choice), choice)
+	pauseForEnter()
+}
+
+// ── Generic text file viewers ─────────────────────────────────────────────────
+
+// showTextFileNewestFirst reads a line-based log file and displays it newest-first.
+func showTextFileNewestFirst(path, title string) {
+	ui.ClearScreen()
+	ui.Header(title)
+
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		fmt.Println()
+		ui.StatusWarn("Log file does not exist yet.")
+		return
+	}
+	if err != nil {
+		ui.StatusError("Could not read log: " + err.Error())
+		return
+	}
+
+	var lines []string
+	for _, l := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, l)
+		}
+	}
+	if len(lines) == 0 {
+		fmt.Println()
+		ui.StatusWarn("Log is empty.")
+		return
+	}
+
+	showLinesNewestFirst(lines)
+}
+
+// showTextFile displays a file top-to-bottom (natural order), paginated.
+// Used for run logs where chronological order matters.
+func showTextFile(path, title string) {
+	ui.ClearScreen()
+	ui.Header(title)
+
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		fmt.Println()
+		ui.StatusWarn("Log file does not exist.")
+		return
+	}
+	if err != nil {
+		ui.StatusError("Could not read log: " + err.Error())
+		return
+	}
+
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	total := len(lines)
+	shown := 0
+	for shown < total {
+		end := shown + logViewPageSize
+		if end > total {
+			end = total
+		}
+		fmt.Println()
+		for _, l := range lines[shown:end] {
+			fmt.Printf("  %s\n", l)
+		}
+		shown = end
+		if shown < total {
+			fmt.Println()
+			fmt.Printf("  -- line %d of %d -- Press Enter for more, or type 'q' to stop: ", shown, total)
+			var input string
+			fmt.Scanln(&input)
+			if strings.ToLower(strings.TrimSpace(input)) == "q" {
+				return
+			}
+		}
+	}
+	fmt.Println()
+	fmt.Printf("  End of log (%d lines).\n", total)
+}
+
+// showLinesNewestFirst pages through lines in reverse order.
+func showLinesNewestFirst(lines []string) {
+	reversed := make([]string, len(lines))
+	for i, l := range lines {
+		reversed[len(lines)-1-i] = l
+	}
+	total := len(reversed)
+	shown := 0
+	for shown < total {
+		end := shown + auditPageSize
+		if end > total {
+			end = total
+		}
+		fmt.Println()
+		for _, l := range reversed[shown:end] {
+			fmt.Printf("  %s\n", l)
+		}
+		shown = end
+		if shown < total {
+			fmt.Println()
+			fmt.Printf("  Showing %d of %d entries. Press Enter for more, or type 'q' to stop: ", shown, total)
+			var input string
+			fmt.Scanln(&input)
+			if strings.ToLower(strings.TrimSpace(input)) == "q" {
+				return
+			}
+		}
+	}
+	fmt.Println()
+	fmt.Printf("  Total: %d entries.\n", total)
+}
+
 func runJobByID(paths app.Paths, id string) error {
 	job, err := jobs.Load(paths, id)
 	if err != nil {
@@ -1358,6 +1712,11 @@ func configureRetention(prompter ui.Prompter, job config.Job) error {
 }
 
 func removeJob(paths app.Paths, prompter ui.Prompter, id string) error {
+	job, err := jobs.Load(paths, id)
+	if err != nil {
+		return err
+	}
+
 	_, choice, err := prompter.Select("Are you sure you want to remove this backup job?", []string{
 		"No - cancel",
 		"Yes - remove backup job",
@@ -1370,10 +1729,63 @@ func removeJob(paths app.Paths, prompter ui.Prompter, id string) error {
 		pauseForEnter()
 		return nil
 	}
+
+	// Ask whether to also destroy the backed-up data at the destination.
+	fmt.Println()
+	ui.SectionHeader("Backed Up Data")
+	ui.KeyValue("Destination:", job.Destination.Path)
+	fmt.Println()
+	ui.StatusWarn("This is your actual backup data. Deleting it is permanent and cannot be undone.")
+	fmt.Println()
+	_, dataChoice, err := prompter.Select("What should happen to the backed up data?", []string{
+		"Keep data - only remove the job configuration",
+		"Delete data - permanently destroy all backed up data",
+	})
+	if err != nil {
+		return err
+	}
+
+	deleteData := dataChoice == "Delete data - permanently destroy all backed up data"
+	if deleteData {
+		// Second confirmation — this is irreversible.
+		fmt.Println()
+		ui.StatusError(fmt.Sprintf("WARNING: This will permanently delete everything at:\n  %s", job.Destination.Path))
+		fmt.Println()
+		_, confirm, err := prompter.Select("Are you absolutely sure?", []string{
+			"No - keep my data",
+			"Yes - delete all backed up data",
+		})
+		if err != nil {
+			return err
+		}
+		if confirm != "Yes - delete all backed up data" {
+			deleteData = false
+		}
+	}
+
+	// Write audit entry before deleting the job dir (it will be gone after).
+	auditDetail := "job configuration removed, data kept"
+	if deleteData {
+		auditDetail = fmt.Sprintf("job configuration removed, data deleted (%s)", job.Destination.Path)
+	}
+	audit.Record(job.JobDir, "Job Deleted", auditDetail)
+
 	if err := jobs.Delete(paths, id); err != nil {
 		return err
 	}
 	ui.StatusOK("Backup job removed.")
+
+	if deleteData {
+		fmt.Println()
+		fmt.Printf("  Deleting backed up data at %s...\n", job.Destination.Path)
+		if err := os.RemoveAll(job.Destination.Path); err != nil {
+			ui.StatusError(fmt.Sprintf("Could not delete backed up data: %v", err))
+			ui.StatusWarn("You may need to delete it manually: " + job.Destination.Path)
+		} else {
+			ui.StatusOK("Backed up data deleted.")
+		}
+	}
+
 	pauseForEnter()
 	return nil
 }
