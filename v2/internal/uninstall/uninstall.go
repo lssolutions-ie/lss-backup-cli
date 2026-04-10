@@ -69,6 +69,10 @@ func Run() error {
 		}
 	}
 
+	// Stop the daemon before touching the filesystem so it releases file handles.
+	stopDaemonService()
+	unregisterDaemonService()
+
 	removeInstalledData(paths)
 
 	fmt.Println("LSS Backup CLI uninstall complete.")
@@ -330,16 +334,10 @@ func safeRemove(target string) {
 	}
 
 	if err := os.RemoveAll(target); err != nil {
-		if runtime.GOOS == "windows" {
-			// Windows locks a running executable; we can't delete it from within
-			// the process itself. Everything else (config, jobs, logs) is still
-			// cleaned up. The binary must be removed manually after exiting, or
-			// by running uninstall-cli.ps1 while the program is not running.
-			fmt.Printf("Note: could not remove %s — the binary may be in use.\n", target)
-			fmt.Println("Delete it manually after exiting, or run uninstall-cli.ps1.")
-			return
-		}
 		fmt.Printf("Warning: could not remove %s: %v\n", target, err)
+		if runtime.GOOS == "windows" {
+			fmt.Println("  (If this is the binary, delete it manually after exiting.)")
+		}
 		return
 	}
 
