@@ -166,7 +166,7 @@ func runCheckForUpdates(paths app.Paths, prompter ui.Prompter) error {
 	}
 
 	if result.UpdateAvailable {
-		ui.StatusWarn(result.Message)
+		ui.StatusInfo(result.Message)
 	} else {
 		ui.StatusOK(result.Message)
 	}

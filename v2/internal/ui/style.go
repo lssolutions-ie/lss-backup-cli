@@ -89,6 +89,11 @@ func StatusDot(color, msg string) {
 	fmt.Printf("  %s  %s\n", dot, msg)
 }
 
+// StatusInfo prints a cyan [INFO] tag + message — neutral informational notices.
+func StatusInfo(msg string) {
+	fmt.Printf("  %s[INFO]%s    %s\n", colCyan, colReset, msg)
+}
+
 // StatusOK prints a green [OK] tag + message.
 func StatusOK(msg string) {
 	fmt.Printf("  %s[OK]%s      %s\n", colGreen, colReset, msg)
