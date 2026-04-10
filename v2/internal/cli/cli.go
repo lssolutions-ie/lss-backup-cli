@@ -1424,9 +1424,10 @@ func termWidth() int {
 }
 
 // wrapMessage splits msg into lines that fit within maxWidth characters.
-// Continuation lines are prefixed with indent. Splits on spaces where possible,
-// falls back to hard-wrapping for tokens longer than maxWidth.
-func wrapMessage(msg string, maxWidth int, indent string) []string {
+// Returns the first line and any continuation lines without any leading indent
+// — the caller is responsible for indenting continuation lines.
+// Splits on spaces where possible, falls back to hard-wrapping.
+func wrapMessage(msg string, maxWidth int) []string {
 	if maxWidth <= 0 {
 		return []string{msg}
 	}
@@ -1442,7 +1443,7 @@ func wrapMessage(msg string, maxWidth int, indent string) []string {
 			cut = idx
 		}
 		lines = append(lines, msg[:cut])
-		msg = indent + strings.TrimLeft(msg[cut:], " ")
+		msg = strings.TrimLeft(msg[cut:], " ")
 	}
 	return lines
 }
@@ -1456,6 +1457,9 @@ func printLogTable(rows []logRow, pageSize int) {
 	contIndent := strings.Repeat(" ", msgOffset)
 
 	tw := termWidth()
+	if tw > 160 {
+		tw = 160 // cap: Windows console buffer width != window width
+	}
 	msgWidth := tw - msgOffset
 	if msgWidth < 20 {
 		msgWidth = 20
@@ -1480,7 +1484,7 @@ func printLogTable(rows []logRow, pageSize int) {
 			if t == "" {
 				t = strings.Repeat(" ", timeCol)
 			}
-			msgLines := wrapMessage(r.message, msgWidth, contIndent)
+			msgLines := wrapMessage(r.message, msgWidth)
 			fmt.Printf("%s%-*s%s%s\n", rowIndent, timeCol, t, sep, msgLines[0])
 			for _, cont := range msgLines[1:] {
 				fmt.Printf("%s%s\n", contIndent, cont)
