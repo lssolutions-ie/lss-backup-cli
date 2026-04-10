@@ -111,6 +111,15 @@ func (p Prompter) AskPassword(question string) (string, error) {
 	}
 }
 
+// ReadLine reads a raw line of input from stdin (no prompt printed).
+func (p Prompter) ReadLine() (string, error) {
+	line, err := p.reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
+}
+
 func (p Prompter) Select(title string, options []string) (int, string, error) {
 	if len(options) == 0 {
 		return 0, "", fmt.Errorf("no options available")

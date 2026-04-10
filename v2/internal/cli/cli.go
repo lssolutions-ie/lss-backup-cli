@@ -641,30 +641,10 @@ func initRepoOnly(paths app.Paths, job config.Job) error {
 }
 
 func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
-	// 1. Always list jobs first.
 	ui.ClearScreen()
 	ui.Header("Manage Backup")
-	if err := printJobs(paths); err != nil {
-		ui.StatusError("Could not list jobs: " + err.Error())
-	}
 
-	// 2. Bail out early if there are no jobs.
-	allJobs, err := jobs.List(paths)
-	if err != nil {
-		return err
-	}
-	if len(allJobs) == 0 {
-		fmt.Println()
-		ui.StatusWarn("No backup jobs found. Create a backup job first.")
-		fmt.Println()
-		ui.Println2("Press Enter to continue...")
-		fmt.Scanln()
-		return nil
-	}
-
-	// 3. Select a job.
-	fmt.Println()
-	job, err := selectJob(paths, prompter)
+	job, err := selectJobTable(paths, prompter)
 	if err != nil {
 		return err
 	}
@@ -1046,57 +1026,6 @@ func runExportWizard(paths app.Paths, prompter ui.Prompter) error {
 	fmt.Printf("Exported job %q to %s\n", job.ID, targetDir)
 	fmt.Println("Files: job.toml, secrets.env")
 	fmt.Println("Keep secrets.env safe — it contains your backup passwords.")
-	return nil
-}
-
-func printJobs(paths app.Paths) error {
-	items, err := jobs.List(paths)
-	if err != nil {
-		return err
-	}
-
-	if len(items) == 0 {
-		fmt.Println()
-		ui.Println2("No backup jobs configured.")
-		return nil
-	}
-
-	const ind = "  "
-	const colID = 10
-	const colProg = 8
-	const colName = 22
-	const colLast = 26
-
-	fmt.Println()
-	fmt.Printf("%s%-*s  %-*s  %-*s  %-*s  %s\n", ind,
-		colID, "ID",
-		colProg, "Program",
-		colName, "Name",
-		colLast, "Last Run",
-		"Next Run",
-	)
-	fmt.Printf("%s%s  %s  %s  %s  %s\n", ind,
-		strings.Repeat("─", colID),
-		strings.Repeat("─", colProg),
-		strings.Repeat("─", colName),
-		strings.Repeat("─", colLast),
-		strings.Repeat("─", 24),
-	)
-
-	for _, item := range items {
-		name := item.Name
-		if len(name) > colName {
-			name = name[:colName-1] + "…"
-		}
-		fmt.Printf("%s%-*s  %-*s  %-*s  %-*s  %s\n", ind,
-			colID, item.ID,
-			colProg, item.Program,
-			colName, name,
-			colLast, formatLastRun(item.LastRun),
-			formatNextRunShort(item.NextRun),
-		)
-	}
-	fmt.Println()
 	return nil
 }
 
@@ -1945,8 +1874,6 @@ func removeJob(paths app.Paths, prompter ui.Prompter, id string) error {
 	return nil
 }
 
-const selectJobBack = "Back"
-
 func selectJob(paths app.Paths, prompter ui.Prompter) (config.Job, error) {
 	items, err := jobs.List(paths)
 	if err != nil {
@@ -1964,16 +1891,97 @@ func selectJob(paths app.Paths, prompter ui.Prompter) (config.Job, error) {
 		lookup[label] = item.ID
 	}
 	sort.Strings(options)
-	options = append(options, selectJobBack)
+	options = append(options, "Back")
 
 	_, selected, err := prompter.Select("Select backup job", options)
 	if err != nil {
 		return config.Job{}, err
 	}
-	if selected == selectJobBack || selected == "" {
+	if selected == "Back" || selected == "" {
 		return config.Job{}, nil
 	}
 	return jobs.Load(paths, lookup[selected])
+}
+
+// selectJobTable renders the job list as a numbered table and prompts the
+// user to pick one by number. Returns an empty Job if the user cancels.
+func selectJobTable(paths app.Paths, prompter ui.Prompter) (config.Job, error) {
+	items, err := jobs.List(paths)
+	if err != nil {
+		return config.Job{}, err
+	}
+
+	if len(items) == 0 {
+		fmt.Println()
+		ui.StatusWarn("No backup jobs found. Create a backup job first.")
+		fmt.Println()
+		ui.Println2("Press Enter to continue...")
+		fmt.Scanln()
+		return config.Job{}, nil
+	}
+
+	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
+
+	const (
+		colID   = 10
+		colProg = 8
+		colName = 22
+		colLast = 26
+	)
+	// Row format: ind + Bold("N)") + "  " + columns
+	// Visible prefix after ind: "N)  " = 4 chars. Header indented to match.
+	const prefixWidth = 4
+	const ind = "  "
+	headerIndent := strings.Repeat(" ", prefixWidth)
+
+	fmt.Println()
+	fmt.Printf("%s%s%-*s  %-*s  %-*s  %-*s  %s\n", ind, headerIndent,
+		colID, "ID",
+		colProg, "Program",
+		colName, "Name",
+		colLast, "Last Run",
+		"Next Run",
+	)
+	fmt.Printf("%s%s%s  %s  %s  %s  %s\n", ind, headerIndent,
+		strings.Repeat("─", colID),
+		strings.Repeat("─", colProg),
+		strings.Repeat("─", colName),
+		strings.Repeat("─", colLast),
+		strings.Repeat("─", 24),
+	)
+
+	for i, item := range items {
+		name := item.Name
+		if len(name) > colName {
+			name = name[:colName-1] + "…"
+		}
+		fmt.Printf("%s%s  %-*s  %-*s  %-*s  %-*s  %s\n", ind,
+			ui.Bold(fmt.Sprintf("%d)", i+1)),
+			colID, item.ID,
+			colProg, item.Program,
+			colName, name,
+			colLast, formatLastRun(item.LastRun),
+			formatNextRunShort(item.NextRun),
+		)
+	}
+	fmt.Println()
+	ui.Divider()
+	fmt.Println()
+	fmt.Printf("  Choose Backup Job [1-%d] or Enter to go back: ", len(items))
+
+	answer, err := prompter.ReadLine()
+	if err != nil {
+		return config.Job{}, err
+	}
+	answer = strings.TrimSpace(answer)
+	if answer == "" {
+		return config.Job{}, nil
+	}
+	n, err := strconv.Atoi(answer)
+	if err != nil || n < 1 || n > len(items) {
+		return config.Job{}, nil
+	}
+	return jobs.Load(paths, items[n-1].ID)
 }
 
 func promptSchedule(prompter ui.Prompter) (config.Schedule, error) {
