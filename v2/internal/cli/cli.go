@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/activitylog"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/audit"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/app"
@@ -1412,11 +1414,55 @@ func showTextFile(path, title string) {
 }
 
 // printLogTable renders rows as a Time | Message table with pagination.
+// termWidth returns the current terminal width, defaulting to 120 if unknown.
+func termWidth() int {
+	w, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil || w < 40 {
+		return 120
+	}
+	return w
+}
+
+// wrapMessage splits msg into lines that fit within maxWidth characters.
+// Continuation lines are prefixed with indent. Splits on spaces where possible,
+// falls back to hard-wrapping for tokens longer than maxWidth.
+func wrapMessage(msg string, maxWidth int, indent string) []string {
+	if maxWidth <= 0 {
+		return []string{msg}
+	}
+	var lines []string
+	for {
+		if len(msg) <= maxWidth {
+			lines = append(lines, msg)
+			break
+		}
+		// Find the last space within maxWidth.
+		cut := maxWidth
+		if idx := strings.LastIndex(msg[:maxWidth], " "); idx > 0 {
+			cut = idx
+		}
+		lines = append(lines, msg[:cut])
+		msg = indent + strings.TrimLeft(msg[cut:], " ")
+	}
+	return lines
+}
+
 func printLogTable(rows []logRow, pageSize int) {
+	const rowIndent = "  "
 	const timeCol = 19
 	const sep = "  "
+	// message column starts at: len(rowIndent) + timeCol + len(sep) = 2+19+2 = 23
+	const msgOffset = len(rowIndent) + timeCol + len(sep)
+	contIndent := strings.Repeat(" ", msgOffset)
+
+	tw := termWidth()
+	msgWidth := tw - msgOffset
+	if msgWidth < 20 {
+		msgWidth = 20
+	}
+
 	divTime := strings.Repeat("-", timeCol)
-	divMsg := strings.Repeat("-", 60)
+	divMsg := strings.Repeat("-", msgWidth)
 
 	total := len(rows)
 	shown := 0
@@ -1427,14 +1473,19 @@ func printLogTable(rows []logRow, pageSize int) {
 		}
 
 		fmt.Println()
-		fmt.Printf("  %-*s%s%s\n", timeCol, "Time", sep, "Message")
-		fmt.Printf("  %-*s%s%s\n", timeCol, divTime, sep, divMsg)
+		fmt.Printf("%s%-*s%s%s\n", rowIndent, timeCol, "Time", sep, "Message")
+		fmt.Printf("%s%-*s%s%s\n", rowIndent, timeCol, divTime, sep, divMsg)
 		for _, r := range rows[shown:end] {
 			t := r.time
 			if t == "" {
 				t = strings.Repeat(" ", timeCol)
 			}
-			fmt.Printf("  %-*s%s%s\n", timeCol, t, sep, r.message)
+			msgLines := wrapMessage(r.message, msgWidth, contIndent)
+			fmt.Printf("%s%-*s%s%s\n", rowIndent, timeCol, t, sep, msgLines[0])
+			for _, cont := range msgLines[1:] {
+				fmt.Printf("%s%s\n", contIndent, cont)
+			}
+			fmt.Println()
 		}
 		shown = end
 
