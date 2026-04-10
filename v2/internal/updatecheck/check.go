@@ -1,13 +1,11 @@
 package updatecheck
 
 import (
-	"archive/zip"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -78,7 +76,7 @@ func Check() (Result, error) {
 		CurrentVersion:  version.Current,
 		LatestVersion:   latest.Raw,
 		UpdateAvailable: compareSemVersion(current, latest) < 0,
-		ArchiveURL:      archiveURLForTag(latest.Raw),
+		ArchiveURL:      binaryAssetURL(latest.Raw),
 	}
 
 	if result.UpdateAvailable {
@@ -90,12 +88,36 @@ func Check() (Result, error) {
 	return result, nil
 }
 
+// binaryAssetName returns the expected release asset filename for this platform.
+func binaryAssetName() string {
+	name := fmt.Sprintf("lss-backup-cli-%s-%s", runtime.GOOS, runtime.GOARCH)
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return name
+}
+
+// binaryAssetURL returns the GitHub release asset download URL for this platform.
+func binaryAssetURL(tag string) string {
+	return fmt.Sprintf("https://github.com/%s/releases/download/%s/%s",
+		version.Repository, tag, binaryAssetName())
+}
+
 func Install(result Result) error {
 	if !result.UpdateAvailable {
 		return fmt.Errorf("no update is currently available")
 	}
 	if result.ArchiveURL == "" {
-		return fmt.Errorf("no archive URL available for %s", result.LatestVersion)
+		return fmt.Errorf("no binary URL available for %s", result.LatestVersion)
+	}
+
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve current executable path: %w", err)
+	}
+	exePath, err = filepath.EvalSymlinks(exePath)
+	if err != nil {
+		return fmt.Errorf("resolve symlinks for executable: %w", err)
 	}
 
 	workDir, err := os.MkdirTemp("", "lss-backup-update-*")
@@ -104,26 +126,18 @@ func Install(result Result) error {
 	}
 	defer os.RemoveAll(workDir)
 
-	archivePath := filepath.Join(workDir, "update.zip")
-	if err := downloadArchive(result.ArchiveURL, archivePath); err != nil {
+	ext := ""
+	if runtime.GOOS == "windows" {
+		ext = ".exe"
+	}
+	newBin := filepath.Join(workDir, "lss-backup-cli-new"+ext)
+
+	fmt.Printf("  Downloading %s...\n", result.LatestVersion)
+	if err := downloadBinary(result.ArchiveURL, newBin); err != nil {
 		return err
 	}
 
-	extractDir := filepath.Join(workDir, "extract")
-	if err := os.MkdirAll(extractDir, 0o755); err != nil {
-		return fmt.Errorf("create extract directory: %w", err)
-	}
-
-	if err := extractZip(archivePath, extractDir); err != nil {
-		return err
-	}
-
-	moduleDir, err := findV2Dir(extractDir)
-	if err != nil {
-		return err
-	}
-
-	return runInstaller(moduleDir)
+	return replaceBinary(exePath, newBin)
 }
 
 func fetchTags() ([]githubTag, error) {
@@ -153,148 +167,40 @@ func fetchTags() ([]githubTag, error) {
 	return tags, nil
 }
 
-func archiveURLForTag(tag string) string {
-	return fmt.Sprintf("https://github.com/%s/archive/refs/tags/%s.zip", version.Repository, tag)
-}
-
-func downloadArchive(url string, targetPath string) error {
+func downloadBinary(url, targetPath string) error {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("User-Agent", "lss-backup-cli-updater")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("download update archive: %w", err)
+		return fmt.Errorf("download update: %w", err)
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("no pre-built binary available for %s/%s — download manually from https://github.com/%s/releases",
+			runtime.GOOS, runtime.GOARCH, version.Repository)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download update archive: unexpected status %s", resp.Status)
+		return fmt.Errorf("download update: unexpected status %s", resp.Status)
 	}
 
-	target, err := os.Create(targetPath)
+	target, err := os.OpenFile(targetPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
 	if err != nil {
-		return fmt.Errorf("create update archive: %w", err)
+		return fmt.Errorf("create temp binary: %w", err)
 	}
 	defer target.Close()
 
-	const maxDownloadBytes = 500 * 1024 * 1024 // 500 MB
-	if _, err := io.Copy(target, io.LimitReader(resp.Body, maxDownloadBytes)); err != nil {
-		return fmt.Errorf("write update archive: %w", err)
+	const maxBytes = 100 * 1024 * 1024 // 100 MB
+	if _, err := io.Copy(target, io.LimitReader(resp.Body, maxBytes)); err != nil {
+		return fmt.Errorf("write binary: %w", err)
 	}
 
 	return nil
-}
-
-func extractZip(archivePath string, targetDir string) error {
-	reader, err := zip.OpenReader(archivePath)
-	if err != nil {
-		return fmt.Errorf("open update archive: %w", err)
-	}
-	defer reader.Close()
-
-	for _, file := range reader.File {
-		path := filepath.Join(targetDir, file.Name)
-		cleanTargetDir := filepath.Clean(targetDir) + string(filepath.Separator)
-		if !strings.HasPrefix(filepath.Clean(path), cleanTargetDir) {
-			return fmt.Errorf("unsafe path in update archive: %s", file.Name)
-		}
-
-		if file.FileInfo().IsDir() {
-			if err := os.MkdirAll(path, 0o755); err != nil {
-				return fmt.Errorf("create directory %s: %w", path, err)
-			}
-			continue
-		}
-
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return fmt.Errorf("create parent directory for %s: %w", path, err)
-		}
-
-		source, err := file.Open()
-		if err != nil {
-			return fmt.Errorf("open archived file %s: %w", file.Name, err)
-		}
-
-		target, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
-		if err != nil {
-			source.Close()
-			return fmt.Errorf("create extracted file %s: %w", path, err)
-		}
-
-		if _, err := io.Copy(target, source); err != nil {
-			source.Close()
-			target.Close()
-			return fmt.Errorf("extract file %s: %w", path, err)
-		}
-
-		source.Close()
-		target.Close()
-	}
-
-	return nil
-}
-
-func findV2Dir(root string) (string, error) {
-	var found string
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if !d.IsDir() || filepath.Base(path) != "v2" {
-			return nil
-		}
-
-		if _, err := os.Stat(filepath.Join(path, "go.mod")); err == nil {
-			found = path
-			return filepath.SkipAll
-		}
-
-		return nil
-	})
-	if err != nil {
-		return "", fmt.Errorf("scan extracted update: %w", err)
-	}
-	if found == "" {
-		return "", fmt.Errorf("could not find v2 installer in downloaded update")
-	}
-	return found, nil
-}
-
-func runInstaller(moduleDir string) error {
-	exePath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("resolve current executable path: %w", err)
-	}
-	exePath, err = filepath.EvalSymlinks(exePath)
-	if err != nil {
-		return fmt.Errorf("resolve symlinks for executable: %w", err)
-	}
-
-	goBin, err := exec.LookPath("go")
-	if err != nil {
-		return fmt.Errorf("go binary not found on PATH — cannot build update: %w", err)
-	}
-
-	ext := ""
-	if runtime.GOOS == "windows" {
-		ext = ".exe"
-	}
-	newBin := filepath.Join(moduleDir, "lss-backup-cli-new"+ext)
-
-	fmt.Println("  Building updated binary...")
-	buildCmd := exec.Command(goBin, "build", "-o", newBin, "./cmd/lss-backup")
-	buildCmd.Dir = moduleDir
-	buildCmd.Stdout = os.Stdout
-	buildCmd.Stderr = os.Stderr
-	if err := buildCmd.Run(); err != nil {
-		return fmt.Errorf("build updated binary: %w", err)
-	}
-
-	return replaceBinary(exePath, newBin)
 }
 
 func parseSemVersion(raw string) (semVersion, bool) {
