@@ -2482,7 +2482,11 @@ func formatLastRun(r *runner.RunResult) string {
 	if r == nil {
 		return "never run"
 	}
-	return fmt.Sprintf("%s %s", r.Status, r.FinishedAt.Local().Format("02-01-2006 15:04"))
+	date := r.FinishedAt.Local().Format("02-01-2006 15:04")
+	if r.Status == "success" {
+		return ui.Green("success") + " " + date
+	}
+	return ui.Red("failure") + " " + date
 }
 
 // lastRunCell returns a colWidth-visible-char padded cell with a coloured dot indicator.
@@ -2508,18 +2512,12 @@ func lastRunCell(r *runner.RunResult, colWidth int) string {
 
 func formatNextRun(r *runner.NextRunResult) string {
 	if r == nil {
-		return "not scheduled (manual or daemon not started)"
+		return "not scheduled"
 	}
-	now := time.Now()
-	due := r.NextRun.Local()
-	if r.NextRun.Before(now) {
-		overdue := now.Sub(r.NextRun).Round(time.Minute)
-		return fmt.Sprintf("OVERDUE by %s — daemon may not be running (last updated %s)",
-			overdue,
-			r.UpdatedAt.Local().Format("02-01-2006 15:04"),
-		)
+	if r.NextRun.Before(time.Now()) {
+		return "OVERDUE — daemon may not be running"
 	}
-	return fmt.Sprintf("%s (in %s)", due.Format("02-01-2006 15:04"), time.Until(r.NextRun).Round(time.Minute))
+	return r.NextRun.Local().Format("02-01-2006 at 15:04")
 }
 
 // formatNextRunShort returns a compact next-run string for table display.
@@ -2527,11 +2525,10 @@ func formatNextRunShort(r *runner.NextRunResult) string {
 	if r == nil {
 		return "—"
 	}
-	now := time.Now()
-	if r.NextRun.Before(now) {
+	if r.NextRun.Before(time.Now()) {
 		return "OVERDUE"
 	}
-	return fmt.Sprintf("%s (in %s)", r.NextRun.Local().Format("02-01-2006 15:04"), time.Until(r.NextRun).Round(time.Minute))
+	return r.NextRun.Local().Format("02-01-2006 at 15:04")
 }
 
 func validateAbsolutePath(value string) error {
