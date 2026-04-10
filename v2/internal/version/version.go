@@ -1,6 +1,6 @@
 package version
 
 const (
-	Current    = "v2.1.49"
+	Current    = "v2.1.50"
 	Repository = "lssolutions-ie/lss-backup-cli"
 )

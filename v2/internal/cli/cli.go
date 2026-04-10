@@ -778,12 +778,18 @@ func runSettingsWizard(paths app.Paths, prompter ui.Prompter) error {
 		case "Restart Daemon":
 			ui.Println2("Restarting daemon...")
 			daemon.RestartService()
-			time.Sleep(2 * time.Second)
-			if daemon.IsRunning() {
-				fmt.Println()
+			running := false
+			for i := 0; i < 8; i++ {
+				time.Sleep(1 * time.Second)
+				if daemon.IsRunning() {
+					running = true
+					break
+				}
+			}
+			fmt.Println()
+			if running {
 				ui.StatusOK("Daemon is running.")
 			} else {
-				fmt.Println()
 				ui.StatusWarn("Daemon did not start — check Task Scheduler or service logs.")
 			}
 			pauseForEnter()
