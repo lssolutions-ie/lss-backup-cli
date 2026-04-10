@@ -280,12 +280,14 @@ func ValidateLayout(job config.Job) []error {
 	}
 
 	runScriptPerm := fs.FileMode(0o755)
+	secretsPerm := fs.FileMode(0o600)
 	if runtime.GOOS == "windows" {
 		runScriptPerm = 0
+		secretsPerm = 0 // Windows does not support Unix-style permissions
 	}
 
 	checkFile(job.JobFile, "job.toml", 0)
-	checkFile(job.SecretsFile, "secrets.env", 0o600)
+	checkFile(job.SecretsFile, "secrets.env", secretsPerm)
 	checkFile(job.RunScript, config.RunScriptName(), runScriptPerm)
 
 	if strings.TrimSpace(job.Program) == "" {
