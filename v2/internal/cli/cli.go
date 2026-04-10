@@ -731,10 +731,12 @@ func runSettingsWizard(paths app.Paths, prompter ui.Prompter) error {
 			"Backup LSS Backup Configuration",
 			"Configure Management Console",
 			"Check For Updates",
-			"Back To Main Menu",
 		})
 		if err != nil {
 			return err
+		}
+		if action == "" {
+			return nil
 		}
 
 		if action != "" {
@@ -756,8 +758,6 @@ func runSettingsWizard(paths app.Paths, prompter ui.Prompter) error {
 				ui.StatusError(err.Error())
 				pauseForEnter()
 			}
-		case "Back To Main Menu":
-			return nil
 		}
 	}
 }
