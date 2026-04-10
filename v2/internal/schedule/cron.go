@@ -34,6 +34,20 @@ func IsHighFrequency(s config.Schedule) bool {
 	return second.Sub(first) < 24*time.Hour
 }
 
+// Describe returns a plain-English description of a Schedule.
+// Returns "manual (no schedule)" for manual/empty schedules.
+func Describe(s config.Schedule) string {
+	expr, ok := ToCronExpression(s)
+	if !ok {
+		return "manual (no schedule)"
+	}
+	desc, err := ValidateCron(expr)
+	if err != nil {
+		return expr
+	}
+	return desc
+}
+
 // ToCronExpression converts a Schedule to a standard 5-field cron expression.
 // Returns ("", false) for manual schedules or modes that cannot be expressed.
 // Days in weekly mode use values 1–7 (Mon–Sun); cron also accepts 7 as Sunday.

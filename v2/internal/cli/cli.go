@@ -474,10 +474,18 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 	activitylog.Log(paths.LogsDir, fmt.Sprintf("job created: %s (%s)", job.ID, job.Name))
 	daemon.TriggerReload(paths.StateDir)
 
+	ui.ClearScreen()
+	ui.Header("Job Created")
+	ui.StatusOK("Backup job created successfully.")
 	fmt.Println()
-	ui.StatusOK("Wizard complete — backup job created successfully.")
+	ui.SectionHeader("Summary")
 	ui.KeyValue("Job ID:", job.ID)
-	ui.KeyValue("Job file:", job.JobFile)
+	ui.KeyValue("Name:", job.Name)
+	ui.KeyValue("Engine:", job.Program)
+	ui.KeyValue("Source:", job.Source.Path)
+	ui.KeyValue("Destination:", job.Destination.Path)
+	ui.KeyValue("Schedule:", cronSchedule.Describe(job.Schedule))
+	ui.KeyValue("Config file:", job.JobFile)
 	fmt.Println()
 
 	_, nextAction, err := prompter.Select("What would you like to do next?", []string{
