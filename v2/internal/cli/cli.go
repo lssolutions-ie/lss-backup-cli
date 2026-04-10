@@ -779,7 +779,10 @@ func runImportWizard(paths app.Paths, prompter ui.Prompter) error {
 	ui.Println2("Provide a path to job.toml (v2) or a *-Configuration.env (v1 legacy).")
 	fmt.Println()
 
-	configFile, err := prompter.Ask("Path to config file", func(value string) error {
+	configFile, err := prompter.Ask("Path to config file (or Enter to go back)", func(value string) error {
+		if value == "" {
+			return nil
+		}
 		if err := validateAbsolutePath(value); err != nil {
 			return err
 		}
@@ -794,6 +797,9 @@ func runImportWizard(paths app.Paths, prompter ui.Prompter) error {
 	})
 	if err != nil {
 		return err
+	}
+	if configFile == "" {
+		return nil
 	}
 
 	if filepath.Base(configFile) == "job.toml" {
