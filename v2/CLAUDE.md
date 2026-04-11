@@ -13,7 +13,7 @@ rsync), runs them, logs results, and reports to a central management server.
 V2 is a clean rewrite of a v1 shell-script-based tool. The goal is durability, safety, and
 operator-friendliness over cleverness.
 
-**Version:** v2.1.120
+**Version:** v2.1.129
 **Module:** `github.com/lssolutions-ie/lss-backup-cli/v2`
 **Go version:** 1.25.0
 
@@ -406,6 +406,15 @@ not by OS-level cron or Task Scheduler entries.
   falls back to direct detached process launch if Task Scheduler start fails
 - `IsRunning()`: checks Task Scheduler status AND running process list (handles direct-launch fallback)
 
+### PID lock (all platforms)
+
+- On startup: writes `daemon.pid` to state directory with current PID
+- If file exists and PID is alive: exits with "another daemon is running (PID N)"
+- Stale PID (crashed process): overwrites and continues
+- Clean shutdown: removes `daemon.pid`
+- `RestartService()` kills ALL daemon processes, removes stale PID file, then starts fresh
+- Returns kill count — CLI warns if more than 1 instance was found
+
 ---
 
 ## Dependencies
@@ -436,7 +445,7 @@ not by OS-level cron or Task Scheduler entries.
 | M4        | First Working Backup Engine   | Done        |
 | M5        | Scheduling                    | Done        |
 | M6        | Notifications And Monitoring  | Done — healthchecks.io, Reporter interface, HTTPReporter |
-| M7        | Management Server Integration | Done — PSK/AES-256-GCM encryption, NodeStatus reporting, Settings wizard |
+| M7        | Management Server Integration | Done — PSK/AES-256-GCM, reporting, PID lock, e2e tested on 3 platforms |
 | M8        | Retention And Cleanup         | Done — keep-last, keep-within, tiered, forget --prune after backup |
 | M9        | Add Rsync Support             | Done        |
 | M10       | Network Sources/Destinations  | Not started |
@@ -490,6 +499,11 @@ not by OS-level cron or Task Scheduler entries.
 - Configure Management Console wizard in Settings menu
 - V1 import: retention (YES-LAST/YES-FULL/tiered), healthchecks, rsync mode, SMB/NFS/S3 warnings
 - V1 import tested against 10 real production configs
+- PID lock file (`daemon.pid`) prevents multiple daemon instances on all platforms
+- Restart Daemon kills all instances, warns if duplicates found
+- Report type field: "heartbeat" (5-min tick) vs "post_run" (after job run)
+- Clock drift hint on 400 responses from management server
+- End-to-end tested: Linux, macOS, Windows nodes reporting to live server
 
 ### Fully stubbed (menu exists, no implementation)
 
@@ -570,4 +584,4 @@ Two distinct display modes are used, depending on whether the log has timestamps
 
 ---
 
-_Last updated: 2026-04-11 (v2.1.120)_
+_Last updated: 2026-04-11 (v2.1.129)_

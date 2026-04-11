@@ -26,12 +26,13 @@ Guiding Principles
 - Reporting must never fail or block a backup job.
 
 
-Current Version: v2.1.120
+Current Version: v2.1.129
 Current State: All three platforms (macOS, Linux, Windows) tested and working.
                CI builds and attaches binaries for all 6 platform/arch combos
                on every v2.* tag push. In-app updater downloads pre-built
-               binaries. Management server reporter wired and shipping.
-               M6 complete. M7 complete.
+               binaries. Management server deployed and receiving reports from
+               all three platforms. End-to-end tested.
+               M6, M7, M11 complete.
 
 
 Milestone M1: Define The Foundation
@@ -179,11 +180,25 @@ Tasks:
 - [x] Reporting wired in CLI: after every manual run.
 - [x] Reporting status shown in About screen.
 
+Post-integration hardening (v2.1.122–v2.1.129):
+- [x] Fixed endpoint path to match server (`/api/v1/status`)
+- [x] Aligned field names with server: User ID → Node ID, Node Name → Node Hostname
+- [x] Added URL validation for Server URL, max 128 char validation for Node ID
+- [x] PSK input switched to regular Ask (allows clipboard paste)
+- [x] Added "Clear configuration" option to management console wizard
+- [x] Added `report_type` field: "heartbeat" (5-min tick) vs "post_run" (after job)
+- [x] PID lock file prevents multiple daemon instances on all platforms
+- [x] Restart Daemon kills all instances and warns if duplicates found
+- [x] Clock drift hint on 400 responses (NTP guidance for operators)
+- [x] End-to-end tested: Linux, macOS, Windows nodes reporting to live server
+
 Deliverables:
 - [x] `{RootDir}/config.toml` with reporting section
 - [x] `HTTPReporter` with PSK encryption
 - [x] "Configure Management Console" menu flow
 - [x] `BuildNodeStatus` reporting all jobs with last/next run
+- [x] PID lock file (`daemon.pid`) for single-instance enforcement
+- [x] Diagnostic logging in daemon `fireReport`
 
 
 Milestone M8: Retention And Cleanup
