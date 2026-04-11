@@ -60,6 +60,19 @@ func pauseForEnter() {
 }
 
 func Run(args []string) error {
+	// On macOS all system paths require root. Enforce it up-front rather than
+	// failing mid-operation with a cryptic permission error.
+	if runtime.GOOS == "darwin" && os.Getuid() != 0 {
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "  [ERROR]   LSS Backup CLI must be run as root on macOS.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "  Please run again with:")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "    sudo lss-backup-cli")
+		fmt.Fprintln(os.Stderr, "")
+		os.Exit(1)
+	}
+
 	paths, err := app.DiscoverPaths()
 	if err != nil {
 		return err
