@@ -21,7 +21,7 @@ import (
 
 const (
 	reportTimeout  = 15 * time.Second
-	reportEndpoint = "/api/v1/node/status"
+	reportEndpoint = "/api/v1/status"
 )
 
 // envelope is the outer HTTP request body sent to the management server.
