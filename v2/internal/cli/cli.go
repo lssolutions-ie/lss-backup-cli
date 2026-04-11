@@ -464,7 +464,7 @@ func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Promp
 		}
 		job.Destination.Path = cleanPath(newDest)
 		if _, statErr := os.Stat(job.Destination.Path); os.IsNotExist(statErr) {
-			fmt.Printf("Note: %s does not exist yet — it will be created automatically.\n", job.Destination.Path)
+			fmt.Printf("  Note: %s does not exist yet — it will be created automatically.\n", job.Destination.Path)
 		}
 		changed = true
 	}
@@ -480,7 +480,8 @@ func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Promp
 		changed = true
 	}
 
-	if ok, err := prompter.Confirm(fmt.Sprintf("Retention [%s] — change?", retentionPkg.Describe(job.Retention))); err != nil {
+	retDesc := strings.Join(strings.Fields(retentionPkg.Describe(job.Retention)), " ")
+	if ok, err := prompter.Confirm(fmt.Sprintf("Retention [%s] — change?", retDesc)); err != nil {
 		return err
 	} else if ok {
 		if job.Retention, err = promptRetention(prompter, job.Program, job.Schedule); err != nil {
@@ -2130,7 +2131,7 @@ func promptSchedule(prompter ui.Prompter) (config.Schedule, error) {
 				return config.Schedule{}, err
 			}
 			fmt.Println()
-			fmt.Println("Note: capped at 28 to run reliably in every month, including February.")
+			fmt.Println("  Note: capped at 28 to run reliably in every month, including February.")
 			dayOfMonthValue, err := prompter.Ask("Day of month (e.g. 1 for the 1st, 15 for the 15th)", validateIntRange(1, 28))
 			if err != nil {
 				return config.Schedule{}, err
