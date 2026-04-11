@@ -13,7 +13,7 @@ rsync), runs them, logs results, and will eventually report to a central managem
 V2 is a clean rewrite of a v1 shell-script-based tool. The goal is durability, safety, and
 operator-friendliness over cleverness.
 
-**Version:** v2.1.85
+**Version:** v2.1.100
 **Module:** `github.com/lssolutions-ie/lss-backup-cli/v2`
 **Go version:** 1.25.0
 
@@ -271,10 +271,12 @@ The CLI is **menu-driven only**. No traditional flag parsing.
 
 ### Main Menu Options
 
+Main menu shows a `●` daemon status dot (green = running, yellow = stopped) directly below the title rule with no blank line above it, then a blank line before the numbered options.
+
 1. **Create Backup** — full wizard (ID, name, program, source, dest, schedule, retention, notifications, secrets)
-2. **Manage Backup** — select a job, then submenu:
+2. **Manage Backup** — numbered table (ID, Program, Name, Last Run with coloured ● dot, Next Run) doubles as selector. Per-job submenu shows ID/Program/Source/Destination/Last Run/Next Run in header, then:
    - Run Backup Now
-   - Restore Backup (snapshot picker with date filter: Today / This Week / This Month / This Year / Custom DD/MM/YYYY)
+   - Restore Backup (snapshot picker with date filter: Today / This Week / This Month / This Year / Custom DD-MM-YYYY)
    - List Snapshots (formatted table: ID, time, host, paths)
    - Edit Backup
    - Configure Schedule
@@ -290,6 +292,14 @@ The CLI is **menu-driven only**. No traditional flag parsing.
 5. **Audit Log** — submenu: System Audit Events / Activity Log / Daemon Log / Job Run Logs (pick job → pick file → view)
 6. **About** — version, platform, paths, install manifest, daemon status (green/red)
 7. **Exit**
+
+**Menu number alignment:** `ui.Prompter.Select` uses `%*d` (right-aligned to width of max item number) so single-digit items align with double-digit items across all menus.
+
+**Status indicators:**
+- `ui.StatusDot("green"|"yellow"|"red", msg)` — coloured `●` for persistent state (daemon status)
+- `ui.StatusOK/StatusError/StatusWarn` — `[OK]`/`[ERROR]`/`[WARN]` badges for action results
+- `ui.StatusInfo` — cyan `[INFO]` for neutral notices (e.g. update available)
+- `ui.HeaderNoTrail` — same as `ui.Header` but without trailing blank line, for when content must follow immediately
 
 **Why menu-driven?** Target users are operators who may not be comfortable with CLI flags.
 A guided wizard with validation prevents bad configs reaching production.
@@ -467,6 +477,7 @@ Two distinct display modes are used, depending on whether the log has timestamps
 - `normaliseMsg()` collapses multiple consecutive spaces (fixes old `%-30s` padding artefacts in daemon log)
 - Word-wraps long messages with continuation indent aligned to the message column
 - Pagination: `auditPageSize` rows per page, prompt to continue or quit
+- `parseLogLine` handles both old YYYY-MM-DD and new DD-MM-YYYY log formats, normalising old entries to DD-MM-YYYY for display
 
 **`printRawLog` details:**
 - No Time/Message header or separator line
@@ -478,7 +489,8 @@ Two distinct display modes are used, depending on whether the log has timestamps
 ## Conventions & Patterns
 
 - **IDs:** `^[a-zA-Z0-9_-]+$` — used as directory names, must be unique.
-- **Timestamps in filenames:** `2006-01-02--15-04-05` (Go reference time format).
+- **Timestamps in filenames:** `02-01-2006--15-04-05` (DD-MM-YYYY, Go reference time format).
+- **All dates displayed as DD-MM-YYYY** everywhere — display, log storage, filenames, snapshot picker, custom date input.
 - **Secrets passed via env**, never command-line args (visible in ps output).
 - **Engine output:** piped to both stdout and a log file via `io.MultiWriter`.
   Stdout is wrapped in `lineIndentWriter` (2-space prefix); log file gets raw output.
@@ -493,6 +505,10 @@ Two distinct display modes are used, depending on whether the log has timestamps
   saving or printing a status message. Never let a cancel fall through to a save.
 - **`executil.HideWindow(cmd)`** must be called on every `exec.Command` in `engines.go` —
   without it, subprocess console windows flash visibly on Windows when the daemon runs jobs.
+- **Never use `%q` for user-facing strings** — it escapes backslashes (`C:\Data` → `C:\\Data`).
+  Use `%s` with manual quoting in format strings instead.
+- **Windows permission checks:** `os.Stat().Mode().Perm()` always returns `0666` on Windows.
+  Any permission validation (secrets.env, run script) must set the expected mode to `0` on Windows to skip the check.
 
 ---
 
@@ -512,4 +528,4 @@ Two distinct display modes are used, depending on whether the log has timestamps
 
 ---
 
-_Last updated: 2026-04-10 (v2.1.85)_
+_Last updated: 2026-04-10 (v2.1.100)_
