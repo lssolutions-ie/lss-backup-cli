@@ -725,20 +725,29 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 		ui.ClearScreen()
 		ui.Header("Manage: " + job.Name)
 		printJobBrief(job)
-		_, action, err := prompter.Select("", []string{
+		menuItems := []string{
 			"Run Backup Now",
 			"Restore Backup",
-			"List Snapshots",
+		}
+		if job.Program == "restic" {
+			menuItems = append(menuItems, "List Snapshots")
+		}
+		menuItems = append(menuItems,
 			"Edit Backup",
 			"Configure Schedule",
-			"Configure Retention",
+		)
+		if job.Program == "restic" {
+			menuItems = append(menuItems, "Configure Retention")
+		}
+		menuItems = append(menuItems,
 			"Configure Notifications",
 			"Show Job Configuration",
 			"Validate Job",
 			"Export Backup Job",
 			"Audit Log (By User)",
 			"Delete Backup",
-		})
+		)
+		_, action, err := prompter.Select("", menuItems)
 		if err != nil {
 			return err
 		}
