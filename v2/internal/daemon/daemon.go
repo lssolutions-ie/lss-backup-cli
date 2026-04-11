@@ -92,6 +92,9 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}) error 
 	}
 	logSchedule(scheduled)
 
+	// Fire an immediate heartbeat on startup so the server gets config right away.
+	fireReport(paths, scheduled, reporting.ReportTypeHeartbeat)
+
 	reloadTicker := time.NewTicker(reloadInterval)
 	defer reloadTicker.Stop()
 
