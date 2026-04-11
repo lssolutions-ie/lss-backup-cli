@@ -120,13 +120,11 @@ What was NOT built (design changed during implementation):
   Healthchecks is called directly from runner.Run(). This works for now
   but will need refactoring before M7 (management server) to avoid
   duplicating the reporting call.
-- Email notification support — not started.
 
 Remaining tasks before M6 is fully done:
 - [ ] Add `Reporter` interface and `NoOpReporter` to `internal/reporting/`.
 - [ ] Wire reporter into `runner.Service` so all reporting paths go through
       one interface (enables M7 without duplication).
-- [ ] Add email notification support.
 - [ ] Support failure-only vs always notification modes per job.
 
 
