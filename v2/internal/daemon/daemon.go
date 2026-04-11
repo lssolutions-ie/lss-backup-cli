@@ -9,6 +9,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -53,6 +55,14 @@ func Run(paths app.Paths) error {
 			log.SetOutput(io.MultiWriter(os.Stdout, f))
 		}
 	}
+
+	// Prevent multiple daemon instances from running simultaneously.
+	pidFile := filepath.Join(paths.StateDir, "daemon.pid")
+	if err := acquirePIDLock(pidFile); err != nil {
+		log.Printf("Cannot start: %v", err)
+		return fmt.Errorf("daemon already running: %w", err)
+	}
+	defer removePIDLock(pidFile)
 
 	log.Println("LSS Backup daemon starting")
 
@@ -343,4 +353,40 @@ func logSchedule(scheduled []scheduledJob) {
 	for _, sj := range scheduled {
 		log.Printf("  %s — next run: %s", sj.job.ID, sj.nextRun.Format(time.RFC3339))
 	}
+}
+
+// acquirePIDLock writes the current process PID to the given file.
+// If the file already exists and the recorded PID is still running,
+// it returns an error to prevent multiple daemon instances.
+func acquirePIDLock(path string) error {
+	data, err := os.ReadFile(path)
+	if err == nil {
+		// File exists — check if the PID is still alive.
+		pid := strings.TrimSpace(string(data))
+		if pid != "" {
+			if p, err := strconv.Atoi(pid); err == nil {
+				if proc, err := os.FindProcess(p); err == nil {
+					// On Unix, FindProcess always succeeds. Send signal 0 to check.
+					// On Windows, FindProcess fails if the process doesn't exist.
+					if runtime.GOOS == "windows" {
+						// Process exists if FindProcess succeeded; release the handle.
+						proc.Release()
+						return fmt.Errorf("another daemon is running (PID %d)", p)
+					}
+					// Unix: signal 0 checks existence without actually signalling.
+					if proc.Signal(syscall.Signal(0)) == nil {
+						return fmt.Errorf("another daemon is running (PID %d)", p)
+					}
+				}
+			}
+		}
+		// Stale PID file — process is gone. Overwrite it.
+	}
+
+	return os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())), 0o644)
+}
+
+// removePIDLock removes the PID lock file on clean shutdown.
+func removePIDLock(path string) {
+	os.Remove(path)
 }

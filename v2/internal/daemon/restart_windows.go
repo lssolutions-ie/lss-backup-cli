@@ -18,30 +18,46 @@ const windowsTaskName = `\LSS Backup\LSS Backup Daemon`
 // It detaches the child from the parent's console so it survives after the CLI exits.
 const detachedProcess = 0x00000008
 
-// RestartService stops any running daemon and starts a fresh one.
-// It first tries Task Scheduler; if the daemon does not appear within 3 seconds
-// it falls back to launching the binary directly as a detached process.
-func RestartService() {
-	stopAndWait()
+// RestartService stops any running daemon processes and starts a fresh one.
+// Returns the number of daemon processes that were killed.
+func RestartService() int {
+	killed := stopAndWait()
+
+	// Remove stale PID file so the new instance can start.
+	os.Remove(filepath.Join(`C:\ProgramData\LSS Backup\state`, "daemon.pid"))
+
 	startViaTaskScheduler()
 	time.Sleep(3 * time.Second)
 	if !IsRunning() {
 		startDirect()
 	}
+
+	return killed
 }
 
-// stopAndWait ends the scheduled task and kills any lingering daemon process,
+// stopAndWait ends the scheduled task and kills any lingering daemon processes,
 // then polls until the task leaves Running state (up to 15 seconds).
-func stopAndWait() {
+// Returns the number of processes killed.
+func stopAndWait() int {
 	exec.Command("schtasks", "/End", "/TN", windowsTaskName).Run() //nolint:errcheck
 
-	// Kill any lingering daemon process (exclude ourselves).
+	// Kill any lingering daemon processes (exclude ourselves).
 	ourPID := os.Getpid()
-	script := fmt.Sprintf(
+	countScript := fmt.Sprintf(
+		`(Get-Process -Name lss-backup-cli -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne %d }).Count`,
+		ourPID,
+	)
+	countOut, _ := exec.Command("powershell.exe", "-NonInteractive", "-NoProfile", "-Command", countScript).Output()
+	killed := 0
+	if n := strings.TrimSpace(string(countOut)); n != "" && n != "0" {
+		fmt.Sscanf(n, "%d", &killed)
+	}
+
+	killScript := fmt.Sprintf(
 		`Get-Process -Name lss-backup-cli -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne %d } | Stop-Process -Force`,
 		ourPID,
 	)
-	exec.Command("powershell.exe", "-NonInteractive", "-NoProfile", "-Command", script).Run() //nolint:errcheck
+	exec.Command("powershell.exe", "-NonInteractive", "-NoProfile", "-Command", killScript).Run() //nolint:errcheck
 
 	for i := 0; i < 15; i++ {
 		time.Sleep(1 * time.Second)
@@ -53,6 +69,8 @@ func stopAndWait() {
 			break
 		}
 	}
+
+	return killed
 }
 
 // startViaTaskScheduler asks Task Scheduler to run the daemon task.

@@ -964,7 +964,11 @@ func runSettingsWizard(paths app.Paths, prompter ui.Prompter) error {
 			}
 		case "Restart Daemon":
 			ui.Println2("Restarting daemon...")
-			daemon.RestartService()
+			killed := daemon.RestartService()
+			if killed > 1 {
+				fmt.Println()
+				ui.StatusWarn(fmt.Sprintf("Found %d daemon processes running — all were killed.", killed))
+			}
 			running := false
 			for i := 0; i < 8; i++ {
 				time.Sleep(1 * time.Second)
