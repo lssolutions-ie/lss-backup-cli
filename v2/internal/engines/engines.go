@@ -150,7 +150,15 @@ func (e ResticEngine) Restore(job config.Job, snapshotID string, target string, 
 		snapshotID = "latest"
 	}
 
-	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "restore", snapshotID, "--target", target)
+	args := []string{"-r", job.Destination.Path, "restore", snapshotID, "--target", target}
+	// Strip the absolute source path components so files land directly in the
+	// target directory rather than recreating the full path hierarchy.
+	// e.g. source=/home/data/myfiles → strip 3 components → target/file.txt
+	if n := pathComponentCount(job.Source.Path); n > 0 {
+		args = append(args, "--strip-components", fmt.Sprintf("%d", n))
+	}
+
+	cmd := exec.Command(resticBin, args...)
 	executil.HideWindow(cmd)
 	cmd.Stdout = output
 	cmd.Stderr = output
@@ -163,6 +171,17 @@ func (e ResticEngine) Restore(job config.Job, snapshotID string, target string, 
 		return fmt.Errorf("restic restore failed: %w", err)
 	}
 	return nil
+}
+
+// pathComponentCount returns the number of path components in an absolute path,
+// excluding the leading slash. Used to compute --strip-components for restic restore.
+// e.g. "/home/data/myfiles" → 3, "/data" → 1, "/" → 0
+func pathComponentCount(p string) int {
+	trimmed := strings.Trim(filepath.ToSlash(p), "/")
+	if trimmed == "" {
+		return 0
+	}
+	return len(strings.Split(trimmed, "/"))
 }
 
 func (e ResticEngine) ListSnapshots(job config.Job) ([]Snapshot, error) {

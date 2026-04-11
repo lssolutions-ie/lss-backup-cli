@@ -105,11 +105,15 @@ func (s Service) Restore(job config.Job, snapshotID string, target string) error
 	}
 	defer closeLog()
 
+	// Append the job ID as a subdirectory so the restore is self-contained and
+	// never overwrites an existing tree at the user-supplied base directory.
+	actualTarget := filepath.Join(target, job.ID)
+
 	fmt.Fprintf(writer, "Starting restore for job %s (%s)\n", job.ID, engine.Name())
 	fmt.Fprintf(writer, "Snapshot: %s\n", snapshotID)
-	fmt.Fprintf(writer, "Restore target: %s\n", target)
+	fmt.Fprintf(writer, "Restore target: %s\n", actualTarget)
 
-	if err := engine.Restore(job, snapshotID, target, writer); err != nil {
+	if err := engine.Restore(job, snapshotID, actualTarget, writer); err != nil {
 		fmt.Fprintf(writer, "Restore failed: %v\n", err)
 		return fmt.Errorf("restore for job %s (%s) failed; see log %s: %w", job.ID, engine.Name(), logFile, err)
 	}
