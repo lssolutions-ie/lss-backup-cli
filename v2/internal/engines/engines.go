@@ -150,15 +150,7 @@ func (e ResticEngine) Restore(job config.Job, snapshotID string, target string, 
 		snapshotID = "latest"
 	}
 
-	args := []string{"-r", job.Destination.Path, "restore", snapshotID, "--target", target}
-	// Strip the absolute source path components so files land directly in the
-	// target directory rather than recreating the full path hierarchy.
-	// e.g. source=/home/data/myfiles → strip 3 components → target/file.txt
-	if n := pathComponentCount(job.Source.Path); n > 0 {
-		args = append(args, "--strip-components", fmt.Sprintf("%d", n))
-	}
-
-	cmd := exec.Command(resticBin, args...)
+	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "restore", snapshotID, "--target", target)
 	executil.HideWindow(cmd)
 	cmd.Stdout = output
 	cmd.Stderr = output
@@ -170,18 +162,55 @@ func (e ResticEngine) Restore(job config.Job, snapshotID string, target string, 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("restic restore failed: %w", err)
 	}
+
+	// Restic recreates the full absolute path hierarchy under the target.
+	// Flatten it by moving the contents of the nested source directory up to
+	// the target root and removing the empty intermediate directories.
+	if err := flattenResticRestore(target, job.Source.Path, output); err != nil {
+		fmt.Fprintf(output, "Warning: could not flatten restore path: %v\n", err)
+	}
+
 	return nil
 }
 
-// pathComponentCount returns the number of path components in an absolute path,
-// excluding the leading slash. Used to compute --strip-components for restic restore.
-// e.g. "/home/data/myfiles" → 3, "/data" → 1, "/" → 0
-func pathComponentCount(p string) int {
-	trimmed := strings.Trim(filepath.ToSlash(p), "/")
-	if trimmed == "" {
-		return 0
+// flattenResticRestore moves the contents of the nested source path that restic
+// created under target up to target itself, then removes the empty intermediate
+// directories. Only operates on Unix-style absolute paths (Linux/macOS).
+// e.g. target=/restore/1, sourcePath=/home/data → moves /restore/1/home/data/* → /restore/1/
+func flattenResticRestore(target string, sourcePath string, output io.Writer) error {
+	if !strings.HasPrefix(sourcePath, "/") {
+		return nil // Windows paths with drive letters — skip
 	}
-	return len(strings.Split(trimmed, "/"))
+
+	// Path where restic placed the files, e.g. /restore/1/home/data
+	nestedDir := filepath.Join(target, strings.TrimPrefix(sourcePath, "/"))
+
+	info, err := os.Stat(nestedDir)
+	if err != nil || !info.IsDir() {
+		return nil // nothing to flatten (e.g. source path mismatch)
+	}
+
+	entries, err := os.ReadDir(nestedDir)
+	if err != nil {
+		return fmt.Errorf("read nested restore dir: %w", err)
+	}
+
+	for _, entry := range entries {
+		src := filepath.Join(nestedDir, entry.Name())
+		dst := filepath.Join(target, entry.Name())
+		if err := os.Rename(src, dst); err != nil {
+			return fmt.Errorf("move %s: %w", entry.Name(), err)
+		}
+	}
+
+	// Remove the top-level intermediate directory (e.g. /restore/1/home).
+	topComponent := strings.SplitN(strings.TrimPrefix(sourcePath, "/"), "/", 2)[0]
+	if topComponent != "" {
+		_ = os.RemoveAll(filepath.Join(target, topComponent))
+	}
+
+	fmt.Fprintf(output, "Restore path flattened: data is at %s\n", target)
+	return nil
 }
 
 func (e ResticEngine) ListSnapshots(job config.Job) ([]Snapshot, error) {
