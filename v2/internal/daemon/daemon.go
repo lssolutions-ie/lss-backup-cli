@@ -338,7 +338,8 @@ func fireReport(paths app.Paths, scheduled []scheduledJob, reportType string) {
 		nodeName, _ = os.Hostname()
 	}
 
-	status := reporting.BuildNodeStatus(nodeName, allJobs, nextRunByID)
+	includeConfig := reportType == reporting.ReportTypeHeartbeat
+	status := reporting.BuildNodeStatus(nodeName, allJobs, nextRunByID, includeConfig)
 	status.ReportType = reportType
 	reporter := reporting.NewReporter(appCfg, paths.RootDir, paths.LogsDir)
 	reporter.Report(status)

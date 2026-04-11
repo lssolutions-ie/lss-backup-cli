@@ -1654,7 +1654,7 @@ func runJobByID(paths app.Paths, id string) error {
 			if nodeName == "" {
 				nodeName, _ = os.Hostname()
 			}
-			status := reporting.BuildNodeStatus(nodeName, allJobs, nil)
+			status := reporting.BuildNodeStatus(nodeName, allJobs, nil, false)
 			status.ReportType = reporting.ReportTypePostRun
 			reporting.NewReporter(appCfg, paths.RootDir, paths.LogsDir).Report(status)
 		}

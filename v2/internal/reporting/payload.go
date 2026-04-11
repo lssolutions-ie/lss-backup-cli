@@ -36,6 +36,86 @@ type JobStatus struct {
 	LastError              string     `json:"last_error,omitempty"`
 	NextRunAt              *time.Time `json:"next_run_at,omitempty"`
 	ScheduleDescription    string     `json:"schedule_description"`
+	Config                 *JobConfig `json:"config,omitempty"` // only on heartbeat reports
+}
+
+// JobConfig is a redacted view of the job's configuration, safe to send
+// to the management server. Secrets and runtime paths are never included.
+type JobConfig struct {
+	Source        JobConfigEndpoint      `json:"source"`
+	Destination   JobConfigEndpoint      `json:"destination"`
+	Schedule      JobConfigSchedule      `json:"schedule"`
+	Retention     JobConfigRetention     `json:"retention"`
+	Notifications JobConfigNotifications `json:"notifications"`
+	RsyncNoPerms  bool                   `json:"rsync_no_permissions"`
+}
+
+type JobConfigEndpoint struct {
+	Type        string `json:"type"`
+	Path        string `json:"path"`
+	ExcludeFile string `json:"exclude_file,omitempty"`
+}
+
+type JobConfigSchedule struct {
+	Mode           string `json:"mode"`
+	Minute         int    `json:"minute"`
+	Hour           int    `json:"hour"`
+	Days           []int  `json:"days"`
+	DayOfMonth     int    `json:"day_of_month"`
+	CronExpression string `json:"cron_expression,omitempty"`
+}
+
+type JobConfigRetention struct {
+	Mode        string `json:"mode"`
+	KeepLast    int    `json:"keep_last"`
+	KeepWithin  string `json:"keep_within,omitempty"`
+	KeepDaily   int    `json:"keep_daily"`
+	KeepWeekly  int    `json:"keep_weekly"`
+	KeepMonthly int    `json:"keep_monthly"`
+	KeepYearly  int    `json:"keep_yearly"`
+}
+
+type JobConfigNotifications struct {
+	HealthchecksEnabled bool   `json:"healthchecks_enabled"`
+	HealthchecksDomain  string `json:"healthchecks_domain,omitempty"`
+	// healthchecks_id deliberately omitted — can be used to spoof pings
+}
+
+// buildJobConfig creates a redacted config view from a Job.
+func buildJobConfig(job config.Job) *JobConfig {
+	return &JobConfig{
+		Source: JobConfigEndpoint{
+			Type:        job.Source.Type,
+			Path:        job.Source.Path,
+			ExcludeFile: job.Source.ExcludeFile,
+		},
+		Destination: JobConfigEndpoint{
+			Type: job.Destination.Type,
+			Path: job.Destination.Path,
+		},
+		Schedule: JobConfigSchedule{
+			Mode:           job.Schedule.Mode,
+			Minute:         job.Schedule.Minute,
+			Hour:           job.Schedule.Hour,
+			Days:           job.Schedule.Days,
+			DayOfMonth:     job.Schedule.DayOfMonth,
+			CronExpression: job.Schedule.CronExpression,
+		},
+		Retention: JobConfigRetention{
+			Mode:        job.Retention.Mode,
+			KeepLast:    job.Retention.KeepLast,
+			KeepWithin:  job.Retention.KeepWithin,
+			KeepDaily:   job.Retention.KeepDaily,
+			KeepWeekly:  job.Retention.KeepWeekly,
+			KeepMonthly: job.Retention.KeepMonthly,
+			KeepYearly:  job.Retention.KeepYearly,
+		},
+		Notifications: JobConfigNotifications{
+			HealthchecksEnabled: job.Notifications.HealthchecksEnabled,
+			HealthchecksDomain:  job.Notifications.HealthchecksDomain,
+		},
+		RsyncNoPerms: job.RsyncNoPermissions,
+	}
 }
 
 // BuildNodeStatus assembles a NodeStatus from the current job list.
@@ -43,7 +123,10 @@ type JobStatus struct {
 // nextRunByID is the daemon's in-memory map of job ID → next scheduled run.
 // When non-nil it is used directly (fast path, no disk I/O).
 // When nil, next_run_at is read from each job's next_run.json file (CLI path).
-func BuildNodeStatus(nodeName string, allJobs []config.Job, nextRunByID map[string]time.Time) NodeStatus {
+//
+// includeConfig controls whether the redacted job config is attached. Should
+// be true for heartbeat reports and false for post_run reports.
+func BuildNodeStatus(nodeName string, allJobs []config.Job, nextRunByID map[string]time.Time, includeConfig bool) NodeStatus {
 	statuses := make([]JobStatus, 0, len(allJobs))
 
 	for _, job := range allJobs {
@@ -74,6 +157,10 @@ func BuildNodeStatus(nodeName string, allJobs []config.Job, nextRunByID map[stri
 				t := nr.NextRun
 				js.NextRunAt = &t
 			}
+		}
+
+		if includeConfig {
+			js.Config = buildJobConfig(job)
 		}
 
 		statuses = append(statuses, js)
