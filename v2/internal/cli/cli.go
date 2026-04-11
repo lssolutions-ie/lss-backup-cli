@@ -1707,7 +1707,7 @@ func runManagementConsoleWizard(paths app.Paths, prompter ui.Prompter) error {
 		}
 		cfg.NodeName = nodeName
 
-		psk, err := prompter.AskPassword("PSK key (128 printable ASCII characters)", validatePSKKey)
+		psk, err := prompter.Ask("PSK key (128 characters, paste from server)", validatePSKKey)
 		if err != nil {
 			return err
 		}
