@@ -54,6 +54,14 @@ func Parse(path string) (Result, error) {
 		return Result{}, fmt.Errorf("unsupported v1 PROGRAM %q (supported: restic, rsync)", program)
 	}
 
+	// --- rsync mode ---
+	if program == "rsync" {
+		rsyncMode := strings.ToUpper(strings.TrimSpace(kv["RSYNCMODE"]))
+		if rsyncMode == "NOPERMNOOWNNOGP" {
+			res.Input.RsyncNoPermissions = true
+		}
+	}
+
 	// --- source ---
 	sourceType := strings.ToLower(strings.TrimSpace(kv["BKSOURCETYPE"]))
 	switch sourceType {
@@ -89,7 +97,11 @@ func Parse(path string) (Result, error) {
 		warns = append(warns, "destination type SMB is not supported in v2; destination path imported as-is")
 	case "nfs":
 		res.Input.DestType = "local"
-		warns = append(warns, "destination type NFS is not supported in v2; destination path imported as-is")
+		w := "destination type NFS is not supported in v2; destination path imported as local"
+		if ip := kv["DMPTARGETIP"]; ip != "" {
+			w += fmt.Sprintf(" (was NFS share %s:%s)", ip, kv["DMPSN"])
+		}
+		warns = append(warns, w)
 	default:
 		res.Input.DestType = "local"
 		warns = append(warns, fmt.Sprintf("unknown destination type %q treated as local", destType))
@@ -116,6 +128,16 @@ func Parse(path string) (Result, error) {
 	res.Input.Notify = notifications
 	warns = append(warns, notifyWarns...)
 
+	// --- email (v2 does not support email — warn if configured) ---
+	if email := kv["EMAILSETUP"]; email != "" && strings.ToLower(email) != "no" {
+		addr := kv["EMAILSETUPADDR"]
+		if addr != "" {
+			warns = append(warns, fmt.Sprintf("email notifications (%s to %s) are not supported in v2; configure an alternative via the management server", email, addr))
+		} else {
+			warns = append(warns, fmt.Sprintf("email notifications (%s) are not supported in v2", email))
+		}
+	}
+
 	// --- secrets ---
 	res.Secrets = config.Secrets{
 		ResticPassword:     kv["RESTIC_PASSWORD"],
@@ -127,6 +149,10 @@ func Parse(path string) (Result, error) {
 	// Also pick up SMB PASSWORD from the source section (v1 used PASSWORD, not SMB_PASSWORD).
 	if res.Secrets.SMBPassword == "" && kv["PASSWORD"] != "" {
 		res.Secrets.SMBPassword = kv["PASSWORD"]
+	}
+	// Pick up NFS password from destination section (v1 used DPASSWORD).
+	if res.Secrets.NFSPassword == "" && kv["DPASSWORD"] != "" {
+		res.Secrets.NFSPassword = kv["DPASSWORD"]
 	}
 
 	// attach secrets pointer so store.Create writes real values
@@ -172,9 +198,19 @@ func convertSchedule(kv map[string]string) (config.Schedule, []string) {
 	}
 
 	if mode == "weekly" {
+		// v1 uses BKCRONDAYS (comma/range list) or BKCRONWEEKLY (single day number).
 		schedule.Days = parseDaysList(kv["BKCRONDAYS"])
 		if len(schedule.Days) == 0 {
-			warns = append(warns, "weekly schedule days (BKCRONDAYS) were empty or invalid; defaulting to day 1")
+			// Fall back to BKCRONWEEKLY (single day).
+			if dStr := strings.TrimSpace(kv["BKCRONWEEKLY"]); dStr != "" {
+				d, err := strconv.Atoi(dStr)
+				if err == nil && d >= 1 && d <= 7 {
+					schedule.Days = []int{d}
+				}
+			}
+		}
+		if len(schedule.Days) == 0 {
+			warns = append(warns, "weekly schedule days (BKCRONDAYS/BKCRONWEEKLY) were empty or invalid; defaulting to day 1")
 			schedule.Days = []int{1}
 		}
 	}
@@ -243,32 +279,52 @@ func convertRetention(kv map[string]string) (config.Retention, []string) {
 		warns = append(warns, "RETENTION=keep-last-only imported as keep-last (1 snapshot); adjust via Configure Retention if needed")
 		return config.Retention{Mode: "keep-last", KeepLast: 1}, warns
 
+	case retention == "yes-last" || retention == "last":
+		// YES-LAST + RESTIC_FORGETLAST=N → keep-last mode.
+		n := 1
+		if lastStr := strings.TrimSpace(kv["RESTIC_FORGETLAST"]); lastStr != "" {
+			if parsed, err := strconv.Atoi(lastStr); err == nil && parsed > 0 {
+				n = parsed
+			}
+		}
+		warns = append(warns, fmt.Sprintf("RETENTION=%s imported as keep-last (%d snapshots)", kv["RETENTION"], n))
+		return config.Retention{Mode: "keep-last", KeepLast: n}, warns
+
 	case strings.HasPrefix(retention, "yes") || retention == "full":
-		// v1 YES-FULL / YES-LAST / YES etc. — check for RESTIC_FORGET* fields.
+		// YES-FULL / YES / FULL — check for RESTIC_FORGET* tiered fields first,
+		// then fall back to RESTIC_FORGETLAST for keep-last.
 		daily := kv["RESTIC_FORGETDAILY"]
 		weekly := kv["RESTIC_FORGETWEEKLY"]
 		monthly := kv["RESTIC_FORGETMONTHLY"]
 		yearly := kv["RESTIC_FORGETANNUAL"]
 
-		if daily == "" && weekly == "" && monthly == "" && yearly == "" {
-			// No forget fields — keep everything.
-			warns = append(warns, fmt.Sprintf("RETENTION=%s but no RESTIC_FORGET* fields found; imported as no pruning", kv["RETENTION"]))
-			return config.Retention{Mode: "none"}, warns
+		if daily != "" || weekly != "" || monthly != "" || yearly != "" {
+			// Tiered retention with duration-to-count conversion.
+			ret := config.Retention{Mode: "tiered"}
+			ret.KeepDaily = durationToCount(daily, "daily")
+			ret.KeepWeekly = durationToCount(weekly, "weekly")
+			ret.KeepMonthly = durationToCount(monthly, "monthly")
+			ret.KeepYearly = durationToCount(yearly, "yearly")
+
+			warns = append(warns, fmt.Sprintf(
+				"retention imported as tiered (daily=%d, weekly=%d, monthly=%d, yearly=%d) from v1 duration values (%s/%s/%s/%s); verify via Configure Retention",
+				ret.KeepDaily, ret.KeepWeekly, ret.KeepMonthly, ret.KeepYearly,
+				daily, weekly, monthly, yearly,
+			))
+			return ret, warns
 		}
 
-		// Parse duration values and convert to approximate counts.
-		ret := config.Retention{Mode: "tiered"}
-		ret.KeepDaily = durationToCount(daily, "daily")
-		ret.KeepWeekly = durationToCount(weekly, "weekly")
-		ret.KeepMonthly = durationToCount(monthly, "monthly")
-		ret.KeepYearly = durationToCount(yearly, "yearly")
+		// Fall back to RESTIC_FORGETLAST if present.
+		if lastStr := strings.TrimSpace(kv["RESTIC_FORGETLAST"]); lastStr != "" {
+			if n, err := strconv.Atoi(lastStr); err == nil && n > 0 {
+				warns = append(warns, fmt.Sprintf("RETENTION=%s with RESTIC_FORGETLAST=%d imported as keep-last (%d snapshots)", kv["RETENTION"], n, n))
+				return config.Retention{Mode: "keep-last", KeepLast: n}, warns
+			}
+		}
 
-		warns = append(warns, fmt.Sprintf(
-			"retention imported as tiered (daily=%d, weekly=%d, monthly=%d, yearly=%d) from v1 duration values (%s/%s/%s/%s); verify via Configure Retention",
-			ret.KeepDaily, ret.KeepWeekly, ret.KeepMonthly, ret.KeepYearly,
-			daily, weekly, monthly, yearly,
-		))
-		return ret, warns
+		// No forget fields at all — keep everything.
+		warns = append(warns, fmt.Sprintf("RETENTION=%s but no RESTIC_FORGET* fields found; imported as no pruning", kv["RETENTION"]))
+		return config.Retention{Mode: "none"}, warns
 
 	default:
 		warns = append(warns, fmt.Sprintf("unrecognised RETENTION value %q, defaulting to none", kv["RETENTION"]))
@@ -368,19 +424,23 @@ func convertNotifications(kv map[string]string) (config.Notifications, []string)
 	var warns []string
 
 	monitoring := strings.ToLower(strings.TrimSpace(kv["MONITORING"]))
-	if monitoring != "yes" && monitoring != "healthchecks" {
+
+	// Healthchecks is enabled if MONITORING=YES/healthchecks, OR if CRONDOMAIN
+	// and CRONID are both present (some v1 configs omit the MONITORING field).
+	domain := strings.TrimSpace(kv["CRONDOMAIN"])
+	checkID := strings.TrimSpace(kv["CRONID"])
+	hasFields := domain != "" && checkID != ""
+
+	if monitoring != "yes" && monitoring != "healthchecks" && !hasFields {
 		return config.Notifications{}, nil
 	}
 
-	domain := strings.TrimSpace(kv["CRONDOMAIN"])
-	checkID := strings.TrimSpace(kv["CRONID"])
-
-	if domain == "" || checkID == "" {
+	if !hasFields {
 		warns = append(warns, "healthchecks monitoring detected but CRONDOMAIN or CRONID is missing; configure manually via Configure Notifications")
 		return config.Notifications{}, warns
 	}
 
-	warns = append(warns, fmt.Sprintf("healthchecks imported: domain=%s, check=%s; verify via Configure Notifications", domain, checkID))
+	warns = append(warns, fmt.Sprintf("healthchecks imported: domain=%s, check=%s", domain, checkID))
 	return config.Notifications{
 		HealthchecksEnabled: true,
 		HealthchecksDomain:  domain,
