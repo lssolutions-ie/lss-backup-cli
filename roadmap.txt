@@ -26,39 +26,16 @@ Guiding Principles
 - Reporting must never fail or block a backup job.
 
 
-Target V2 Shape
----------------
-Suggested high-level structure:
-
-- `bin/`
-- `jobs/<job-id>/job.toml`
-- `jobs/<job-id>/secrets.env`
-- `jobs/<job-id>/last_run.json`        <- added: persisted run result
-- `jobs/<job-id>/logs/`
-- `jobs/<job-id>/run.sh`
-- `state/`
-- `config.toml`                        <- added: app-level config (reporting)
-- `docs/`
-
-Suggested CLI commands:
-
-- `lss-backup init`
-- `lss-backup create`
-- `lss-backup list`
-- `lss-backup show <job-id>`
-- `lss-backup run <job-id>`
-- `lss-backup validate <job-id>`
-- `lss-backup restore <job-id>`
-- `lss-backup remove <job-id>`
-- `lss-backup import <path>`
-- `lss-backup export <job-id>`
-- `lss-backup schedule sync`
+Current Version: v2.1.117
+Current State: All three platforms (macOS, Linux, Windows) tested and working.
+               CI builds and attaches binaries for all 6 platform/arch combos
+               on every v2.* tag push. In-app updater downloads pre-built
+               binaries. Daemon log viewer working on all platforms.
 
 
 Milestone M1: Define The Foundation
 -----------------------------------
-Goal:
-Lock the v2 shape before writing too much code.
+Status: COMPLETE
 
 Tasks:
 - [x] Choose implementation language.
@@ -68,185 +45,103 @@ Tasks:
 - [x] Decide which v1 features are required for first release.
 - [x] Decide which v1 features can wait until later milestones.
 
-Deliverables:
-- [x] v2 architecture note
-- [x] sample `job.toml`
-- [x] sample `secrets.env`
-- [x] command list with expected behavior
-
-Success looks like:
-- We can clearly describe how a job is stored, loaded, run, and restored.
-
-Status:
-- M1 complete
-- v2 scaffold and interactive menu work started ahead of later milestones
-
 
 Milestone M2: Build The Core CLI Skeleton
 -----------------------------------------
-Goal:
-Get a runnable but mostly empty CLI in place.
+Status: COMPLETE
 
 Tasks:
 - [x] Create the main CLI entrypoint.
-- [x] Add `create` command.
-- [x] Add `list` command.
-- [x] Add `show` command.
-- [x] Add `run` command.
-- [x] Add `validate` command.
-- [ ] Implement shared logging setup.
-- [x] Implement job discovery from `jobs/<job-id>/`.
-
-Deliverables:
-- [x] basic CLI app
-- [x] jobs can be listed and loaded from config
-- [x] validation errors are human-readable
-
-Success looks like:
-- v2 can read and inspect jobs even before real backup execution exists.
-
-Status:
-- M2 complete (shared logging deferred to M4 log file work)
+- [x] Add interactive menu-driven CLI (menu-only, no flag parsing).
+- [x] Job create / list / show / validate / delete workflows.
+- [x] Job discovery from jobs/<job-id>/.
 
 
 Milestone M3: Implement Job Persistence
 ---------------------------------------
-Goal:
-Make job definitions the durable source of truth.
+Status: COMPLETE
 
 Tasks:
-- [x] Write config read/write logic.
+- [x] Write config read/write logic (hand-rolled TOML parser).
 - [x] Create job directory creation logic.
-- [x] Generate per-job `run.sh` wrappers if job-local entrypoints are kept.
-- [x] Store secrets separately with safe permissions.
-- [x] Add export/import of the new config format.
+- [x] Generate per-job run.sh / run.ps1 wrappers.
+- [x] Store secrets separately with safe permissions (0o600).
+- [x] Add export/import of v2 config format.
 - [x] Add import of v1 legacy *-Configuration.env format.
-
-Deliverables:
-- [x] `create` writes a valid job
-- [x] `show` prints job data
-- [x] `import` works for v2 format
-- [x] `import` works for v1 legacy format (with warnings for unsupported features)
-- [x] `export` works for v2 format
-
-Success looks like:
-- A job can be created, moved, and reconstructed from its config files.
-
-Status:
-- M3 complete
 
 
 Milestone M4: First Working Backup Engine
 -----------------------------------------
-Goal:
-Get one real backup path working end to end, with persisted run state.
-
-Recommended first slice:
-- `restic`
-- local source
-- local destination
+Status: COMPLETE
 
 Tasks:
 - [x] Validate source and destination.
-- [x] Initialize repository when needed.
-- [x] Run backup.
-- [x] Write logs.
-- [x] Return stable exit codes.
-- [x] Add `RunResult` struct capturing: status, started_at, finished_at,
-      duration_seconds, error_message, log_file.
-- [x] Modify runner to return `(RunResult, error)` instead of `error` alone.
-- [x] Persist last run result as `{JobDir}/last_run.json` after every run
-      (both scheduled and manual).
+- [x] Initialize restic repository when needed.
+- [x] Run backup and write logs.
+- [x] Return stable exit codes (restic 3 = warning, rsync 24 = success).
+- [x] RunResult struct (status, started_at, finished_at, duration, error, log_file).
+- [x] Persist last_run.json after every run.
 - [x] Surface last run status and timestamp in job listing.
-
-Deliverables:
-- [x] first production-capable backup path
-- [x] log file output
-- [x] clear failure messages
-- [x] `RunResult` struct
-- [x] `last_run.json` per job
-- [x] job list shows last run status
-
-Note:
-  RunResult is foundational. It feeds the notification layer (M6),
-  the reporter interface (M6), and the management server payload (M7).
-  Do not skip it.
-
-Success looks like:
-- One real job can run reliably and its result is durably recorded.
 
 
 Milestone M5: Scheduling
 ------------------------
-Goal:
-Make jobs runnable automatically and repeatably.
+Status: COMPLETE
+
+Note: Implemented via a long-running daemon process rather than OS-level
+cron or Task Scheduler entries per job. This was a deliberate architectural
+decision made during implementation — it gives more control and avoids
+platform-specific scheduler fragmentation.
 
 Tasks:
-- [x] Store schedule in job config.
-- [ ] Implement `schedule sync`.
-- [ ] Generate one managed cron block.
-- [x] Support daily schedules.
-- [x] Support weekly schedules.
-- [x] Support monthly schedules.
-- [x] Support manual-only jobs.
-
-Deliverables:
-- [ ] deterministic cron generation
-- [ ] schedule preview
-- [ ] schedule update flow
-
-Success looks like:
-- Changing a schedule means editing config and syncing cron once.
+- [x] Store schedule in job config (manual / daily / weekly / monthly / cron).
+- [x] Cron expression validation and English description.
+- [x] Daemon process: load jobs, compute next run, sleep, run, reschedule.
+- [x] Config reload every 60s (polling) + on-demand via signal file.
+- [x] Graceful shutdown on SIGTERM / os.Interrupt.
+- [x] Service installation: systemd (Linux), launchd (macOS), Task Scheduler (Windows).
+- [x] Daemon log written to daemon.log on all platforms.
+- [x] Daemon status shown in main menu and About screen.
+- [x] Restart Daemon from Settings menu.
 
 
 Milestone M6: Notifications And Monitoring
 ------------------------------------------
-Goal:
-Restore ops-friendly alerting from v1 and establish the reporting
-abstraction used by the management server integration.
+Status: PARTIAL — healthchecks.io done; email and Reporter interface not started
 
-Tasks:
-- [ ] Add `Reporter` interface to `internal/reporting/`:
-        Report(job config.Job, result runner.RunResult) error
-- [ ] Implement `NoOpReporter` as the default (used when reporting disabled).
-- [ ] Wire reporter into `runner.Service` as a constructor argument so it
-      fires on every run path, not just the interactive menu.
-- [ ] Add Healthchecks ping support.
+What was built:
+- [x] Healthchecks.io pings: start, success, and failure per job.
+- [x] Configurable domain and check ID per job.
+- [x] Works for both restic and rsync jobs.
+- [x] Configure Notifications wizard in per-job menu.
+
+What was NOT built (design changed during implementation):
+- The formal Reporter interface / NoOpReporter was not introduced.
+  Healthchecks is called directly from runner.Run(). This works for now
+  but will need refactoring before M7 (management server) to avoid
+  duplicating the reporting call.
+- Email notification support — not started.
+
+Remaining tasks before M6 is fully done:
+- [ ] Add `Reporter` interface and `NoOpReporter` to `internal/reporting/`.
+- [ ] Wire reporter into `runner.Service` so all reporting paths go through
+      one interface (enables M7 without duplication).
 - [ ] Add email notification support.
-- [ ] Support success notifications.
-- [ ] Support failure-only notifications.
-- [ ] Make notification failures visible but non-destructive.
-
-Deliverables:
-- [ ] `internal/reporting/` package with interface and NoOp implementation
-- [ ] notification config section
-- [ ] post-run success/failure hooks via Reporter
-- [ ] testable notification layer
-
-Note:
-  The Reporter interface is the extension point for management server
-  reporting (M7). Get the interface right here before building on top of it.
-
-Success looks like:
-- Jobs can be monitored without notification code being scattered everywhere.
-- Adding a new reporting target requires only a new Reporter implementation.
+- [ ] Support failure-only vs always notification modes per job.
 
 
 Milestone M7: Management Server Integration
 -------------------------------------------
-Goal:
-Allow nodes to report backup job results to a central management server
-over HTTPS. Reporting is always non-blocking and non-destructive.
+Status: NOT STARTED
 
 Design decisions locked in:
 - App-level config lives at `{RootDir}/config.toml`, mode 0600.
 - Per-node token stored there; admin creates the token in the dashboard.
-- Authorization via `Authorization: Bearer {token}` header (not request body).
+- Authorization via `Authorization: Bearer {token}` header.
 - Payload always includes `payload_version: "1"` for forward compatibility.
-- 15-second HTTP timeout; failure is logged as a warning in the job log only.
-- No retry queue for now. Fire-and-forget.
-- Node name is user-configurable (not derived from hostname) because VMs
-  get renamed and cloned.
+- 15-second HTTP timeout; failure logged as warning only — never blocks backup.
+- No retry queue. Fire-and-forget.
+- Node name is user-configurable (not derived from hostname).
 
 Tasks:
 - [ ] Add `AppConfig` struct with a `[reporting]` section:
@@ -254,18 +149,13 @@ Tasks:
         server_url  string
         node_token  string
         node_name   string
-- [ ] Add load/save for `{RootDir}/config.toml` (TOML, created on first run).
-- [ ] Add "Configure Reporting" option to the CLI main menu:
-        - enable/disable toggle
-        - set server URL
-        - set node token (masked input, like restic password)
-        - set node name
+- [ ] Add load/save for `{RootDir}/config.toml`.
+- [ ] Add "Configure Management Console" to Settings menu (currently stubbed).
 - [ ] Implement `HTTPReporter` in `internal/reporting/`:
         - POST to `{server_url}/api/v1/status`
-        - Auth header: `Authorization: Bearer {node_token}`
-        - 15s timeout
-        - log warning on failure, never return error that surfaces to user
-- [ ] Define and lock the JSON payload shape:
+        - Auth: `Authorization: Bearer {node_token}`
+        - 15s timeout, log warning on failure
+- [ ] Lock the JSON payload shape:
         {
           "payload_version": "1",
           "node_name":        string,
@@ -278,181 +168,132 @@ Tasks:
           "duration_seconds": int,
           "error_message":    string
         }
-- [ ] Wire app config load into CLI startup; select NoOp or HTTP reporter
-      based on `reporting.enabled`.
-- [ ] Show reporting status (enabled/disabled) in CLI main menu header.
-- [ ] Test against a local mock server before wiring to production.
+- [ ] Wire app config into CLI startup; select NoOp or HTTP reporter.
+- [ ] Show reporting status in CLI header or About.
 
 Deliverables:
 - [ ] `{RootDir}/config.toml` with reporting section
 - [ ] `HTTPReporter` implementation
-- [ ] "Configure Reporting" menu flow
+- [ ] "Configure Management Console" menu flow
 - [ ] locked payload schema (v1)
 
-Success looks like:
-- After every run (manual or scheduled) the result is POSTed to the server.
-- If the server is unreachable the backup job is unaffected.
-- The node token never appears in logs or stdout.
+Dependency: Refactor M6 Reporter interface first.
 
 
 Milestone M8: Retention And Cleanup
 ------------------------------------
-Goal:
-Bring back restic lifecycle management.
+Status: COMPLETE
 
 Tasks:
-- [ ] Add retention config support.
-- [ ] Implement no-retention mode.
-- [ ] Implement keep-last-only mode.
-- [ ] Implement full retention policy mode.
-- [ ] Add prune step.
-- [ ] Add log cleanup policy.
-
-Deliverables:
-- [ ] retention module
-- [ ] prune integration
-- [ ] log cleanup command or policy
-
-Success looks like:
-- Restic jobs behave like v1 but from one shared runner.
+- [x] Add retention config (none / keep-last / keep-within / tiered).
+- [x] Run restic forget --prune after backup when retention is not "none".
+- [x] Retention description shown in Edit Backup and job header.
+- [x] Log file retention: last 30 backup logs, last 10 restore logs per job.
+- [x] Activity log retention: 10,000 lines cap.
+- [x] Audit events log: 8-year retention.
+- [x] Daemon log: 5,000 lines cap.
 
 
 Milestone M9: Add Rsync Support
 --------------------------------
-Goal:
-Support the second engine cleanly.
+Status: COMPLETE
 
 Tasks:
-- [x] Add rsync runner behind the same job model.
-- [x] Support the rsync modes that matter for release.
-- [x] Reuse the same validation, logging, scheduling, and notification layers.
-
-Deliverables:
-- [x] `program = "rsync"` job support
-- [x] same command set works for both engines
-
-Success looks like:
-- Restic and rsync differ only in engine execution, not in the overall app structure.
-
-Status:
-- M9 complete
+- [x] RsyncEngine behind same job model.
+- [x] rsync -a with optional --no-perms/--no-owner/--no-group.
+- [x] Exit code 24 treated as success.
+- [x] Restore: rsync -a destination/ target/.
+- [x] rsync-only items hidden from restic menus and vice versa.
+- [x] rsync excluded from Windows (not a standard Windows tool).
 
 
 Milestone M10: Network Sources And Destinations
 ------------------------------------------------
-Goal:
-Add SMB/NFS carefully after local paths are stable.
+Status: NOT STARTED
 
 Tasks:
-- [ ] Add SMB source support.
-- [ ] Add SMB destination support.
-- [ ] Add NFS source support.
-- [ ] Add NFS destination support.
-- [ ] Make mount/unmount behavior explicit.
-- [ ] Make mount/unmount behavior testable.
-- [ ] Decide whether temporary mounts or persistent mounts are preferred.
+- [ ] Add SMB source/destination support.
+- [ ] Add NFS source/destination support.
+- [ ] Add S3 destination support (restic native).
+- [ ] Make mount/unmount behavior explicit and testable.
+- [ ] Decide: temporary mounts vs persistent mounts.
 
-Deliverables:
-- [ ] network storage support
-- [ ] safer mount handling
-- [ ] clear validation and cleanup rules
-
-Success looks like:
-- Remote jobs are supported without bringing back the current duplication and fragility.
+Note: S3 is easier than SMB/NFS since restic handles it natively via env vars.
+     May be worth doing S3 before SMB/NFS.
 
 
 Milestone M11: Migration From V1
 ---------------------------------
-Goal:
-Protect existing users and preserve prior work.
+Status: PARTIAL — import works; migration report not done
 
 Tasks:
-- [ ] Build importer for old `.env` jobs.
-- [ ] Map v1 fields into v2 config.
-- [ ] Detect unsupported combinations cleanly.
-- [ ] Generate a migration report per job.
-
-Deliverables:
-- [ ] `import-v1 <path>` or `migrate-v1-job <id>`
-- [ ] compatibility notes
-- [ ] fallback behavior for edge cases
-
-Success looks like:
-- A real v1 job can be brought into v2 with minimal manual editing.
+- [x] Import v1 *-Configuration.env format.
+- [x] Map v1 fields to v2 config.
+- [x] Detect unsupported combinations.
+- [ ] Generate a migration report per job (what mapped, what was skipped, what needs manual fix).
+- [ ] Document known v1 → v2 gaps.
 
 
 Milestone M12: Safety Hardening
 --------------------------------
-Goal:
-Make v2 trustworthy.
+Status: NOT STARTED
 
 Tasks:
-- [ ] Add strong input validation.
-- [ ] Protect destructive commands.
-- [ ] Add dry-run where possible.
+- [ ] Add dry-run mode for backup and restore.
 - [ ] Verify delete targets before removal.
-- [ ] Improve secret handling and file permissions.
-- [ ] Add structured error reporting.
+- [ ] Add structured error codes.
+- [ ] Audit all permission checks for correctness on each platform.
+- [ ] Review and harden secrets handling end-to-end.
 
-Deliverables:
-- [ ] safer remove flow
-- [ ] validation layer
-- [ ] security checklist
-
-Success looks like:
-- Bad config fails early and safely instead of causing messy runtime behavior.
+Note: Some safety work was done organically (double-confirmation for delete,
+     secrets in 0o600 files, input validation throughout). Formal hardening
+     pass still needed.
 
 
 Milestone M13: Release Readiness
 ----------------------------------
-Goal:
-Make v2 something that can be comfortably shipped.
+Status: NOT STARTED
 
 Tasks:
-- [ ] Write install docs.
-- [ ] Write migration docs.
+- [ ] Write install docs (macOS, Linux, Windows).
+- [ ] Write migration guide from v1.
 - [ ] Write admin usage guide.
-- [ ] Test upgrade/reinstall flow.
-- [ ] Test fresh install flow.
-- [ ] Test backup/restore/remove/import manually on real scenarios.
+- [ ] Test upgrade/reinstall flow on all three platforms.
+- [ ] Test fresh install flow on all three platforms.
+- [ ] Write known limitations document.
+- [ ] Finalize release checklist.
 
-Deliverables:
-- [ ] release checklist
-- [ ] user guide
-- [ ] migration guide
-- [ ] known limitations
-
-Success looks like:
-- A real user can be onboarded and upgraded with confidence.
+Note: Three-platform testing has been done informally during development
+     (v2.1.100–v2.1.117). Formal release readiness requires documented
+     test runs and a written guide.
 
 
-Suggested Release Cuts
-----------------------
-`v2.0.0-alpha1`
-- M1 to M4
-- restic local-to-local only
-- last_run.json persisted per job
+Suggested Release Cuts (revised)
+---------------------------------
+`v2.1.x` (current — pre-release, three-platform tested)
+- M1–M9 complete
+- M6 partial (healthchecks only)
+- M11 partial (import only)
+- CI builds binaries for all platforms on tag push
+- In-app updater downloads pre-built binaries
 
-`v2.0.0-beta1`
-- M5 to M7
-- scheduling, notifications, retention
-- management server reporting
+`v2.2.0`
+- M6 complete (Reporter interface + email notifications)
+- M7 complete (management server integration)
+- M11 complete (migration report)
 
-`v2.0.0-beta2`
-- M8 to M11
-- rsync, network sources, migration
+`v2.3.0`
+- M10 (network destinations: S3 first, then SMB/NFS)
+- M12 (safety hardening pass)
 
-`v2.0.0`
-- M12 to M13
-- hardening and docs
+`v2.4.0 / v2.0.0-rc`
+- M13 (release readiness, docs, formal test runs)
 
 
 Immediate Next Steps
 --------------------
-Resume at M4 — add RunResult and last_run.json before anything else.
-This unblocks M6 (notifications) and M7 (management server reporting).
-
-1. Define `RunResult` struct in `internal/runner/`.
-2. Update `runner.Service.Run()` to return `(RunResult, error)`.
-3. Write `last_run.json` to `{JobDir}/` after each run.
-4. Show last run status in the job list menu.
+1. Finish macOS testing checklist (restore, healthchecks, scheduled run).
+2. Refactor M6 Reporter interface as a prerequisite for M7.
+3. Begin M7 — management server integration.
+   Start with AppConfig + config.toml load/save, then HTTPReporter,
+   then wire the "Configure Management Console" menu stub.
