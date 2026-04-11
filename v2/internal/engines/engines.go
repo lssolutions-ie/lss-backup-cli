@@ -150,7 +150,25 @@ func (e ResticEngine) Restore(job config.Job, snapshotID string, target string, 
 		snapshotID = "latest"
 	}
 
-	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "restore", snapshotID, "--target", target)
+	major, minor := resticVersionMinor(resticBin)
+	if major == 0 && minor < 17 {
+		return fmt.Errorf(
+			"restic 0.17.0 or newer is required for restore (detected: 0.%d).\n"+
+				"  Please update restic:\n"+
+				"    Linux:  sudo apt-get install --only-upgrade restic\n"+
+				"            or download from https://github.com/restic/restic/releases\n"+
+				"    macOS:  brew upgrade restic\n"+
+				"    Windows: winget upgrade restic",
+			minor,
+		)
+	}
+
+	args := []string{"-r", job.Destination.Path, "restore", snapshotID, "--target", target}
+	if n := pathComponentCount(job.Source.Path); n > 0 {
+		args = append(args, "--strip-components", fmt.Sprintf("%d", n))
+	}
+
+	cmd := exec.Command(resticBin, args...)
 	executil.HideWindow(cmd)
 	cmd.Stdout = output
 	cmd.Stderr = output
@@ -162,55 +180,39 @@ func (e ResticEngine) Restore(job config.Job, snapshotID string, target string, 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("restic restore failed: %w", err)
 	}
-
-	// Restic recreates the full absolute path hierarchy under the target.
-	// Flatten it by moving the contents of the nested source directory up to
-	// the target root and removing the empty intermediate directories.
-	if err := flattenResticRestore(target, job.Source.Path, output); err != nil {
-		fmt.Fprintf(output, "Warning: could not flatten restore path: %v\n", err)
-	}
-
 	return nil
 }
 
-// flattenResticRestore moves the contents of the nested source path that restic
-// created under target up to target itself, then removes the empty intermediate
-// directories. Only operates on Unix-style absolute paths (Linux/macOS).
-// e.g. target=/restore/1, sourcePath=/home/data → moves /restore/1/home/data/* → /restore/1/
-func flattenResticRestore(target string, sourcePath string, output io.Writer) error {
-	if !strings.HasPrefix(sourcePath, "/") {
-		return nil // Windows paths with drive letters — skip
-	}
-
-	// Path where restic placed the files, e.g. /restore/1/home/data
-	nestedDir := filepath.Join(target, strings.TrimPrefix(sourcePath, "/"))
-
-	info, err := os.Stat(nestedDir)
-	if err != nil || !info.IsDir() {
-		return nil // nothing to flatten (e.g. source path mismatch)
-	}
-
-	entries, err := os.ReadDir(nestedDir)
+// resticVersionMinor runs "restic version" and returns the major and minor version
+// numbers. Returns 0, 0 on any parse failure (treated as unknown/old).
+// Output format: "restic 0.17.3 compiled with go1.23.4 on linux/amd64"
+func resticVersionMinor(bin string) (major, minor int) {
+	out, err := exec.Command(bin, "version").Output()
 	if err != nil {
-		return fmt.Errorf("read nested restore dir: %w", err)
+		return 0, 0
 	}
-
-	for _, entry := range entries {
-		src := filepath.Join(nestedDir, entry.Name())
-		dst := filepath.Join(target, entry.Name())
-		if err := os.Rename(src, dst); err != nil {
-			return fmt.Errorf("move %s: %w", entry.Name(), err)
-		}
+	fields := strings.Fields(string(out))
+	if len(fields) < 2 {
+		return 0, 0
 	}
-
-	// Remove the top-level intermediate directory (e.g. /restore/1/home).
-	topComponent := strings.SplitN(strings.TrimPrefix(sourcePath, "/"), "/", 2)[0]
-	if topComponent != "" {
-		_ = os.RemoveAll(filepath.Join(target, topComponent))
+	parts := strings.Split(fields[1], ".")
+	if len(parts) < 2 {
+		return 0, 0
 	}
+	fmt.Sscanf(parts[0], "%d", &major)
+	fmt.Sscanf(parts[1], "%d", &minor)
+	return major, minor
+}
 
-	fmt.Fprintf(output, "Restore path flattened: data is at %s\n", target)
-	return nil
+// pathComponentCount returns the number of slash-separated components in an
+// absolute path, used to compute --strip-components for restic restore.
+// "/home/data/files" → 3, "/data" → 1, "/" or "" → 0
+func pathComponentCount(p string) int {
+	trimmed := strings.Trim(filepath.ToSlash(p), "/")
+	if trimmed == "" {
+		return 0
+	}
+	return len(strings.Split(trimmed, "/"))
 }
 
 func (e ResticEngine) ListSnapshots(job config.Job) ([]Snapshot, error) {
