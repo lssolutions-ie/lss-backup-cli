@@ -112,6 +112,7 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}) error 
 			return nil
 
 		case <-heartbeatTicker.C:
+			log.Println("Heartbeat tick")
 			fireReport(paths, scheduled)
 
 		case <-reloadTicker.C:
@@ -296,14 +297,25 @@ func writeNextRun(job config.Job, next time.Time) {
 // daemon restart. It is always fire-and-forget.
 func fireReport(paths app.Paths, scheduled []scheduledJob) {
 	appCfg, err := config.LoadAppConfig(paths.RootDir)
-	if err != nil || !appCfg.Enabled {
+	if err != nil {
+		log.Printf("Report: config load error: %v", err)
+		return
+	}
+	if !appCfg.Enabled {
 		return
 	}
 
 	allJobs, err := jobs.LoadAll(paths)
-	if err != nil || len(allJobs) == 0 {
+	if err != nil {
+		log.Printf("Report: job load error: %v", err)
 		return
 	}
+	if len(allJobs) == 0 {
+		log.Println("Report: no jobs found")
+		return
+	}
+
+	log.Printf("Report: sending status for %d jobs (node_id=%s, psk_len=%d)", len(allJobs), appCfg.NodeID, len(appCfg.PSKKey))
 
 	// Build next-run map from in-memory schedule (no disk I/O needed).
 	nextRunByID := make(map[string]time.Time, len(scheduled))
