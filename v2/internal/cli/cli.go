@@ -1687,6 +1687,24 @@ func runManagementConsoleWizard(paths app.Paths, prompter ui.Prompter) error {
 	}
 	cfg.Enabled = enable
 
+	if !enable && cfg.ServerURL != "" {
+		clear, err := prompter.Confirm("Clear stored management console configuration?")
+		if err != nil {
+			return err
+		}
+		if clear {
+			cfg = config.AppConfig{}
+			if err := config.SaveAppConfig(paths.RootDir, cfg); err != nil {
+				return fmt.Errorf("save config: %w", err)
+			}
+			activitylog.Audit(paths.LogsDir, "management console configuration cleared")
+			daemon.TriggerReload(paths.StateDir)
+			ui.StatusOK("Management console configuration cleared.")
+			pauseForEnter()
+			return nil
+		}
+	}
+
 	if enable {
 		serverURL, err := prompter.Ask("Server URL (e.g. https://manage.example.com)", validateServerURL)
 		if err != nil {
