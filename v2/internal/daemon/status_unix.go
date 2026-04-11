@@ -18,7 +18,7 @@ func IsRunning() bool {
 		}
 		return strings.TrimSpace(string(out)) == "active"
 	case "darwin":
-		out, err := exec.Command("launchctl", "list", "ie.lssolutions.lss-backup").Output()
+		out, err := exec.Command("launchctl", "list", "com.lssolutions.lss-backup").Output()
 		return err == nil && len(out) > 0
 	}
 	return false
@@ -30,7 +30,7 @@ func StartService() error {
 	case "linux":
 		return exec.Command("systemctl", "start", "lss-backup").Run()
 	case "darwin":
-		return exec.Command("launchctl", "start", "ie.lssolutions.lss-backup").Run()
+		return exec.Command("launchctl", "start", "com.lssolutions.lss-backup").Run()
 	}
 	return nil
 }
