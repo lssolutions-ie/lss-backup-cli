@@ -13,6 +13,7 @@ import (
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/engines"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/healthchecks"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/logcleanup"
+	"golang.org/x/term"
 )
 
 type Service struct {
@@ -177,16 +178,19 @@ func (b bestEffortWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// lineIndentWriter prefixes every new line with a fixed string.
+// lineIndentWriter prefixes every new line with a fixed string and optionally
+// word-wraps at wrapAt columns (0 = no wrapping).
 // Used to indent engine output on stdout so it aligns with the UI's 2-space convention.
 type lineIndentWriter struct {
 	w      io.Writer
 	prefix []byte
 	bol    bool // true when we are at the start of a new line
+	col    int  // current column position (bytes since last newline)
+	wrapAt int  // wrap column, 0 = disabled
 }
 
-func newLineIndentWriter(w io.Writer, prefix string) *lineIndentWriter {
-	return &lineIndentWriter{w: w, prefix: []byte(prefix), bol: true}
+func newLineIndentWriter(w io.Writer, prefix string, wrapAt int) *lineIndentWriter {
+	return &lineIndentWriter{w: w, prefix: []byte(prefix), bol: true, wrapAt: wrapAt}
 }
 
 func (l *lineIndentWriter) Write(p []byte) (int, error) {
@@ -194,11 +198,21 @@ func (l *lineIndentWriter) Write(p []byte) (int, error) {
 	for _, b := range p {
 		if l.bol {
 			buf.Write(l.prefix)
+			l.col = len(l.prefix)
 			l.bol = false
 		}
-		buf.WriteByte(b)
 		if b == '\n' {
+			buf.WriteByte(b)
 			l.bol = true
+			l.col = 0
+		} else {
+			if l.wrapAt > 0 && l.col >= l.wrapAt {
+				buf.WriteByte('\n')
+				buf.Write(l.prefix)
+				l.col = len(l.prefix)
+			}
+			buf.WriteByte(b)
+			l.col++
 		}
 	}
 	l.w.Write(buf.Bytes()) //nolint:errcheck
@@ -236,7 +250,14 @@ func prepareLogInDir(job config.Job, subdir string) (string, io.Writer, func(), 
 	}
 	logcleanup.KeepLatestFiles(logDir, "*.log", keep)
 
-	writer := io.MultiWriter(newLineIndentWriter(bestEffortWriter{os.Stdout}, "  "), file)
+	termWidth, _, err2 := term.GetSize(int(os.Stdout.Fd()))
+	if err2 != nil || termWidth <= 0 {
+		termWidth = 120
+	}
+	if termWidth > 160 {
+		termWidth = 160
+	}
+	writer := io.MultiWriter(newLineIndentWriter(bestEffortWriter{os.Stdout}, "  ", termWidth), file)
 	closeFn := func() {
 		_ = file.Close()
 	}
