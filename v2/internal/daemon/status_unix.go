@@ -18,8 +18,9 @@ func IsRunning() bool {
 		}
 		return strings.TrimSpace(string(out)) == "active"
 	case "darwin":
-		out, err := exec.Command("launchctl", "list", "com.lssolutions.lss-backup").Output()
-		return err == nil && len(out) > 0
+		// launchctl list requires root for system-level daemons; use pgrep instead.
+		err := exec.Command("pgrep", "-f", "lss-backup-cli daemon").Run()
+		return err == nil
 	}
 	return false
 }
