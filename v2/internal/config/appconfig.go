@@ -12,11 +12,13 @@ import (
 // AppConfig holds node-level settings persisted to {RootDir}/config.toml.
 // The file is written with mode 0o600 because it contains the PSK key.
 type AppConfig struct {
-	Enabled   bool
-	ServerURL string
-	NodeID    string
-	NodeHostname  string
-	PSKKey    string // 128 printable ASCII chars; never log this value
+	Enabled      bool
+	ServerURL    string
+	NodeID       string
+	NodeHostname string
+	PSKKey       string // 128 printable ASCII chars; never log this value
+	SSHHost      string // management server SSH host for tunnel (defaults to ServerURL hostname)
+	SSHPort      int    // management server SSH port for tunnel (default 22)
 }
 
 const appConfigFile = "config.toml"
@@ -62,6 +64,12 @@ func renderAppConfigTOML(cfg AppConfig) string {
 	sb.WriteString(fmt.Sprintf("node_id = %s\n", strconv.Quote(cfg.NodeID)))
 	sb.WriteString(fmt.Sprintf("node_hostname = %s\n", strconv.Quote(cfg.NodeHostname)))
 	sb.WriteString(fmt.Sprintf("psk_key = %s\n", strconv.Quote(cfg.PSKKey)))
+	if cfg.SSHHost != "" {
+		sb.WriteString(fmt.Sprintf("ssh_host = %s\n", strconv.Quote(cfg.SSHHost)))
+	}
+	if cfg.SSHPort != 0 {
+		sb.WriteString(fmt.Sprintf("ssh_port = %d\n", cfg.SSHPort))
+	}
 	return sb.String()
 }
 
@@ -107,6 +115,13 @@ func parseAppConfigTOML(raw string) (AppConfig, error) {
 			cfg.NodeHostname = parseString(value)
 		case "psk_key":
 			cfg.PSKKey = parseString(value)
+		case "ssh_host":
+			cfg.SSHHost = parseString(value)
+		case "ssh_port":
+			n, err := strconv.Atoi(value)
+			if err == nil {
+				cfg.SSHPort = n
+			}
 		}
 	}
 

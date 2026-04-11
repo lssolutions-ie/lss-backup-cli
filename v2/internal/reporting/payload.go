@@ -14,14 +14,22 @@ const (
 	ReportTypePostRun   = "post_run"  // immediately after a job runs
 )
 
+// TunnelStatus holds the current reverse tunnel state for the management server.
+type TunnelStatus struct {
+	Port      int    `json:"port"`
+	PublicKey string `json:"public_key,omitempty"`
+	Connected bool   `json:"connected"`
+}
+
 // NodeStatus is the full snapshot of this node's backup state sent to the
 // management server on every report.
 type NodeStatus struct {
-	PayloadVersion string      `json:"payload_version"`
-	ReportType     string      `json:"report_type"` // "heartbeat" or "post_run"
-	NodeName       string      `json:"node_name"`
-	ReportedAt     time.Time   `json:"reported_at"`
-	Jobs           []JobStatus `json:"jobs"`
+	PayloadVersion string        `json:"payload_version"`
+	ReportType     string        `json:"report_type"` // "heartbeat" or "post_run"
+	NodeName       string        `json:"node_name"`
+	ReportedAt     time.Time     `json:"reported_at"`
+	Tunnel         *TunnelStatus `json:"tunnel,omitempty"`
+	Jobs           []JobStatus   `json:"jobs"`
 }
 
 // JobStatus describes the current state of a single backup job.

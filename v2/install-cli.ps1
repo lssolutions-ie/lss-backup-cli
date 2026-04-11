@@ -283,3 +283,9 @@ $modeLabel = if ($RunAsSystem) { "SYSTEM" } else { $env:USERNAME }
 Write-Host "Daemon task registered and started as $modeLabel (Task Scheduler)"
 
 Write-Host "Install manifest written to $ManifestPath"
+
+# Set up SSH credentials for management server terminal access.
+Write-Host ""
+Write-Host "Setting up SSH credentials for remote management..."
+Write-Host ""
+& $BinPath --setup-ssh

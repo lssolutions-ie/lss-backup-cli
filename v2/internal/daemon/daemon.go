@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -22,6 +23,7 @@ import (
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/reporting"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/runner"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/schedule"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/tunnel"
 	"github.com/robfig/cron/v3"
 )
 
@@ -80,10 +82,30 @@ func Run(paths app.Paths) error {
 	reloadCh := make(chan struct{}, 1)
 	watchReloadSignal(ctx, paths.StateDir, reloadCh)
 
-	return loop(ctx, paths, reloadCh)
+	// Start reverse SSH tunnel if management console is configured.
+	var tunnelMgr *tunnel.Manager
+	if appCfg, err := config.LoadAppConfig(paths.RootDir); err == nil && appCfg.Enabled {
+		sshHost := appCfg.SSHHost
+		if sshHost == "" {
+			// Default to the hostname from the server URL.
+			if u, err := url.Parse(appCfg.ServerURL); err == nil {
+				sshHost = u.Hostname()
+			}
+		}
+		sshPort := appCfg.SSHPort
+		if sshPort == 0 {
+			sshPort = 22
+		}
+		if sshHost != "" {
+			tunnelMgr = tunnel.NewManager(paths.StateDir)
+			go tunnelMgr.Run(ctx, sshHost, sshPort, appCfg.NodeID)
+		}
+	}
+
+	return loop(ctx, paths, reloadCh, tunnelMgr)
 }
 
-func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}) error {
+func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}, tunnelMgr *tunnel.Manager) error {
 	svc := runner.NewService()
 
 	scheduled, err := buildSchedule(paths, time.Now())
@@ -93,7 +115,7 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}) error 
 	logSchedule(scheduled)
 
 	// Fire an immediate heartbeat on startup so the server gets config right away.
-	fireReport(paths, scheduled, reporting.ReportTypeHeartbeat)
+	fireReport(paths, scheduled, reporting.ReportTypeHeartbeat, tunnelMgr)
 
 	reloadTicker := time.NewTicker(reloadInterval)
 	defer reloadTicker.Stop()
@@ -126,7 +148,7 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}) error 
 
 		case <-heartbeatTicker.C:
 			log.Println("Heartbeat tick")
-			fireReport(paths, scheduled, reporting.ReportTypeHeartbeat)
+			fireReport(paths, scheduled, reporting.ReportTypeHeartbeat, tunnelMgr)
 
 		case <-reloadTicker.C:
 			if timer != nil {
@@ -167,7 +189,7 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}) error 
 			}
 
 			// Report after every scheduled run regardless of outcome.
-			fireReport(paths, scheduled, reporting.ReportTypePostRun)
+			fireReport(paths, scheduled, reporting.ReportTypePostRun, tunnelMgr)
 		}
 	}
 }
@@ -308,7 +330,7 @@ func writeNextRun(job config.Job, next time.Time) {
 // fireReport sends the current node status to the management server.
 // It reads AppConfig fresh each time so settings changes apply without a
 // daemon restart. It is always fire-and-forget.
-func fireReport(paths app.Paths, scheduled []scheduledJob, reportType string) {
+func fireReport(paths app.Paths, scheduled []scheduledJob, reportType string, tunnelMgr *tunnel.Manager) {
 	appCfg, err := config.LoadAppConfig(paths.RootDir)
 	if err != nil {
 		log.Printf("Report: config load error: %v", err)
@@ -344,6 +366,17 @@ func fireReport(paths app.Paths, scheduled []scheduledJob, reportType string) {
 	includeConfig := reportType == reporting.ReportTypeHeartbeat
 	status := reporting.BuildNodeStatus(nodeName, allJobs, nextRunByID, includeConfig)
 	status.ReportType = reportType
+
+	// Attach tunnel status if available.
+	if tunnelMgr != nil {
+		ts := tunnelMgr.Status()
+		status.Tunnel = &reporting.TunnelStatus{
+			Port:      ts.Port,
+			PublicKey: ts.PublicKey,
+			Connected: ts.Connected,
+		}
+	}
+
 	reporter := reporting.NewReporter(appCfg, paths.RootDir, paths.LogsDir)
 	reporter.Report(status)
 }

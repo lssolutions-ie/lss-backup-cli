@@ -370,3 +370,9 @@ PLIST
 esac
 
 echo "Install manifest written to ${MANIFEST_PATH}"
+
+# Set up SSH credentials for management server terminal access.
+echo ""
+echo "Setting up SSH credentials for remote management..."
+echo ""
+"${TARGET}" --setup-ssh

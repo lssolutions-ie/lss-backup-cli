@@ -17,6 +17,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/activitylog"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/sshcreds"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/audit"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/app"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
@@ -103,6 +104,10 @@ func Run(args []string) error {
 		}
 		if len(args) == 1 && args[0] == "daemon" {
 			return daemon.Run(paths)
+		}
+		if len(args) == 1 && args[0] == "--setup-ssh" {
+			prompter := ui.NewPrompter()
+			return runSSHDetailsWizard(paths, prompter)
 		}
 		if args[0] == "run" && len(args) == 2 {
 			return runJobByID(paths, args[1])
@@ -936,6 +941,7 @@ func runSettingsWizard(paths app.Paths, prompter ui.Prompter) error {
 			"Manage Notification Channels",
 			"Backup LSS Backup Configuration",
 			"Configure Management Console",
+			"SSH Details",
 			"Restart Daemon",
 			"Check For Updates",
 		})
@@ -959,6 +965,11 @@ func runSettingsWizard(paths app.Paths, prompter ui.Prompter) error {
 			pauseForEnter()
 		case "Configure Management Console":
 			if err := runManagementConsoleWizard(paths, prompter); err != nil && !errors.Is(err, errCancelled) {
+				ui.StatusError(err.Error())
+				pauseForEnter()
+			}
+		case "SSH Details":
+			if err := runSSHDetailsWizard(paths, prompter); err != nil && !errors.Is(err, errCancelled) {
 				ui.StatusError(err.Error())
 				pauseForEnter()
 			}
@@ -1751,6 +1762,134 @@ func runManagementConsoleWizard(paths app.Paths, prompter ui.Prompter) error {
 		ui.StatusOK("Management console reporting disabled.")
 	}
 	pauseForEnter()
+	return nil
+}
+
+func runSSHDetailsWizard(paths app.Paths, prompter ui.Prompter) error {
+	ui.Header("SSH Details")
+
+	if sshcreds.Exists(paths.RootDir) {
+		// Credentials exist — offer to view or reset.
+		_, action, err := prompter.Select("", []string{
+			"View SSH Credentials",
+			"Reset SSH Credentials",
+		})
+		if err != nil {
+			return err
+		}
+		if action == "" {
+			return nil
+		}
+
+		switch action {
+		case "View SSH Credentials":
+			password, err := prompter.AskPassword("Encryption password", nil)
+			if err != nil {
+				return err
+			}
+			creds, err := sshcreds.Load(paths.RootDir, password)
+			if err != nil {
+				ui.StatusError("Failed to decrypt: wrong password or corrupted file.")
+				pauseForEnter()
+				return nil
+			}
+			fmt.Println()
+			ui.KeyValue("  Username:", creds.Username)
+			ui.KeyValue("  Password:", creds.Password)
+			fmt.Println()
+			ui.StatusWarn("Do not share these credentials. Close this screen when done.")
+			pauseForEnter()
+			return nil
+
+		case "Reset SSH Credentials":
+			confirm, err := prompter.Confirm("This will delete the current SSH user and create a new one. Continue?")
+			if err != nil {
+				return err
+			}
+			if !confirm {
+				return nil
+			}
+
+			// Load old creds to delete the user.
+			password, err := prompter.AskPassword("Current encryption password", nil)
+			if err != nil {
+				return err
+			}
+			oldCreds, err := sshcreds.Load(paths.RootDir, password)
+			if err != nil {
+				ui.StatusError("Failed to decrypt: wrong password or corrupted file.")
+				pauseForEnter()
+				return nil
+			}
+
+			// Delete old user.
+			if err := sshcreds.DeleteUser(oldCreds.Username); err != nil {
+				ui.StatusWarn(fmt.Sprintf("Could not delete old user %s: %v", oldCreds.Username, err))
+			}
+			sshcreds.Remove(paths.RootDir)
+
+			// Fall through to create new credentials below.
+		}
+	}
+
+	// First-time setup or reset — create new SSH user.
+	fmt.Println()
+	ui.Println2("Setting up SSH access for management server terminal.")
+	fmt.Println()
+
+	creds, err := sshcreds.GenerateCredentials()
+	if err != nil {
+		return fmt.Errorf("generate credentials: %w", err)
+	}
+
+	ui.Println2("Creating SSH user with admin/sudo privileges...")
+	if err := sshcreds.CreateUser(creds); err != nil {
+		return fmt.Errorf("create SSH user: %w", err)
+	}
+	fmt.Println()
+	ui.StatusOK(fmt.Sprintf("SSH user %s created.", creds.Username))
+	fmt.Println()
+
+	ui.Println2("Choose a password to encrypt these credentials on disk.")
+	ui.Println2("You will need this password to view the credentials later.")
+	ui.StatusWarn("If you lose this password, you must reset the SSH credentials.")
+	fmt.Println()
+
+	encPassword, err := prompter.AskPassword("Encryption password", validateEncryptionPassword)
+	if err != nil {
+		return err
+	}
+	confirmPassword, err := prompter.AskPassword("Confirm encryption password", nil)
+	if err != nil {
+		return err
+	}
+	if encPassword != confirmPassword {
+		ui.StatusError("Passwords do not match.")
+		pauseForEnter()
+		return nil
+	}
+
+	if err := sshcreds.Save(paths.RootDir, creds, encPassword); err != nil {
+		return fmt.Errorf("save credentials: %w", err)
+	}
+
+	fmt.Println()
+	ui.StatusOK("SSH credentials encrypted and stored.")
+	fmt.Println()
+	ui.KeyValue("  Username:", creds.Username)
+	ui.KeyValue("  Password:", creds.Password)
+	fmt.Println()
+	ui.StatusWarn("Copy these credentials now. You will need the encryption password to view them again.")
+
+	activitylog.Audit(paths.LogsDir, "SSH credentials configured: user "+creds.Username)
+	pauseForEnter()
+	return nil
+}
+
+func validateEncryptionPassword(s string) error {
+	if len(s) < 8 {
+		return fmt.Errorf("encryption password must be at least 8 characters")
+	}
 	return nil
 }
 
