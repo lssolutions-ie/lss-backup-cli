@@ -121,6 +121,30 @@ Ensure-Dependency "go"     "GoLang.Go"     $deps { Install-GoFallback }
 Ensure-Dependency "restic" "restic.restic" $deps { Install-ResticFallback }
 
 
+# SSH server — required for management server terminal access.
+$sshCapability = Get-WindowsCapability -Online | Where-Object { $_.Name -like 'OpenSSH.Server*' }
+if ($sshCapability.State -ne 'Installed') {
+    Write-Host "Installing OpenSSH Server..."
+    Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 | Out-Null
+}
+$sshdService = Get-Service -Name sshd -ErrorAction SilentlyContinue
+if ($sshdService) {
+    if ($sshdService.Status -ne 'Running') {
+        Start-Service sshd
+    }
+    Set-Service -Name sshd -StartupType Automatic
+} else {
+    Write-Host "[WARN] sshd service not found after install — check Windows version."
+}
+# Ensure firewall rule for SSH.
+$sshRule = Get-NetFirewallRule -Name 'sshd' -ErrorAction SilentlyContinue
+if (-not $sshRule) {
+    New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server (LSS Backup)' `
+        -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 | Out-Null
+    Write-Host "SSH firewall rule added (port 22)"
+}
+Write-Host "SSH server ready"
+
 Ensure-Directory $BinDir
 Ensure-Directory $ConfigDir
 Ensure-Directory $JobsDir

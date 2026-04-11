@@ -221,6 +221,13 @@ case "$OS_NAME" in
 		fi
 		ensure_linux_dependency rsync rsync
 		ensure_linux_dependency zip zip
+		# SSH server — required for management server terminal access.
+		ensure_linux_dependency sshd openssh-server
+		if ! systemctl is-active --quiet ssh 2>/dev/null; then
+			sudo systemctl enable ssh
+			sudo systemctl start ssh
+			echo "SSH server enabled and started"
+		fi
 		sudo mkdir -p "$CONFIG_DIR" "$JOBS_DIR" "$LOGS_DIR" "$STATE_DIR"
 		;;
 	Darwin)
@@ -246,6 +253,19 @@ case "$OS_NAME" in
 			append_dep "restic" "brew" "restic" false true
 		fi
 		ensure_macos_dependency rsync rsync
+		# SSH server — enable Remote Login for management server terminal access.
+		if ! sudo systemsetup -getremotelogin 2>/dev/null | grep -qi "on"; then
+			echo "Enabling Remote Login (SSH)..."
+			sudo systemsetup -setremotelogin on
+			echo "SSH server enabled"
+		fi
+		# Ensure password authentication is enabled for SSH.
+		if grep -q "^PasswordAuthentication no" /etc/ssh/sshd_config 2>/dev/null; then
+			sudo sed -i '' 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+			sudo launchctl stop com.openssh.sshd 2>/dev/null || true
+			sudo launchctl start com.openssh.sshd 2>/dev/null || true
+			echo "SSH password authentication enabled"
+		fi
 		sudo mkdir -p "$CONFIG_DIR" "$JOBS_DIR" "$LOGS_DIR" "$STATE_DIR"
 		# Give the current user ownership so the CLI can write jobs and config
 		# without requiring root at runtime.
