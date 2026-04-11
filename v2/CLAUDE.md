@@ -13,7 +13,7 @@ rsync), runs them, logs results, and will eventually report to a central managem
 V2 is a clean rewrite of a v1 shell-script-based tool. The goal is durability, safety, and
 operator-friendliness over cleverness.
 
-**Version:** v2.1.100
+**Version:** v2.1.112
 **Module:** `github.com/lssolutions-ie/lss-backup-cli/v2`
 **Go version:** 1.25.0
 
@@ -71,6 +71,8 @@ v2/
 │   ├── legacyimport/              Parses v1 {BKID}-Configuration.env → v2 types
 │   ├── uninstall/                 Zip backup + safe file removal + dep cleanup
 │   └── updatecheck/               GitHub release check + download + replace binary (retry for CDN lag)
+│       └── restic.go              Restic version check + platform-specific upgrade (GitHub binary / brew / winget)
+├── .github/workflows/release.yml  CI: builds linux/darwin/windows × amd64/arm64 binaries on v2.* tag push
 ├── jobs/                          Created by installer, holds job directories
 └── state/                         Created by installer, daemon.log lives here
 ```
@@ -205,7 +207,7 @@ Used by `ListSnapshots()` — populated from `restic snapshots --json`.
 |------|----------|-----------|----------|
 | `activity.log` | `{logsDir}/` | 10,000 lines → trims to 8,000 | All activity: menu selections, runs, edits, imports, exports, daemon events |
 | `audit-events.log` | `{logsDir}/` | **8 years** | `[AUDIT]` entries only — job created/deleted/modified with OS username |
-| `daemon.log` | `{stateDir}/` | 5,000 lines → trims to 4,000 (on startup, Windows only) | Daemon process output |
+| `daemon.log` | `{stateDir}/` | 5,000 lines → trims to 4,000 (on startup, all platforms) | Daemon process output |
 | `{job}/audit.log` | Per-job dir | Unbounded (low volume) | Per-job user actions with timestamp, action, detail |
 | `{job}/logs/*.log` | Per-job logs | Last 30 files | Full restic/rsync output per backup run |
 | `{job}/logs/restore/*.log` | Per-job restore | Last 10 files | Full output per restore run |
@@ -243,8 +245,11 @@ Registry pattern: `NewRegistry()` → `map[string]Engine{"restic": ..., "rsync":
 - Passes secrets via env: `RESTIC_PASSWORD`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
 - Exit code 3 (some files unreadable) treated as warning, not failure
 - Retention: runs `restic forget --prune` after backup if retention mode is not "none"
-- Restore: `restic -r {dest} restore {snapshotID} --target {target}` (snapshot picker in UI)
+- Restore: `restic -r {dest} restore {snapshotID} --target {target}` followed by `flattenResticRestore`
+  to move contents of the nested absolute source path up to the target root (restic always recreates
+  the full absolute path under the target directory)
 - `ListSnapshots`: runs `restic snapshots --json`, returns `[]Snapshot`
+- `InstalledResticVersion() string`: runs `restic version`, parses version string
 
 ### RsyncEngine
 
@@ -254,6 +259,7 @@ Registry pattern: `NewRegistry()` → `map[string]Engine{"restic": ..., "rsync":
 - Exit code 24 (source files vanished during transfer) treated as success
 - Restore: `rsync -a {destination}/ {target}/`
 - `ListSnapshots`: returns nil (rsync has no snapshot history)
+- `InstalledRsyncVersion() string`: runs `rsync --version`, parses first line
 
 ---
 
@@ -277,10 +283,10 @@ Main menu shows a `●` daemon status dot (green = running, yellow = stopped) di
 2. **Manage Backup** — numbered table (ID, Program, Name, Last Run with coloured ● dot, Next Run) doubles as selector. Per-job submenu shows ID/Program/Source/Destination/Last Run/Next Run in header, then:
    - Run Backup Now
    - Restore Backup (snapshot picker with date filter: Today / This Week / This Month / This Year / Custom DD-MM-YYYY)
-   - List Snapshots (formatted table: ID, time, host, paths)
+   - List Snapshots (**restic only** — hidden for rsync jobs)
    - Edit Backup
    - Configure Schedule
-   - Configure Retention
+   - Configure Retention (**restic only** — hidden for rsync jobs)
    - Configure Notifications
    - Show Job Configuration
    - Validate Job
@@ -290,7 +296,7 @@ Main menu shows a `●` daemon status dot (green = running, yellow = stopped) di
 3. **Import Backup** — v2 job.toml or v1 {BKID}-Configuration.env
 4. **Settings** — Manage Notification Channels (stub) / Backup Config (stub) / Management Console (stub) / Restart Daemon / Check For Updates
 5. **Audit Log** — submenu: System Audit Events / Activity Log / Daemon Log / Job Run Logs (pick job → pick file → view)
-6. **About** — version, platform, paths, install manifest, daemon status (green/red)
+6. **About** — version, platform, paths, install manifest, daemon status (green/red), installed tool versions (restic, rsync)
 7. **Exit**
 
 **Menu number alignment:** `ui.Prompter.Select` uses `%*d` (right-aligned to width of max item number) so single-digit items align with double-digit items across all menus.
@@ -310,10 +316,27 @@ A guided wizard with validation prevents bad configs reaching production.
 
 1. User selects "Restore Backup" from Manage Backup
 2. Prompted for restore target directory
-3. For rsync: restores directly (no snapshot history)
+3. For rsync: restores directly (no snapshot history) into `{target}/{job-id}/latest/`
 4. For restic: date filter menu (Today / This Week / This Month / This Year / Custom), then numbered
    snapshot list newest-first → user picks → `restic restore {snapshotID} --target {dir}`
-5. Restore log written to `{job}/logs/restore/{timestamp}.log`
+5. Restore target layout: `{user-target}/{job-id}/{DD-MM-YYYY}--{snapshotID}/`
+   - rsync uses `"latest"` as the snapshot dir since there's no snapshot ID
+   - restic snapshot date comes from `snap.Time` carried through from `promptSnapshotPicker`
+6. After restic restore: `flattenResticRestore` moves contents of the nested absolute-path
+   subdirectory up to the target root and removes the intermediate directories
+7. Restore log written to `{job}/logs/restore/{timestamp}.log`
+
+### Restic path flattening
+
+Restic always recreates the full absolute source path under the restore target
+(e.g. source `/home/data` → restore lands at `{target}/home/data/`). After a
+successful restore, `flattenResticRestore(target, sourcePath, output)`:
+- Locates `{target}/{sourcePath-without-leading-slash}/`
+- Moves each entry one level at a time up to `{target}/`
+- Calls `os.RemoveAll(dst)` before each `os.Rename` so re-restoring the same
+  snapshot doesn't fail on existing destination entries
+- Removes the top-level intermediate directory on success
+- Prints the data location if any move fails (data is intact, just not flattened)
 
 ---
 
@@ -368,11 +391,17 @@ not by OS-level cron or Task Scheduler entries.
 | macOS    | launchd plist installed by `install-cli.sh`              |
 | Windows  | Task Scheduler task at startup via installer             |
 
+### Daemon log file
+
+`daemon.log` is written on **all platforms** (not just Windows):
+- **Windows:** file only — no console after `FreeConsole()`
+- **Linux/macOS:** `io.MultiWriter(os.Stdout, f)` — systemd journal / launchd still receive output,
+  and the file exists for the CLI Daemon Log viewer
+- Trimmed to 4,000 lines (max 5,000) on each startup
+
 ### Windows daemon specifics
 
 - Detaches from console to avoid CTRL_CLOSE_EVENT killing the process
-- Logs to `{stateDir}/daemon.log` (no console after detach)
-- `daemon.log` trimmed to 4,000 lines (max 5,000) on each startup
 - Restart from Settings menu: stops via Task Scheduler + process kill, starts via Task Scheduler,
   falls back to direct detached process launch if Task Scheduler start fails
 - `IsRunning()`: checks Task Scheduler status AND running process list (handles direct-launch fallback)
@@ -431,21 +460,31 @@ not by OS-level cron or Task Scheduler entries.
 - Last run status shown in job list
 - V1 legacy import / V2 export + import
 - Update check + in-place binary replacement (retry loop for GitHub CDN lag)
-- Non-interactive `--update` flag
+- Non-interactive `--update` flag; also checks and upgrades restic to latest
+- Restic auto-update: `updatecheck.CheckRestic()` / `UpdateRestic()` — GitHub binary on Linux,
+  brew on macOS, winget on Windows; called from Check For Updates and `--update`
+- Installer (`install-cli.sh`) also ensures restic is current: upgrades if already installed,
+  otherwise downloads latest binary from GitHub releases
 - Uninstall (with optional zip backup)
 - Cross-platform path handling
 - Password masking in prompts
 - Cron expression validation + English description
 - Daemon: scheduled runs, config reload, graceful shutdown, Windows Task Scheduler integration
-- Healthchecks.io: start/success/fail pings per job
-- Snapshot picker for restore (date-filtered, numbered list)
+- Daemon log written to file on all platforms (Linux/macOS: MultiWriter to stdout + file)
+- Healthchecks.io: start/success/fail pings per job (both restic and rsync)
+- Snapshot picker for restore (date-filtered, numbered list; carries full Snapshot struct for date)
+- Restore target: `{user-target}/{job-id}/{DD-MM-YYYY}--{snapshotID}/`; restic output flattened
 - Per-job audit log (`{jobDir}/audit.log`)
 - System audit events log (`audit-events.log`, 8-year retention)
 - Activity log with retention (10k lines cap)
 - Log browser: main menu Audit Log (system audit events / activity / daemon / job run logs)
 - Log browser: per-job Audit Log (user actions / backup logs / restore logs)
-- Daemon status in About (green/red)
+- Daemon status in About (green/red); installed tool versions (restic, rsync) shown in About
 - `windows/arm64` build target
+- GitHub Actions CI: builds and attaches binaries for all 6 platform/arch combos on every `v2.*` tag
+- Per-job menu is dynamically built: "List Snapshots" and "Configure Retention" hidden for rsync jobs
+- Linux sudo permission warning shown when source path is inaccessible due to permissions
+- Runner stdout wrapped in `lineIndentWriter` with terminal-width word-wrap (capped at 160)
 
 ### Fully stubbed (menu exists, no implementation)
 
@@ -493,7 +532,8 @@ Two distinct display modes are used, depending on whether the log has timestamps
 - **All dates displayed as DD-MM-YYYY** everywhere — display, log storage, filenames, snapshot picker, custom date input.
 - **Secrets passed via env**, never command-line args (visible in ps output).
 - **Engine output:** piped to both stdout and a log file via `io.MultiWriter`.
-  Stdout is wrapped in `lineIndentWriter` (2-space prefix); log file gets raw output.
+  Stdout is wrapped in `lineIndentWriter` (2-space prefix, word-wrap at terminal width capped at 160);
+  log file gets raw output (no wrapping).
 - **Exit codes from backup tools:** restic 3 and rsync 24 treated as success — documented above.
 - **DayOfMonth capped at 28** — prevents skipping February on monthly schedules.
 - **`bestEffortWriter`** wraps os.Stdout so write errors (no console on Windows daemon) never
@@ -528,4 +568,4 @@ Two distinct display modes are used, depending on whether the log has timestamps
 
 ---
 
-_Last updated: 2026-04-10 (v2.1.100)_
+_Last updated: 2026-04-11 (v2.1.112)_
