@@ -8,10 +8,17 @@ import (
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/schedule"
 )
 
+// Report types sent in the payload so the server can distinguish them.
+const (
+	ReportTypeHeartbeat = "heartbeat" // periodic 5-minute tick
+	ReportTypePostRun   = "post_run"  // immediately after a job runs
+)
+
 // NodeStatus is the full snapshot of this node's backup state sent to the
 // management server on every report.
 type NodeStatus struct {
 	PayloadVersion string      `json:"payload_version"`
+	ReportType     string      `json:"report_type"` // "heartbeat" or "post_run"
 	NodeName       string      `json:"node_name"`
 	ReportedAt     time.Time   `json:"reported_at"`
 	Jobs           []JobStatus `json:"jobs"`

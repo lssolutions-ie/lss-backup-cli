@@ -113,7 +113,7 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}) error 
 
 		case <-heartbeatTicker.C:
 			log.Println("Heartbeat tick")
-			fireReport(paths, scheduled)
+			fireReport(paths, scheduled, reporting.ReportTypeHeartbeat)
 
 		case <-reloadTicker.C:
 			if timer != nil {
@@ -154,7 +154,7 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}) error 
 			}
 
 			// Report after every scheduled run regardless of outcome.
-			fireReport(paths, scheduled)
+			fireReport(paths, scheduled, reporting.ReportTypePostRun)
 		}
 	}
 }
@@ -295,7 +295,7 @@ func writeNextRun(job config.Job, next time.Time) {
 // fireReport sends the current node status to the management server.
 // It reads AppConfig fresh each time so settings changes apply without a
 // daemon restart. It is always fire-and-forget.
-func fireReport(paths app.Paths, scheduled []scheduledJob) {
+func fireReport(paths app.Paths, scheduled []scheduledJob, reportType string) {
 	appCfg, err := config.LoadAppConfig(paths.RootDir)
 	if err != nil {
 		log.Printf("Report: config load error: %v", err)
@@ -329,6 +329,7 @@ func fireReport(paths app.Paths, scheduled []scheduledJob) {
 	}
 
 	status := reporting.BuildNodeStatus(nodeName, allJobs, nextRunByID)
+	status.ReportType = reportType
 	reporter := reporting.NewReporter(appCfg, paths.RootDir, paths.LogsDir)
 	reporter.Report(status)
 }
