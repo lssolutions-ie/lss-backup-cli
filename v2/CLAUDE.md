@@ -13,7 +13,7 @@ rsync), runs them, logs results, and reports to a central management server.
 V2 is a clean rewrite of a v1 shell-script-based tool. The goal is durability, safety, and
 operator-friendliness over cleverness.
 
-**Version:** v2.1.129
+**Version:** v2.1.135
 **Module:** `github.com/lssolutions-ie/lss-backup-cli/v2`
 **Go version:** 1.25.0
 
@@ -504,6 +504,13 @@ not by OS-level cron or Task Scheduler entries.
 - Report type field: "heartbeat" (5-min tick) vs "post_run" (after job run)
 - Clock drift hint on 400 responses from management server
 - End-to-end tested: Linux, macOS, Windows nodes reporting to live server
+- SSH credentials: auto-created OS user (lss_* prefix, sudo/admin), encrypted storage with operator password
+- Settings → SSH Details: view/reset credentials, --setup-ssh flag for install scripts
+- Reverse SSH tunnel over WebSocket: wss://<server>/ws/ssh-tunnel with HMAC-SHA256 auth
+- Per-node ed25519 key pair generated and stored in state dir, public key sent in heartbeat
+- Tunnel auto-reconnects on disconnect, reports port/connected status in heartbeat
+- Install scripts set up SSH server on all platforms (openssh-server, Remote Login, OpenSSH capability)
+- gorilla/websocket + golang.org/x/crypto/ssh dependencies added
 
 ### Fully stubbed (menu exists, no implementation)
 
@@ -584,4 +591,4 @@ Two distinct display modes are used, depending on whether the log has timestamps
 
 ---
 
-_Last updated: 2026-04-11 (v2.1.129)_
+_Last updated: 2026-04-12 (v2.1.135)_
