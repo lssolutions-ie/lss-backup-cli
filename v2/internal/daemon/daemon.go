@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -37,15 +38,17 @@ func Run(paths app.Paths) error {
 
 	log.SetFlags(log.Ldate | log.Ltime)
 
-	// On Windows the process has no console after FreeConsole(), so log output
-	// would be lost. Write to a file instead so the daemon's activity is visible.
-	if runtime.GOOS == "windows" {
-		logPath := filepath.Join(paths.StateDir, "daemon.log")
-		logcleanup.TrimFileLines(logPath, 5000, 4000)
-		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-		if err == nil {
+	// Windows: no console after FreeConsole() — write only to file.
+	// Linux/macOS: write to both stdout (systemd journal / launchd) AND the file
+	// so the Daemon Log viewer in the CLI has something to show.
+	logPath := filepath.Join(paths.StateDir, "daemon.log")
+	logcleanup.TrimFileLines(logPath, 5000, 4000)
+	if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
+		// f intentionally not closed — stays open for the daemon's lifetime.
+		if runtime.GOOS == "windows" {
 			log.SetOutput(f)
-			// f intentionally not closed — stays open for the daemon's lifetime.
+		} else {
+			log.SetOutput(io.MultiWriter(os.Stdout, f))
 		}
 	}
 
