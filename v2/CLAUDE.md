@@ -8,12 +8,12 @@ why decisions were made, and what's next. Keep it up to date as the project evol
 ## What This Project Is
 
 A CLI backup management tool for small/medium operators. It manages backup jobs (restic or
-rsync), runs them, logs results, and will eventually report to a central management server.
+rsync), runs them, logs results, and reports to a central management server.
 
 V2 is a clean rewrite of a v1 shell-script-based tool. The goal is durability, safety, and
 operator-friendliness over cleverness.
 
-**Version:** v2.1.112
+**Version:** v2.1.120
 **Module:** `github.com/lssolutions-ie/lss-backup-cli/v2`
 **Go version:** 1.25.0
 
@@ -435,12 +435,12 @@ not by OS-level cron or Task Scheduler entries.
 | M3        | Implement Job Persistence     | Done        |
 | M4        | First Working Backup Engine   | Done        |
 | M5        | Scheduling                    | Done        |
-| M6        | Notifications And Monitoring  | Done — healthchecks.io (start/success/fail pings, default domain cron.lssolutions.ie) |
-| M7        | Management Server Integration | Not started |
+| M6        | Notifications And Monitoring  | Done — healthchecks.io, Reporter interface, HTTPReporter |
+| M7        | Management Server Integration | Done — PSK/AES-256-GCM encryption, NodeStatus reporting, Settings wizard |
 | M8        | Retention And Cleanup         | Done — keep-last, keep-within, tiered, forget --prune after backup |
 | M9        | Add Rsync Support             | Done        |
 | M10       | Network Sources/Destinations  | Not started |
-| M11       | Migration From V1             | Partial — import works; migration report not done |
+| M11       | Migration From V1             | Done — tested against 10 production v1 configs |
 | M12       | Safety Hardening              | Not started |
 | M13       | Release Readiness             | Not started |
 
@@ -485,18 +485,20 @@ not by OS-level cron or Task Scheduler entries.
 - Per-job menu is dynamically built: "List Snapshots" and "Configure Retention" hidden for rsync jobs
 - Linux sudo permission warning shown when source path is inaccessible due to permissions
 - Runner stdout wrapped in `lineIndentWriter` with terminal-width word-wrap (capped at 160)
+- Management server reporter: PSK/AES-256-GCM encryption, fire-and-forget, heartbeat + post-run
+- AppConfig with `[reporting]` section in `{RootDir}/config.toml`
+- Configure Management Console wizard in Settings menu
+- V1 import: retention (YES-LAST/YES-FULL/tiered), healthchecks, rsync mode, SMB/NFS/S3 warnings
+- V1 import tested against 10 real production configs
 
 ### Fully stubbed (menu exists, no implementation)
 
 - Manage Notification Channels
 - Backup LSS Backup Configuration
-- Configure Management Console
 
 ### Planned but not started
 
 - Network destinations: SMB, NFS, S3
-- HTTPReporter → management server (M7)
-- Migration report (M11)
 
 ---
 
@@ -568,4 +570,4 @@ Two distinct display modes are used, depending on whether the log has timestamps
 
 ---
 
-_Last updated: 2026-04-11 (v2.1.112)_
+_Last updated: 2026-04-11 (v2.1.120)_

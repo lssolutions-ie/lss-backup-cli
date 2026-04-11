@@ -26,7 +26,7 @@ Guiding Principles
 - Reporting must never fail or block a backup job.
 
 
-Current Version: v2.1.118
+Current Version: v2.1.120
 Current State: All three platforms (macOS, Linux, Windows) tested and working.
                CI builds and attaches binaries for all 6 platform/arch combos
                on every v2.* tag push. In-app updater downloads pre-built
@@ -230,14 +230,21 @@ Note: S3 is easier than SMB/NFS since restic handles it natively via env vars.
 
 Milestone M11: Migration From V1
 ---------------------------------
-Status: PARTIAL — import works; migration report not done
+Status: COMPLETE
 
 Tasks:
 - [x] Import v1 *-Configuration.env format.
 - [x] Map v1 fields to v2 config.
 - [x] Detect unsupported combinations.
-- [ ] Generate a migration report per job (what mapped, what was skipped, what needs manual fix).
-- [ ] Document known v1 → v2 gaps.
+- [x] Per-job warnings during import (what mapped, what was skipped, what needs manual fix).
+- [x] Tested against 10 real production v1 configs covering all schedule modes,
+      both engines, SMB/NFS/S3, YES-LAST/YES-FULL retention, and healthchecks.
+
+Known v1 → v2 gaps (warned during import):
+- SMB/NFS source/destination types imported as local (mount paths preserved)
+- S3 destination imported as-is (works with restic but v2 has no S3-specific UI yet)
+- Email notifications not supported in v2 (warned)
+- v1 tiered retention durations converted to approximate counts (warned)
 
 
 Milestone M12: Safety Hardening
@@ -280,13 +287,12 @@ Suggested Release Cuts (revised)
 - M1–M9 complete
 - M6 complete (Reporter interface + healthchecks.io)
 - M7 complete (management server: PSK encryption, node status reporting)
-- M11 partial (import only)
+- M11 complete (v1 import tested against 10 production configs)
 - CI builds binaries for all platforms on tag push
 - In-app updater downloads pre-built binaries
 
 `v2.2.0`
 - M10 (network destinations: S3 first, then SMB/NFS)
-- M11 complete (migration report)
 
 `v2.3.0`
 - M12 (safety hardening pass)
@@ -299,5 +305,4 @@ Immediate Next Steps
 --------------------
 1. Build the management server that receives and stores node reports.
 2. M10 — network destinations (S3 is lowest friction, restic handles it natively).
-3. M11 — migration report (low effort, import already works).
-4. M12 — safety hardening (dry-run mode, structured error codes, secrets audit).
+3. M12 — safety hardening (dry-run mode, structured error codes, secrets audit).
