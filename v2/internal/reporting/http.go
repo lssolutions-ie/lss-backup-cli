@@ -43,7 +43,7 @@ type httpReporter struct {
 // NewReporter returns a NoOpReporter when reporting is disabled or not
 // fully configured, and an httpReporter when ready.
 func NewReporter(cfg config.AppConfig, rootDir, logsDir string) Reporter {
-	if !cfg.Enabled || cfg.ServerURL == "" || cfg.UserID == "" || len(cfg.PSKKey) != 128 {
+	if !cfg.Enabled || cfg.ServerURL == "" || cfg.NodeID == "" || len(cfg.PSKKey) != 128 {
 		return NoOpReporter{}
 	}
 	return &httpReporter{rootDir: rootDir, logsDir: logsDir}
@@ -58,13 +58,13 @@ func (r *httpReporter) Report(status NodeStatus) {
 func (r *httpReporter) send(status NodeStatus) {
 	// Re-read config fresh so any settings update is picked up immediately.
 	cfg, err := config.LoadAppConfig(r.rootDir)
-	if err != nil || !cfg.Enabled || cfg.ServerURL == "" || cfg.UserID == "" || len(cfg.PSKKey) != 128 {
+	if err != nil || !cfg.Enabled || cfg.ServerURL == "" || cfg.NodeID == "" || len(cfg.PSKKey) != 128 {
 		return
 	}
 
 	// Resolve node name: config field → hostname fallback.
-	if cfg.NodeName != "" {
-		status.NodeName = cfg.NodeName
+	if cfg.NodeHostname != "" {
+		status.NodeName = cfg.NodeHostname
 	} else if status.NodeName == "" {
 		status.NodeName, _ = os.Hostname()
 	}
@@ -81,7 +81,7 @@ func (r *httpReporter) send(status NodeStatus) {
 		return
 	}
 
-	env := envelope{V: "1", UID: cfg.UserID, Data: encrypted}
+	env := envelope{V: "1", UID: cfg.NodeID, Data: encrypted}
 	body, err := json.Marshal(env)
 	if err != nil {
 		r.warn("marshal envelope: " + err.Error())

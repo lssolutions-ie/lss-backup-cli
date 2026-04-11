@@ -311,7 +311,7 @@ func fireReport(paths app.Paths, scheduled []scheduledJob) {
 		nextRunByID[sj.job.ID] = sj.nextRun
 	}
 
-	nodeName := appCfg.NodeName
+	nodeName := appCfg.NodeHostname
 	if nodeName == "" {
 		nodeName, _ = os.Hostname()
 	}

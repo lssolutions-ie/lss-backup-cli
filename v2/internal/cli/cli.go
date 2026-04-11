@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	osuser "os/user"
 	"path/filepath"
@@ -383,12 +384,12 @@ func runAbout(paths app.Paths) {
 		if appCfg.Enabled {
 			ui.KeyValue("Reporting:", ui.Green("enabled"))
 			ui.KeyValue("Server:", appCfg.ServerURL)
-			ui.KeyValue("User ID:", appCfg.UserID)
-			nodeName := appCfg.NodeName
-			if nodeName == "" {
-				nodeName, _ = os.Hostname()
+			ui.KeyValue("Node ID:", appCfg.NodeID)
+			nodeHostname := appCfg.NodeHostname
+			if nodeHostname == "" {
+				nodeHostname, _ = os.Hostname()
 			}
-			ui.KeyValue("Node name:", nodeName)
+			ui.KeyValue("Node Hostname:", nodeHostname)
 		} else {
 			ui.KeyValue("Reporting:", ui.Red("disabled"))
 		}
@@ -1645,7 +1646,7 @@ func runJobByID(paths app.Paths, id string) error {
 	// Fire-and-forget report regardless of run outcome.
 	if appCfg, cfgErr := config.LoadAppConfig(paths.RootDir); cfgErr == nil && appCfg.Enabled {
 		if allJobs, loadErr := jobs.LoadAll(paths); loadErr == nil {
-			nodeName := appCfg.NodeName
+			nodeName := appCfg.NodeHostname
 			if nodeName == "" {
 				nodeName, _ = os.Hostname()
 			}
@@ -1669,12 +1670,12 @@ func runManagementConsoleWizard(paths app.Paths, prompter ui.Prompter) error {
 	if cfg.Enabled {
 		ui.StatusOK("Reporting is currently enabled.")
 		ui.KeyValue("  Server:", cfg.ServerURL)
-		ui.KeyValue("  User ID:", cfg.UserID)
-		nodeName := cfg.NodeName
-		if nodeName == "" {
-			nodeName, _ = os.Hostname()
+		ui.KeyValue("  Node ID:", cfg.NodeID)
+		nodeHostname := cfg.NodeHostname
+		if nodeHostname == "" {
+			nodeHostname, _ = os.Hostname()
 		}
-		ui.KeyValue("  Node name:", nodeName)
+		ui.KeyValue("  Node Hostname:", nodeHostname)
 	} else {
 		ui.StatusWarn("Reporting is currently disabled.")
 	}
@@ -1687,25 +1688,25 @@ func runManagementConsoleWizard(paths app.Paths, prompter ui.Prompter) error {
 	cfg.Enabled = enable
 
 	if enable {
-		serverURL, err := prompter.Ask("Server URL (e.g. https://manage.example.com)", validateNonEmpty("server URL"))
+		serverURL, err := prompter.Ask("Server URL (e.g. https://manage.example.com)", validateServerURL)
 		if err != nil {
 			return err
 		}
 		cfg.ServerURL = strings.TrimRight(serverURL, "/")
 
-		userID, err := prompter.Ask("User ID", validateNonEmpty("user ID"))
+		nodeID, err := prompter.Ask("Node ID (from server dashboard)", validateNodeID)
 		if err != nil {
 			return err
 		}
-		cfg.UserID = userID
+		cfg.NodeID = nodeID
 
 		hostname, _ := os.Hostname()
-		nodeNamePrompt := fmt.Sprintf("Node name (Enter to use %q)", hostname)
-		nodeName, err := prompter.AskOptional(nodeNamePrompt)
+		hostnamePrompt := fmt.Sprintf("Node Hostname (Enter to use %q)", hostname)
+		nodeHostname, err := prompter.AskOptional(hostnamePrompt)
 		if err != nil {
 			return err
 		}
-		cfg.NodeName = nodeName
+		cfg.NodeHostname = nodeHostname
 
 		psk, err := prompter.Ask("PSK key (128 characters, paste from server)", validatePSKKey)
 		if err != nil {
@@ -1727,6 +1728,35 @@ func runManagementConsoleWizard(paths app.Paths, prompter ui.Prompter) error {
 		ui.StatusOK("Management console reporting disabled.")
 	}
 	pauseForEnter()
+	return nil
+}
+
+func validateServerURL(s string) error {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return fmt.Errorf("server URL cannot be empty")
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %v", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("server URL must start with http:// or https://")
+	}
+	if u.Host == "" {
+		return fmt.Errorf("server URL must include a hostname")
+	}
+	return nil
+}
+
+func validateNodeID(s string) error {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return fmt.Errorf("node ID cannot be empty")
+	}
+	if len(s) > 128 {
+		return fmt.Errorf("node ID must be 128 characters or less, got %d", len(s))
+	}
 	return nil
 }
 

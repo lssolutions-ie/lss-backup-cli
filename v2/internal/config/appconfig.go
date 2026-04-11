@@ -14,8 +14,8 @@ import (
 type AppConfig struct {
 	Enabled   bool
 	ServerURL string
-	UserID    string
-	NodeName  string
+	NodeID    string
+	NodeHostname  string
 	PSKKey    string // 128 printable ASCII chars; never log this value
 }
 
@@ -59,8 +59,8 @@ func renderAppConfigTOML(cfg AppConfig) string {
 		sb.WriteString("enabled = false\n")
 	}
 	sb.WriteString(fmt.Sprintf("server_url = %s\n", strconv.Quote(cfg.ServerURL)))
-	sb.WriteString(fmt.Sprintf("user_id = %s\n", strconv.Quote(cfg.UserID)))
-	sb.WriteString(fmt.Sprintf("node_name = %s\n", strconv.Quote(cfg.NodeName)))
+	sb.WriteString(fmt.Sprintf("node_id = %s\n", strconv.Quote(cfg.NodeID)))
+	sb.WriteString(fmt.Sprintf("node_hostname = %s\n", strconv.Quote(cfg.NodeHostname)))
 	sb.WriteString(fmt.Sprintf("psk_key = %s\n", strconv.Quote(cfg.PSKKey)))
 	return sb.String()
 }
@@ -101,10 +101,10 @@ func parseAppConfigTOML(raw string) (AppConfig, error) {
 			cfg.Enabled = b
 		case "server_url":
 			cfg.ServerURL = parseString(value)
-		case "user_id":
-			cfg.UserID = parseString(value)
-		case "node_name":
-			cfg.NodeName = parseString(value)
+		case "node_id":
+			cfg.NodeID = parseString(value)
+		case "node_hostname":
+			cfg.NodeHostname = parseString(value)
 		case "psk_key":
 			cfg.PSKKey = parseString(value)
 		}
