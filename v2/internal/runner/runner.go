@@ -89,7 +89,7 @@ func (s Service) Run(job config.Job) (RunResult, error) {
 	return result, nil
 }
 
-func (s Service) Restore(job config.Job, snapshotID string, target string) error {
+func (s Service) Restore(job config.Job, snapshotID string, snapshotTime time.Time, target string) error {
 	if err := validateSupportedSlice(job); err != nil {
 		return err
 	}
@@ -105,11 +105,14 @@ func (s Service) Restore(job config.Job, snapshotID string, target string) error
 	}
 	defer closeLog()
 
-	// Restore into {target}/{job-id}/{snapshotID}/ so each restore is isolated.
-	// Using the snapshot ID means re-running the same restore is idempotent,
-	// while restoring a different snapshot never collides with a previous one.
-	// For rsync (snapshotID == "latest") we use "latest" as the subdirectory name.
-	actualTarget := filepath.Join(target, job.ID, snapshotID)
+	// Build a human-readable subdirectory: {DD-MM-YYYY}--{snapshotID}
+	// so the restore location is self-documenting.
+	// For rsync (no snapshots) snapshotTime is zero — fall back to just the ID.
+	snapDir := snapshotID
+	if !snapshotTime.IsZero() {
+		snapDir = snapshotTime.Local().Format("02-01-2006") + "--" + snapshotID
+	}
+	actualTarget := filepath.Join(target, job.ID, snapDir)
 
 	fmt.Fprintf(writer, "Starting restore for job %s (%s)\n", job.ID, engine.Name())
 	fmt.Fprintf(writer, "Snapshot: %s\n", snapshotID)

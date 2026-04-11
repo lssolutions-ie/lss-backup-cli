@@ -1628,18 +1628,18 @@ func runRestoreWizard(paths app.Paths, prompter ui.Prompter, id string) error {
 		fmt.Println()
 		ui.Divider()
 		fmt.Println()
-		err := service.Restore(job, "latest", target)
+		err := service.Restore(job, "latest", time.Time{}, target)
 		fmt.Println()
 		ui.Divider()
 		return err
 	}
 
 	// Ask for a date filter to narrow down the snapshot list.
-	snapshotID, err := promptSnapshotPicker(prompter, job)
+	snap, err := promptSnapshotPicker(prompter, job)
 	if err != nil {
 		return err
 	}
-	if snapshotID == "" {
+	if snap.ShortID == "" {
 		return errCancelled
 	}
 
@@ -1647,7 +1647,7 @@ func runRestoreWizard(paths app.Paths, prompter ui.Prompter, id string) error {
 	fmt.Println()
 	ui.Divider()
 	fmt.Println()
-	err = service.Restore(job, snapshotID, target)
+	err = service.Restore(job, snap.ShortID, snap.Time, target)
 	fmt.Println()
 	ui.Divider()
 	return err
@@ -1658,7 +1658,7 @@ type snapshotDateRange struct {
 	To   time.Time
 }
 
-func promptSnapshotPicker(prompter ui.Prompter, job config.Job) (string, error) {
+func promptSnapshotPicker(prompter ui.Prompter, job config.Job) (engines.Snapshot, error) {
 	_, filterChoice, err := prompter.Select("Filter snapshots by date", []string{
 		"Today",
 		"This Week",
@@ -1667,26 +1667,26 @@ func promptSnapshotPicker(prompter ui.Prompter, job config.Job) (string, error) 
 		"Custom Date (DD-MM-YYYY)",
 	})
 	if err != nil {
-		return "", err
+		return engines.Snapshot{}, err
 	}
 	if filterChoice == "" {
-		return "", nil
+		return engines.Snapshot{}, nil
 	}
 
 	dr, err := resolveSnapshotDateRange(filterChoice, prompter)
 	if err != nil {
-		return "", err
+		return engines.Snapshot{}, err
 	}
 
 	ui.Println2("Loading snapshots...")
 	registry := engines.NewRegistry()
 	engine, err := registry.Get(job.Program)
 	if err != nil {
-		return "", err
+		return engines.Snapshot{}, err
 	}
 	all, err := engine.ListSnapshots(job)
 	if err != nil {
-		return "", err
+		return engines.Snapshot{}, err
 	}
 
 	// Filter by date range.
@@ -1700,7 +1700,7 @@ func promptSnapshotPicker(prompter ui.Prompter, job config.Job) (string, error) 
 	if len(filtered) == 0 {
 		ui.StatusWarn("No snapshots found for the selected period.")
 		pauseForEnter()
-		return "", nil
+		return engines.Snapshot{}, nil
 	}
 
 	// Sort newest first.
@@ -1722,13 +1722,13 @@ func promptSnapshotPicker(prompter ui.Prompter, job config.Job) (string, error) 
 		options,
 	)
 	if err != nil {
-		return "", err
+		return engines.Snapshot{}, err
 	}
 	if idx == -1 {
-		return "", nil
+		return engines.Snapshot{}, nil
 	}
 
-	return filtered[idx].ShortID, nil
+	return filtered[idx], nil
 }
 
 func resolveSnapshotDateRange(choice string, prompter ui.Prompter) (snapshotDateRange, error) {
