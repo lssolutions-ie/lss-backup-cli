@@ -171,20 +171,30 @@ func runMenu(paths app.Paths) error {
 func runCheckForUpdates(paths app.Paths, prompter ui.Prompter) error {
 	ui.SectionHeader("Check For Updates")
 
+	// --- lss-backup-cli ---
 	result, err := updatecheck.Check()
 	if err != nil {
 		return err
 	}
-
 	if result.UpdateAvailable {
 		ui.StatusInfo(result.Message)
 	} else {
 		ui.StatusOK(result.Message)
 	}
-	if result.LatestVersion != "" {
-		ui.Println2("Latest: " + result.LatestVersion)
+
+	// --- restic ---
+	fmt.Println()
+	resticResult, resticErr := updatecheck.CheckRestic(engines.InstalledResticVersion())
+	if resticErr != nil {
+		ui.StatusWarn("Could not check restic version: " + resticErr.Error())
+	} else if resticResult.UpdateAvailable {
+		ui.StatusInfo(resticResult.Message)
+	} else {
+		ui.StatusOK(resticResult.Message)
 	}
-	if !result.UpdateAvailable {
+
+	anythingToUpdate := result.UpdateAvailable || (resticErr == nil && resticResult.UpdateAvailable)
+	if !anythingToUpdate {
 		fmt.Println()
 		ui.Println2("Press Enter to return to the menu...")
 		fmt.Scanln()
@@ -195,37 +205,51 @@ func runCheckForUpdates(paths app.Paths, prompter ui.Prompter) error {
 	ui.Println2("Updating does not remove existing backup jobs or configuration data.")
 	fmt.Println()
 
-	_, installChoice, err := prompter.Select("Would you like to install this update now?", []string{
-		"Yes, install update now",
+	_, installChoice, err := prompter.Select("Would you like to install available updates now?", []string{
+		"Yes, install updates now",
 		"No, return to main menu",
 	})
 	if err != nil {
 		return err
 	}
-	if installChoice != "Yes, install update now" {
+	if installChoice != "Yes, install updates now" {
 		return nil
 	}
 
-	ui.Println2("Downloading and installing update...")
-	if err := updatecheck.Install(result); err != nil {
+	cliUpdated := false
+	if result.UpdateAvailable {
+		ui.Println2("Downloading and installing lss-backup-cli " + result.LatestVersion + "...")
+		if err := updatecheck.Install(result); err != nil {
+			ui.StatusError(err.Error())
+		} else {
+			activitylog.Log(paths.LogsDir, fmt.Sprintf("update installed: %s", result.LatestVersion))
+			cliUpdated = true
+		}
+	}
+
+	if resticErr == nil && resticResult.UpdateAvailable {
+		ui.Println2("Updating restic...")
+		if err := updatecheck.UpdateRestic(os.Stdout); err != nil {
+			ui.StatusError("restic update failed: " + err.Error())
+		} else {
+			activitylog.Log(paths.LogsDir, fmt.Sprintf("restic updated to %s", resticResult.LatestVersion))
+			fmt.Println()
+			ui.StatusOK("restic updated to " + resticResult.LatestVersion)
+		}
+	}
+
+	fmt.Println()
+	if cliUpdated {
+		daemon.RestartService()
+		ui.StatusOK("lss-backup-cli updated to " + result.LatestVersion + ". Please restart.")
 		fmt.Println()
-		ui.StatusError(err.Error())
-		fmt.Println()
+		ui.Println2("Press Enter to exit...")
+		fmt.Scanln()
+		os.Exit(0)
+	} else {
 		ui.Println2("Press Enter to return to the menu...")
 		fmt.Scanln()
-		return nil
 	}
-
-	activitylog.Log(paths.LogsDir, fmt.Sprintf("update installed: %s", result.LatestVersion))
-	daemon.RestartService()
-	fmt.Println()
-	ui.StatusOK("Update installed successfully.")
-	fmt.Println()
-	ui.Println2("Please restart LSS Backup CLI to use the new version.")
-	fmt.Println()
-	ui.Println2("Press Enter to exit...")
-	fmt.Scanln()
-	os.Exit(0)
 	return nil
 }
 
@@ -240,27 +264,44 @@ func runUpdateCLI(paths app.Paths) error {
 		return err
 	}
 
-	if !result.UpdateAvailable {
+	if result.UpdateAvailable {
+		ui.StatusInfo(result.Message)
+		fmt.Println()
+		ui.Println2("Downloading and installing " + result.LatestVersion + "...")
+		if err := updatecheck.Install(result); err != nil {
+			return err
+		}
+		activitylog.Log(paths.LogsDir, fmt.Sprintf("update installed: %s", result.LatestVersion))
+		daemon.RestartService()
+		fmt.Println()
+		ui.StatusOK("lss-backup-cli updated to " + result.LatestVersion)
+		fmt.Println()
+	} else {
 		ui.StatusOK(result.Message)
 		fmt.Println()
-		return nil
 	}
 
-	ui.StatusWarn(result.Message)
-	fmt.Println()
-	fmt.Println("  Updating does not remove existing backup jobs or configuration data.")
-	fmt.Println()
-
-	ui.Println2("Downloading and installing " + result.LatestVersion + "...")
-	if err := updatecheck.Install(result); err != nil {
-		return err
+	// Also update restic.
+	resticResult, resticErr := updatecheck.CheckRestic(engines.InstalledResticVersion())
+	if resticErr != nil {
+		ui.StatusWarn("Could not check restic: " + resticErr.Error())
+	} else if resticResult.UpdateAvailable {
+		ui.StatusInfo(resticResult.Message)
+		fmt.Println()
+		ui.Println2("Updating restic...")
+		if err := updatecheck.UpdateRestic(os.Stdout); err != nil {
+			ui.StatusError("restic update failed: " + err.Error())
+		} else {
+			activitylog.Log(paths.LogsDir, fmt.Sprintf("restic updated to %s", resticResult.LatestVersion))
+			fmt.Println()
+			ui.StatusOK("restic updated to " + resticResult.LatestVersion)
+			fmt.Println()
+		}
+	} else {
+		ui.StatusOK(resticResult.Message)
+		fmt.Println()
 	}
 
-	activitylog.Log(paths.LogsDir, fmt.Sprintf("update installed: %s", result.LatestVersion))
-	daemon.RestartService()
-	fmt.Println()
-	ui.StatusOK("Update installed successfully.")
-	fmt.Println()
 	return nil
 }
 
@@ -273,6 +314,20 @@ func runAbout() {
 		ui.KeyValue("Daemon:", ui.Green("running"))
 	} else {
 		ui.KeyValue("Daemon:", ui.Red("not running"))
+	}
+
+	ui.SectionHeader("Installed Tools")
+	if v := engines.InstalledResticVersion(); v != "" {
+		ui.KeyValue("restic:", v)
+	} else {
+		ui.KeyValue("restic:", ui.Red("not found"))
+	}
+	if runtime.GOOS != "windows" {
+		if v := engines.InstalledRsyncVersion(); v != "" {
+			ui.KeyValue("rsync:", v)
+		} else {
+			ui.KeyValue("rsync:", ui.Red("not found"))
+		}
 	}
 
 	rp, err := platform.CurrentRuntimePaths()

@@ -11,6 +11,9 @@ GO_MIN_MINOR=22
 # Fallback Go version downloaded from go.dev when the system package is too old.
 GO_FALLBACK_VERSION="1.22.5"
 
+# Minimum restic minor version required for --strip-components restore support.
+RESTIC_MIN_MINOR=17
+
 require_command() {
 	command -v "$1" >/dev/null 2>&1 || {
 		echo "Required command not found: $1" >&2
@@ -119,6 +122,62 @@ ensure_linux_dependency() {
 	append_dep "$cmd_name" "apt" "$package_id" false true
 }
 
+# Returns 0 if the installed restic meets RESTIC_MIN_MINOR, 1 otherwise.
+restic_meets_minimum() {
+	command -v restic >/dev/null 2>&1 || return 1
+	_ver=$(restic version 2>/dev/null | awk '{print $2}')
+	_minor=$(echo "$_ver" | cut -d. -f2)
+	[ "${_minor:-0}" -ge "$RESTIC_MIN_MINOR" ]
+}
+
+# Downloads and installs the latest restic binary from GitHub releases.
+install_restic_binary() {
+	_arch=$(uname -m)
+	case "$_arch" in
+		x86_64)  _resticarch="amd64" ;;
+		aarch64) _resticarch="arm64" ;;
+		*)
+			echo "Unsupported architecture for restic binary install: $_arch" >&2
+			exit 1
+			;;
+	esac
+
+	_os="linux"
+	if [ "$OS_NAME" = "Darwin" ]; then
+		_os="darwin"
+	fi
+
+	echo "Fetching latest restic version from GitHub..."
+	if command -v curl >/dev/null 2>&1; then
+		_latest=$(curl -fsSL "https://api.github.com/repos/restic/restic/releases/latest" | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+	elif command -v wget >/dev/null 2>&1; then
+		_latest=$(wget -qO- "https://api.github.com/repos/restic/restic/releases/latest" | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+	else
+		echo "Neither curl nor wget found; cannot download restic." >&2
+		exit 1
+	fi
+
+	if [ -z "$_latest" ]; then
+		echo "Could not determine latest restic version." >&2
+		exit 1
+	fi
+
+	echo "Installing restic ${_latest} (${_resticarch})..."
+	_url="https://github.com/restic/restic/releases/download/v${_latest}/restic_${_latest}_${_os}_${_resticarch}.bz2"
+	_tmp="/tmp/restic_${_latest}.bz2"
+
+	if command -v curl >/dev/null 2>&1; then
+		curl -fsSL "$_url" -o "$_tmp"
+	else
+		wget -q "$_url" -O "$_tmp"
+	fi
+
+	sudo bunzip2 -c "$_tmp" > /tmp/restic_bin
+	rm -f "$_tmp"
+	sudo install -m 755 /tmp/restic_bin /usr/local/bin/restic
+	rm -f /tmp/restic_bin
+}
+
 ensure_brew() {
 	if command -v brew >/dev/null 2>&1; then
 		append_dep "brew" "brew-bootstrap" "homebrew" true false
@@ -152,7 +211,14 @@ case "$OS_NAME" in
 		STATE_DIR="/var/lib/lss-backup"
 		MANIFEST_PATH="${STATE_DIR}/install-manifest.json"
 		ensure_linux_go
-		ensure_linux_dependency restic restic
+		# restic: install latest binary from GitHub if not present or version is too old.
+		if restic_meets_minimum; then
+			echo "restic $(restic version 2>/dev/null | awk '{print $2}') already meets minimum — skipping upgrade."
+			append_dep "restic" "github-release" "restic/restic" true false
+		else
+			install_restic_binary
+			append_dep "restic" "github-release" "restic/restic" false true
+		fi
 		ensure_linux_dependency rsync rsync
 		ensure_linux_dependency zip zip
 		sudo mkdir -p "$CONFIG_DIR" "$JOBS_DIR" "$LOGS_DIR" "$STATE_DIR"
@@ -170,7 +236,15 @@ case "$OS_NAME" in
 		MANIFEST_PATH="${STATE_DIR}/install-manifest.json"
 		ensure_brew
 		ensure_macos_dependency go go
-		ensure_macos_dependency restic restic
+		# restic: install or upgrade to latest via Homebrew.
+		if command -v restic >/dev/null 2>&1; then
+			echo "Upgrading restic to latest via Homebrew..."
+			brew upgrade restic 2>/dev/null || true
+			append_dep "restic" "brew" "restic" true false
+		else
+			brew install restic
+			append_dep "restic" "brew" "restic" false true
+		fi
 		ensure_macos_dependency rsync rsync
 		sudo mkdir -p "$CONFIG_DIR" "$JOBS_DIR" "$LOGS_DIR" "$STATE_DIR"
 		# Give the current user ownership so the CLI can write jobs and config

@@ -183,19 +183,57 @@ func (e ResticEngine) Restore(job config.Job, snapshotID string, target string, 
 	return nil
 }
 
-// resticVersionMinor runs "restic version" and returns the major and minor version
-// numbers. Returns 0, 0 on any parse failure (treated as unknown/old).
-// Output format: "restic 0.17.3 compiled with go1.23.4 on linux/amd64"
-func resticVersionMinor(bin string) (major, minor int) {
+// InstalledResticVersion returns the installed restic version string (e.g. "0.17.3"),
+// or an empty string if restic is not found or the version cannot be parsed.
+func InstalledResticVersion() string {
+	bin, err := lookPath("restic")
+	if err != nil {
+		return ""
+	}
 	out, err := exec.Command(bin, "version").Output()
 	if err != nil {
-		return 0, 0
+		return ""
 	}
+	// "restic 0.17.3 compiled with go1.23.4 on linux/amd64"
 	fields := strings.Fields(string(out))
-	if len(fields) < 2 {
+	if len(fields) >= 2 {
+		return fields[1]
+	}
+	return ""
+}
+
+// InstalledRsyncVersion returns the installed rsync version string (e.g. "3.2.7"),
+// or an empty string if rsync is not found.
+func InstalledRsyncVersion() string {
+	bin, err := lookPath("rsync")
+	if err != nil {
+		return ""
+	}
+	out, err := exec.Command(bin, "--version").Output()
+	if err != nil {
+		return ""
+	}
+	// First line: "rsync  version 3.2.7  protocol version 31"
+	line := strings.SplitN(string(out), "\n", 2)[0]
+	for i, f := range strings.Fields(line) {
+		if f == "version" {
+			parts := strings.Fields(line)
+			if i+1 < len(parts) {
+				return parts[i+1]
+			}
+		}
+	}
+	return ""
+}
+
+// resticVersionMinor returns the major and minor version of the installed restic.
+// Returns 0, 0 on any parse failure (treated as unknown/old).
+func resticVersionMinor(bin string) (major, minor int) {
+	v := InstalledResticVersion()
+	if v == "" {
 		return 0, 0
 	}
-	parts := strings.Split(fields[1], ".")
+	parts := strings.Split(v, ".")
 	if len(parts) < 2 {
 		return 0, 0
 	}
