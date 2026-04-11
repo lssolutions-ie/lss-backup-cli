@@ -105,9 +105,11 @@ func (s Service) Restore(job config.Job, snapshotID string, target string) error
 	}
 	defer closeLog()
 
-	// Append the job ID as a subdirectory so the restore is self-contained and
-	// never overwrites an existing tree at the user-supplied base directory.
-	actualTarget := filepath.Join(target, job.ID)
+	// Restore into {target}/{job-id}/{snapshotID}/ so each restore is isolated.
+	// Using the snapshot ID means re-running the same restore is idempotent,
+	// while restoring a different snapshot never collides with a previous one.
+	// For rsync (snapshotID == "latest") we use "latest" as the subdirectory name.
+	actualTarget := filepath.Join(target, job.ID, snapshotID)
 
 	fmt.Fprintf(writer, "Starting restore for job %s (%s)\n", job.ID, engine.Name())
 	fmt.Fprintf(writer, "Snapshot: %s\n", snapshotID)

@@ -164,56 +164,72 @@ func (e ResticEngine) Restore(job config.Job, snapshotID string, target string, 
 	}
 
 	// Restic recreates the full absolute source path under the target.
-	// Flatten it by moving the contents of the nested directory up to the
-	// target root and removing the empty intermediate directories.
-	if err := flattenResticRestore(target, job.Source.Path, output); err != nil {
-		fmt.Fprintf(output, "Warning: could not flatten restore path: %v\n", err)
-	}
+	// Flatten it so files land directly in target.
+	flattenResticRestore(target, job.Source.Path, output)
 
 	return nil
 }
 
-// flattenResticRestore moves the contents of the nested source path that restic
-// created under target up to the target root, then removes the empty
+// flattenResticRestore moves the contents of the nested source directory that
+// restic created under target up to the target root, then removes the empty
 // intermediate directories. Only operates on Unix absolute paths.
-// e.g. target=/restore/1, sourcePath=/home/data →
 //
-//	restic creates: /restore/1/home/data/
-//	after flatten:  /restore/1/ contains the files directly
-func flattenResticRestore(target string, sourcePath string, output io.Writer) error {
+// e.g. target=/restore/1/abc123, sourcePath=/home/data:
+//
+//	restic creates: /restore/1/abc123/home/data/{files}
+//	after flatten:  /restore/1/abc123/{files}
+//
+// Re-run safety: if the destination already exists (same snapshot restored
+// twice), os.Rename atomically replaces files and, for directories, we
+// remove the old destination first so the rename always succeeds.
+// On any failure the data is intact at nestedDir and the location is printed.
+func flattenResticRestore(target string, sourcePath string, output io.Writer) {
 	if !strings.HasPrefix(sourcePath, "/") {
-		return nil // Windows drive-letter paths — leave as-is
+		return // Windows drive-letter paths — leave as-is
 	}
 
-	// Path where restic placed the files.
 	nestedDir := filepath.Join(target, strings.TrimPrefix(sourcePath, "/"))
-
 	info, err := os.Stat(nestedDir)
 	if err != nil || !info.IsDir() {
-		return nil // nothing to flatten
+		return // nothing to flatten
 	}
 
 	entries, err := os.ReadDir(nestedDir)
 	if err != nil {
-		return fmt.Errorf("read nested restore dir: %w", err)
+		fmt.Fprintf(output, "  Note: data is at: %s\n", nestedDir)
+		return
 	}
 
+	failed := false
 	for _, entry := range entries {
 		src := filepath.Join(nestedDir, entry.Name())
 		dst := filepath.Join(target, entry.Name())
+
+		// For a re-run: remove existing destination so Rename always succeeds.
+		if _, statErr := os.Lstat(dst); statErr == nil {
+			if err := os.RemoveAll(dst); err != nil {
+				fmt.Fprintf(output, "  Note: could not overwrite %s — data is at: %s\n", entry.Name(), nestedDir)
+				failed = true
+				break
+			}
+		}
+
 		if err := os.Rename(src, dst); err != nil {
-			return fmt.Errorf("move %s: %w", entry.Name(), err)
+			fmt.Fprintf(output, "  Note: could not move %s — data is at: %s\n", entry.Name(), nestedDir)
+			failed = true
+			break
 		}
 	}
 
-	// Remove the now-empty top-level intermediate directory.
+	if failed {
+		return
+	}
+
+	// Remove the now-empty intermediate directory tree.
 	topComponent := strings.SplitN(strings.TrimPrefix(sourcePath, "/"), "/", 2)[0]
 	if topComponent != "" {
 		_ = os.RemoveAll(filepath.Join(target, topComponent))
 	}
-
-	fmt.Fprintf(output, "Restore flattened — data is at: %s\n", target)
-	return nil
 }
 
 // InstalledResticVersion returns the installed restic version string (e.g. "0.17.3"),
