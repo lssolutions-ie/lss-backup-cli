@@ -107,7 +107,11 @@ func (r *httpReporter) send(status NodeStatus) {
 	io.Copy(io.Discard, resp.Body) //nolint:errcheck
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		r.warn(fmt.Sprintf("server returned %s", resp.Status))
+		msg := fmt.Sprintf("server returned %s", resp.Status)
+		if resp.StatusCode == 400 {
+			msg += " — possible clock drift; verify system time is correct (NTP)"
+		}
+		r.warn(msg)
 	}
 }
 
