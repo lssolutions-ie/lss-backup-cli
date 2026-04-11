@@ -26,11 +26,12 @@ Guiding Principles
 - Reporting must never fail or block a backup job.
 
 
-Current Version: v2.1.117
+Current Version: v2.1.118
 Current State: All three platforms (macOS, Linux, Windows) tested and working.
                CI builds and attaches binaries for all 6 platform/arch combos
                on every v2.* tag push. In-app updater downloads pre-built
-               binaries. Daemon log viewer working on all platforms.
+               binaries. Management server reporter wired and shipping.
+               M6 complete. M7 complete.
 
 
 Milestone M1: Define The Foundation
@@ -107,75 +108,82 @@ Tasks:
 
 Milestone M6: Notifications And Monitoring
 ------------------------------------------
-Status: PARTIAL — healthchecks.io done; email and Reporter interface not started
+Status: COMPLETE
 
 What was built:
 - [x] Healthchecks.io pings: start, success, and failure per job.
 - [x] Configurable domain and check ID per job.
 - [x] Works for both restic and rsync jobs.
 - [x] Configure Notifications wizard in per-job menu.
+- [x] `Reporter` interface + `NoOpReporter` in `internal/reporting/`.
+- [x] `HTTPReporter` wired into daemon (heartbeat + post-run) and CLI (manual run).
 
-What was NOT built (design changed during implementation):
-- The formal Reporter interface / NoOpReporter was not introduced.
-  Healthchecks is called directly from runner.Run(). This works for now
-  but will need refactoring before M7 (management server) to avoid
-  duplicating the reporting call.
-
-Remaining tasks before M6 is fully done:
-- [ ] Add `Reporter` interface and `NoOpReporter` to `internal/reporting/`.
-- [ ] Wire reporter into `runner.Service` so all reporting paths go through
-      one interface (enables M7 without duplication).
-- [ ] Support failure-only vs always notification modes per job.
+Note: failure-only vs always notification modes per job is a minor future
+enhancement — not blocking any downstream milestone.
 
 
 Milestone M7: Management Server Integration
 -------------------------------------------
-Status: NOT STARTED
+Status: COMPLETE
 
-Design decisions locked in:
+Design decisions implemented:
 - App-level config lives at `{RootDir}/config.toml`, mode 0600.
-- Per-node token stored there; admin creates the token in the dashboard.
-- Authorization via `Authorization: Bearer {token}` header.
-- Payload always includes `payload_version: "1"` for forward compatibility.
+- Per-node PSK key (128 printable ASCII chars) used for AES-256-GCM encryption.
+- Payload encrypted: key = SHA-256(pskKey), 12-byte random nonce, base64(nonce+ciphertext+tag).
+- Outer HTTP envelope: `{"v":"1","uid":"<user_id>","data":"<base64(...)>"}`.
 - 15-second HTTP timeout; failure logged as warning only — never blocks backup.
-- No retry queue. Fire-and-forget.
-- Node name is user-configurable (not derived from hostname).
+- No retry queue. Fire-and-forget (goroutine).
+- Node name is user-configurable (defaults to hostname).
+- Config re-read from disk on every send — settings changes apply without daemon restart.
 
 Tasks:
-- [ ] Add `AppConfig` struct with a `[reporting]` section:
+- [x] `AppConfig` struct with `[reporting]` section:
         enabled     bool
         server_url  string
-        node_token  string
+        user_id     string
         node_name   string
-- [ ] Add load/save for `{RootDir}/config.toml`.
-- [ ] Add "Configure Management Console" to Settings menu (currently stubbed).
-- [ ] Implement `HTTPReporter` in `internal/reporting/`:
+        psk_key     string  // 128 printable ASCII chars; never logged
+- [x] Load/save for `{RootDir}/config.toml`.
+- [x] "Configure Management Console" wizard in Settings menu:
+        - Enable/disable toggle
+        - Server address
+        - User ID
+        - Node name
+        - PSK key (masked input, 128-char validation)
+        - Test connection (optional)
+- [x] `HTTPReporter` in `internal/reporting/http.go`:
         - POST to `{server_url}/api/v1/status`
-        - Auth: `Authorization: Bearer {node_token}`
-        - 15s timeout, log warning on failure
-- [ ] Lock the JSON payload shape:
+        - AES-256-GCM encrypted payload
+        - 15s timeout, fire-and-forget goroutine
+- [x] Payload shape (NodeStatus):
         {
           "payload_version": "1",
           "node_name":        string,
-          "job_id":           string,
-          "job_name":         string,
-          "program":          string,
-          "status":           "success" | "failure",
-          "started_at":       RFC3339 UTC,
-          "finished_at":      RFC3339 UTC,
-          "duration_seconds": int,
-          "error_message":    string
+          "reported_at":      RFC3339 UTC,
+          "jobs": [
+            {
+              "id":                       string,
+              "name":                     string,
+              "program":                  string,
+              "enabled":                  bool,
+              "last_status":              string,
+              "last_run_at":              RFC3339 UTC (omitempty),
+              "last_run_duration_seconds": int,
+              "last_error":               string (omitempty),
+              "next_run_at":              RFC3339 UTC (omitempty),
+              "schedule_description":     string
+            }
+          ]
         }
-- [ ] Wire app config into CLI startup; select NoOp or HTTP reporter.
-- [ ] Show reporting status in CLI header or About.
+- [x] Reporting wired in daemon: heartbeat every 5 minutes + after every scheduled run.
+- [x] Reporting wired in CLI: after every manual run.
+- [x] Reporting status shown in About screen.
 
 Deliverables:
-- [ ] `{RootDir}/config.toml` with reporting section
-- [ ] `HTTPReporter` implementation
-- [ ] "Configure Management Console" menu flow
-- [ ] locked payload schema (v1)
-
-Dependency: Refactor M6 Reporter interface first.
+- [x] `{RootDir}/config.toml` with reporting section
+- [x] `HTTPReporter` with PSK encryption
+- [x] "Configure Management Console" menu flow
+- [x] `BuildNodeStatus` reporting all jobs with last/next run
 
 
 Milestone M8: Retention And Cleanup
@@ -270,18 +278,17 @@ Suggested Release Cuts (revised)
 ---------------------------------
 `v2.1.x` (current — pre-release, three-platform tested)
 - M1–M9 complete
-- M6 partial (healthchecks only)
+- M6 complete (Reporter interface + healthchecks.io)
+- M7 complete (management server: PSK encryption, node status reporting)
 - M11 partial (import only)
 - CI builds binaries for all platforms on tag push
 - In-app updater downloads pre-built binaries
 
 `v2.2.0`
-- M6 complete (Reporter interface + email notifications)
-- M7 complete (management server integration)
+- M10 (network destinations: S3 first, then SMB/NFS)
 - M11 complete (migration report)
 
 `v2.3.0`
-- M10 (network destinations: S3 first, then SMB/NFS)
 - M12 (safety hardening pass)
 
 `v2.4.0 / v2.0.0-rc`
@@ -290,8 +297,7 @@ Suggested Release Cuts (revised)
 
 Immediate Next Steps
 --------------------
-1. Finish macOS testing checklist (restore, healthchecks, scheduled run).
-2. Refactor M6 Reporter interface as a prerequisite for M7.
-3. Begin M7 — management server integration.
-   Start with AppConfig + config.toml load/save, then HTTPReporter,
-   then wire the "Configure Management Console" menu stub.
+1. Build the management server that receives and stores node reports.
+2. M10 — network destinations (S3 is lowest friction, restic handles it natively).
+3. M11 — migration report (low effort, import already works).
+4. M12 — safety hardening (dry-run mode, structured error codes, secrets audit).
