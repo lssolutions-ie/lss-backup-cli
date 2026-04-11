@@ -683,7 +683,6 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			"Export Backup Job",
 			"Audit Log (By User)",
 			"Delete Backup",
-			"Back To Main Menu",
 		})
 		if err != nil {
 			return err
@@ -1115,9 +1114,8 @@ func runSystemLogBrowser(paths app.Paths, prompter ui.Prompter) {
 			"Activity Log",
 			"Daemon Log",
 			"Job Run Logs",
-			"Back",
 		})
-		if err != nil || choice == "Back" || choice == "" {
+		if err != nil || choice == "" {
 			return
 		}
 
@@ -1186,10 +1184,8 @@ func runJobRunLogBrowserGlobal(paths app.Paths, prompter ui.Prompter) {
 		byLabel[label] = j
 	}
 	sort.Strings(options)
-	options = append(options, "Back")
-
 	_, choice, err := prompter.Select("Select job", options)
-	if err != nil || choice == "Back" || choice == "" {
+	if err != nil || choice == "" {
 		return
 	}
 	runJobLogBrowser(paths, prompter, byLabel[choice])
@@ -1205,9 +1201,8 @@ func runJobLogBrowser(paths app.Paths, prompter ui.Prompter, job config.Job) {
 			"User Actions (Audit Log)",
 			"Backup Run Logs",
 			"Restore Logs",
-			"Back",
 		})
-		if err != nil || choice == "Back" || choice == "" {
+		if err != nil || choice == "" {
 			return
 		}
 
@@ -1275,10 +1270,8 @@ func pickAndViewLogFile(prompter ui.Prompter, dir string, label string) {
 	for _, m := range matches {
 		options = append(options, filepath.Base(m))
 	}
-	options = append(options, "Back")
-
 	_, choice, err := prompter.Select(fmt.Sprintf("Select %s log", label), options)
-	if err != nil || choice == "Back" || choice == "" {
+	if err != nil || choice == "" {
 		return
 	}
 
@@ -1911,13 +1904,11 @@ func selectJob(paths app.Paths, prompter ui.Prompter) (config.Job, error) {
 		lookup[label] = item.ID
 	}
 	sort.Strings(options)
-	options = append(options, "Back")
-
 	_, selected, err := prompter.Select("Select backup job", options)
 	if err != nil {
 		return config.Job{}, err
 	}
-	if selected == "Back" || selected == "" {
+	if selected == "" {
 		return config.Job{}, nil
 	}
 	return jobs.Load(paths, lookup[selected])
