@@ -17,12 +17,14 @@ import (
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/jobs"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/logcleanup"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/reporting"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/runner"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/schedule"
 	"github.com/robfig/cron/v3"
 )
 
 const reloadInterval = 60 * time.Second
+const reportInterval = 5 * time.Minute
 
 type scheduledJob struct {
 	job     config.Job
@@ -83,6 +85,9 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}) error 
 	reloadTicker := time.NewTicker(reloadInterval)
 	defer reloadTicker.Stop()
 
+	heartbeatTicker := time.NewTicker(reportInterval)
+	defer heartbeatTicker.Stop()
+
 	for {
 		next := earliestJob(scheduled)
 
@@ -105,6 +110,9 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}) error 
 			}
 			log.Println("Daemon stopped")
 			return nil
+
+		case <-heartbeatTicker.C:
+			fireReport(paths, scheduled)
 
 		case <-reloadTicker.C:
 			if timer != nil {
@@ -143,6 +151,9 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}) error 
 				scheduled = updateNextRun(scheduled, job.ID, newNext)
 				log.Printf("Job %s next run: %s", job.ID, newNext.Format(time.RFC3339))
 			}
+
+			// Report after every scheduled run regardless of outcome.
+			fireReport(paths, scheduled)
 		}
 	}
 }
@@ -278,6 +289,36 @@ func writeNextRun(job config.Job, next time.Time) {
 	if err := runner.WriteNextRun(job.JobDir, next); err != nil {
 		log.Printf("Warning: could not write next_run.json for job %s: %v", job.ID, err)
 	}
+}
+
+// fireReport sends the current node status to the management server.
+// It reads AppConfig fresh each time so settings changes apply without a
+// daemon restart. It is always fire-and-forget.
+func fireReport(paths app.Paths, scheduled []scheduledJob) {
+	appCfg, err := config.LoadAppConfig(paths.RootDir)
+	if err != nil || !appCfg.Enabled {
+		return
+	}
+
+	allJobs, err := jobs.LoadAll(paths)
+	if err != nil || len(allJobs) == 0 {
+		return
+	}
+
+	// Build next-run map from in-memory schedule (no disk I/O needed).
+	nextRunByID := make(map[string]time.Time, len(scheduled))
+	for _, sj := range scheduled {
+		nextRunByID[sj.job.ID] = sj.nextRun
+	}
+
+	nodeName := appCfg.NodeName
+	if nodeName == "" {
+		nodeName, _ = os.Hostname()
+	}
+
+	status := reporting.BuildNodeStatus(nodeName, allJobs, nextRunByID)
+	reporter := reporting.NewReporter(appCfg, paths.RootDir, paths.LogsDir)
+	reporter.Report(status)
 }
 
 func logSchedule(scheduled []scheduledJob) {

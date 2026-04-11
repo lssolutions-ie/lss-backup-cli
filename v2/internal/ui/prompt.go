@@ -82,30 +82,35 @@ func (p Prompter) Confirm(question string) (bool, error) {
 }
 
 // AskPassword prompts for a password with masked input. Pressing Enter with no
-// input returns ErrCancelled.
-func (p Prompter) AskPassword(question string) (string, error) {
+// input returns ErrCancelled. If validate is non-nil, invalid input shows an
+// error and re-prompts.
+func (p Prompter) AskPassword(question string, validate func(string) error) (string, error) {
 	for {
 		fmt.Printf("  %s (Enter to cancel): ", question)
+		var value string
 		if term.IsTerminal(int(os.Stdin.Fd())) {
 			password, err := term.ReadPassword(int(os.Stdin.Fd()))
 			fmt.Println()
 			if err != nil {
 				return "", err
 			}
-			value := strings.TrimSpace(string(password))
-			if value == "" {
-				return "", ErrCancelled
+			value = strings.TrimSpace(string(password))
+		} else {
+			// Non-terminal fallback (piped input).
+			text, err := p.reader.ReadString('\n')
+			if err != nil {
+				return "", err
 			}
-			return value, nil
+			value = strings.TrimSpace(text)
 		}
-		// Non-terminal fallback (piped input).
-		text, err := p.reader.ReadString('\n')
-		if err != nil {
-			return "", err
-		}
-		value := strings.TrimSpace(text)
 		if value == "" {
 			return "", ErrCancelled
+		}
+		if validate != nil {
+			if err := validate(value); err != nil {
+				fmt.Printf("  %s[!]%s %v\n", colRed, colReset, err)
+				continue
+			}
 		}
 		return value, nil
 	}

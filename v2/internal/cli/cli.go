@@ -19,6 +19,7 @@ import (
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/audit"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/app"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/reporting"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/daemon"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/engines"
 	healthchecksPkg "github.com/lssolutions-ie/lss-backup-cli/v2/internal/healthchecks"
@@ -172,7 +173,7 @@ func runMenu(paths app.Paths) error {
 		case "Audit Log":
 			runSystemLogBrowser(paths, prompter)
 		case "About":
-			runAbout()
+			runAbout(paths)
 		case "Exit":
 			activitylog.Log(paths.LogsDir, "program exited")
 			ui.Println2("Good bye.")
@@ -318,7 +319,7 @@ func runUpdateCLI(paths app.Paths) error {
 	return nil
 }
 
-func runAbout() {
+func runAbout(paths app.Paths) {
 	ui.SectionHeader("About LSS Backup CLI")
 	ui.KeyValue("Version:", version.Current)
 	ui.KeyValue("Platform:", runtime.GOOS+"/"+runtime.GOARCH)
@@ -374,6 +375,22 @@ func runAbout() {
 					fmt.Printf("  %-10s  %-8s  %s  (%s)\n", dep.Name, dep.Manager, dep.PackageID, installed)
 				}
 			}
+		}
+	}
+
+	ui.SectionHeader("Management Console")
+	if appCfg, err := config.LoadAppConfig(paths.RootDir); err == nil {
+		if appCfg.Enabled {
+			ui.KeyValue("Reporting:", ui.Green("enabled"))
+			ui.KeyValue("Server:", appCfg.ServerURL)
+			ui.KeyValue("User ID:", appCfg.UserID)
+			nodeName := appCfg.NodeName
+			if nodeName == "" {
+				nodeName, _ = os.Hostname()
+			}
+			ui.KeyValue("Node name:", nodeName)
+		} else {
+			ui.KeyValue("Reporting:", ui.Red("disabled"))
 		}
 	}
 
@@ -618,7 +635,7 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 
 	var resticPassword string
 	if program == "restic" {
-		resticPassword, err = prompter.AskPassword("Restic repository password")
+		resticPassword, err = prompter.AskPassword("Restic repository password", nil)
 		if err != nil {
 			return err
 		}
@@ -940,8 +957,10 @@ func runSettingsWizard(paths app.Paths, prompter ui.Prompter) error {
 			ui.StatusWarn("Not yet implemented.")
 			pauseForEnter()
 		case "Configure Management Console":
-			ui.StatusWarn("Not yet implemented.")
-			pauseForEnter()
+			if err := runManagementConsoleWizard(paths, prompter); err != nil && !errors.Is(err, errCancelled) {
+				ui.StatusError(err.Error())
+				pauseForEnter()
+			}
 		case "Restart Daemon":
 			ui.Println2("Restarting daemon...")
 			daemon.RestartService()
@@ -1621,8 +1640,106 @@ func runJobByID(paths app.Paths, id string) error {
 	}
 
 	service := runner.NewService()
-	_, err = service.Run(job)
-	return err
+	_, runErr := service.Run(job)
+
+	// Fire-and-forget report regardless of run outcome.
+	if appCfg, cfgErr := config.LoadAppConfig(paths.RootDir); cfgErr == nil && appCfg.Enabled {
+		if allJobs, loadErr := jobs.LoadAll(paths); loadErr == nil {
+			nodeName := appCfg.NodeName
+			if nodeName == "" {
+				nodeName, _ = os.Hostname()
+			}
+			status := reporting.BuildNodeStatus(nodeName, allJobs, nil)
+			reporting.NewReporter(appCfg, paths.RootDir, paths.LogsDir).Report(status)
+		}
+	}
+
+	return runErr
+}
+
+func runManagementConsoleWizard(paths app.Paths, prompter ui.Prompter) error {
+	cfg, err := config.LoadAppConfig(paths.RootDir)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	ui.Header("Configure Management Console")
+
+	// Show current state.
+	if cfg.Enabled {
+		ui.StatusOK("Reporting is currently enabled.")
+		ui.KeyValue("  Server:", cfg.ServerURL)
+		ui.KeyValue("  User ID:", cfg.UserID)
+		nodeName := cfg.NodeName
+		if nodeName == "" {
+			nodeName, _ = os.Hostname()
+		}
+		ui.KeyValue("  Node name:", nodeName)
+	} else {
+		ui.StatusWarn("Reporting is currently disabled.")
+	}
+	fmt.Println()
+
+	enable, err := prompter.Confirm("Enable management console reporting?")
+	if err != nil {
+		return err
+	}
+	cfg.Enabled = enable
+
+	if enable {
+		serverURL, err := prompter.Ask("Server URL (e.g. https://manage.example.com)", validateNonEmpty("server URL"))
+		if err != nil {
+			return err
+		}
+		cfg.ServerURL = strings.TrimRight(serverURL, "/")
+
+		userID, err := prompter.Ask("User ID", validateNonEmpty("user ID"))
+		if err != nil {
+			return err
+		}
+		cfg.UserID = userID
+
+		hostname, _ := os.Hostname()
+		nodeNamePrompt := fmt.Sprintf("Node name (Enter to use %q)", hostname)
+		nodeName, err := prompter.AskOptional(nodeNamePrompt)
+		if err != nil {
+			return err
+		}
+		cfg.NodeName = nodeName
+
+		psk, err := prompter.AskPassword("PSK key (128 printable ASCII characters)", validatePSKKey)
+		if err != nil {
+			return err
+		}
+		cfg.PSKKey = psk
+	}
+
+	if err := config.SaveAppConfig(paths.RootDir, cfg); err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+
+	activitylog.Audit(paths.LogsDir, "management console configured: enabled="+fmt.Sprintf("%t", cfg.Enabled))
+	daemon.TriggerReload(paths.StateDir)
+
+	if cfg.Enabled {
+		ui.StatusOK("Management console reporting enabled.")
+	} else {
+		ui.StatusOK("Management console reporting disabled.")
+	}
+	pauseForEnter()
+	return nil
+}
+
+func validatePSKKey(s string) error {
+	if len(s) != 128 {
+		return fmt.Errorf("PSK key must be exactly 128 characters, got %d", len(s))
+	}
+	for _, r := range s {
+		if r < 0x20 || r > 0x7e {
+			return fmt.Errorf("PSK key must contain only printable ASCII characters")
+		}
+	}
+	return nil
 }
 
 func runRestoreWizard(paths app.Paths, prompter ui.Prompter, id string) error {
