@@ -1,23 +1,30 @@
 // Package tunnel manages a persistent reverse SSH tunnel from the node to the
-// management server. The tunnel forwards a dynamically allocated remote port
-// back to the node's local SSH server (port 22), allowing the management
-// server's web terminal to reach the node without inbound connectivity.
+// management server over WebSocket. The tunnel connects to wss://<server>/ws/ssh-tunnel
+// which proxies to the server's local sshd. The node then establishes a reverse
+// port forward so the server's web terminal can reach the node's SSH without
+// inbound connectivity.
 package tunnel
 
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -26,6 +33,7 @@ const (
 	keyFileName    = "tunnel_key"
 	pubKeyFileName = "tunnel_key.pub"
 	localSSHTarget = "localhost:22"
+	tunnelWSPath   = "/ws/ssh-tunnel"
 )
 
 // Status holds the current tunnel state for heartbeat reporting.
@@ -61,8 +69,9 @@ func (m *Manager) Status() Status {
 }
 
 // Run starts the reverse tunnel and blocks until ctx is cancelled.
-// It automatically reconnects on failure.
-func (m *Manager) Run(ctx context.Context, sshHost string, sshPort int, nodeID string) {
+// It automatically reconnects on failure. serverURL is the management
+// server's HTTPS URL (e.g. "https://lssbackup.lssolutions.ie").
+func (m *Manager) Run(ctx context.Context, serverURL, nodeID, pskKey string) {
 	// Load or generate the key pair.
 	signer, pubKeyStr, err := m.loadOrGenerateKey()
 	if err != nil {
@@ -74,16 +83,17 @@ func (m *Manager) Run(ctx context.Context, sshHost string, sshPort int, nodeID s
 	m.publicKey = pubKeyStr
 	m.mu.Unlock()
 
-	config := &ssh.ClientConfig{
+	// Derive WebSocket URL from server URL.
+	wsURL := deriveWSURL(serverURL)
+
+	sshConfig := &ssh.ClientConfig{
 		User: "lss-tunnel",
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
 		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: known_hosts
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // server sshd reached via trusted WebSocket
 		Timeout:         15 * time.Second,
 	}
-
-	addr := fmt.Sprintf("%s:%d", sshHost, sshPort)
 
 	for {
 		select {
@@ -93,7 +103,7 @@ func (m *Manager) Run(ctx context.Context, sshHost string, sshPort int, nodeID s
 		default:
 		}
 
-		m.connect(ctx, addr, config, nodeID)
+		m.connect(ctx, wsURL, nodeID, pskKey, sshConfig)
 
 		// Wait before reconnecting.
 		select {
@@ -105,13 +115,39 @@ func (m *Manager) Run(ctx context.Context, sshHost string, sshPort int, nodeID s
 	}
 }
 
-func (m *Manager) connect(ctx context.Context, addr string, config *ssh.ClientConfig, nodeID string) {
-	client, err := ssh.Dial("tcp", addr, config)
+func (m *Manager) connect(ctx context.Context, wsURL, nodeID, pskKey string, sshConfig *ssh.ClientConfig) {
+	// Build HMAC auth headers.
+	ts := fmt.Sprintf("%d", time.Now().Unix())
+	mac := computeHMAC(pskKey, "ssh-tunnel:"+nodeID+":"+ts)
+
+	headers := http.Header{}
+	headers.Set("X-LSS-UID", nodeID)
+	headers.Set("X-LSS-TS", ts)
+	headers.Set("X-LSS-HMAC", mac)
+
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 15 * time.Second,
+	}
+
+	ws, _, err := dialer.DialContext(ctx, wsURL, headers)
 	if err != nil {
-		log.Printf("Tunnel: dial failed: %v", err)
+		log.Printf("Tunnel: WebSocket dial failed: %v", err)
 		m.setConnected(false, 0)
 		return
 	}
+	defer ws.Close()
+
+	// Wrap the WebSocket as a net.Conn for the SSH client.
+	conn := newWSConn(ws)
+
+	// Establish SSH session over the WebSocket.
+	sshConn, chans, reqs, err := ssh.NewClientConn(conn, wsURL, sshConfig)
+	if err != nil {
+		log.Printf("Tunnel: SSH handshake failed: %v", err)
+		m.setConnected(false, 0)
+		return
+	}
+	client := ssh.NewClient(sshConn, chans, reqs)
 	defer client.Close()
 
 	// Request a reverse port forward with port 0 (server picks).
@@ -128,7 +164,7 @@ func (m *Manager) connect(ctx context.Context, addr string, config *ssh.ClientCo
 	port := 0
 	fmt.Sscanf(portStr, "%d", &port)
 
-	log.Printf("Tunnel: connected, remote port %d → %s", port, localSSHTarget)
+	log.Printf("Tunnel: connected via WebSocket, remote port %d → %s", port, localSSHTarget)
 	m.setConnected(true, port)
 
 	// Accept connections and forward them to local SSH.
@@ -186,7 +222,7 @@ func (m *Manager) loadOrGenerateKey() (ssh.Signer, string, error) {
 		signer, err := ssh.ParsePrivateKey(keyData)
 		if err == nil {
 			pubData, _ := os.ReadFile(pubPath)
-			return signer, string(pubData), nil
+			return signer, strings.TrimSpace(string(pubData)), nil
 		}
 	}
 
@@ -208,13 +244,13 @@ func (m *Manager) loadOrGenerateKey() (ssh.Signer, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("marshal public key: %w", err)
 	}
-	pubStr := string(ssh.MarshalAuthorizedKey(sshPub))
+	pubStr := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub)))
 
 	// Write to disk.
 	if err := os.WriteFile(keyPath, privPEM, 0o600); err != nil {
 		return nil, "", fmt.Errorf("write private key: %w", err)
 	}
-	if err := os.WriteFile(pubPath, []byte(pubStr), 0o644); err != nil {
+	if err := os.WriteFile(pubPath, []byte(pubStr+"\n"), 0o644); err != nil {
 		return nil, "", fmt.Errorf("write public key: %w", err)
 	}
 
@@ -226,3 +262,69 @@ func (m *Manager) loadOrGenerateKey() (ssh.Signer, string, error) {
 	log.Printf("Tunnel: generated new ed25519 key pair")
 	return signer, pubStr, nil
 }
+
+// deriveWSURL converts an HTTPS server URL to a WSS tunnel URL.
+func deriveWSURL(serverURL string) string {
+	u := strings.TrimRight(serverURL, "/")
+	if strings.HasPrefix(u, "https://") {
+		return "wss://" + u[len("https://"):] + tunnelWSPath
+	}
+	if strings.HasPrefix(u, "http://") {
+		return "ws://" + u[len("http://"):] + tunnelWSPath
+	}
+	return "wss://" + u + tunnelWSPath
+}
+
+// computeHMAC returns the lowercase hex of HMAC-SHA256(psk, message).
+func computeHMAC(psk, message string) string {
+	mac := hmac.New(sha256.New, []byte(psk))
+	mac.Write([]byte(message))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// wsConn wraps a gorilla/websocket.Conn as a net.Conn so it can be used
+// with ssh.NewClientConn. All frames use BinaryMessage.
+type wsConn struct {
+	ws *websocket.Conn
+	r  io.Reader
+}
+
+func newWSConn(ws *websocket.Conn) *wsConn {
+	return &wsConn{ws: ws}
+}
+
+func (c *wsConn) Read(p []byte) (int, error) {
+	for {
+		if c.r == nil {
+			_, r, err := c.ws.NextReader()
+			if err != nil {
+				return 0, err
+			}
+			c.r = r
+		}
+		n, err := c.r.Read(p)
+		if err == io.EOF {
+			c.r = nil
+			if n > 0 {
+				return n, nil
+			}
+			continue
+		}
+		return n, err
+	}
+}
+
+func (c *wsConn) Write(p []byte) (int, error) {
+	err := c.ws.WriteMessage(websocket.BinaryMessage, p)
+	if err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (c *wsConn) Close() error                       { return c.ws.Close() }
+func (c *wsConn) LocalAddr() net.Addr                { return c.ws.LocalAddr() }
+func (c *wsConn) RemoteAddr() net.Addr               { return c.ws.RemoteAddr() }
+func (c *wsConn) SetDeadline(t time.Time) error      { return nil }
+func (c *wsConn) SetReadDeadline(t time.Time) error  { return c.ws.SetReadDeadline(t) }
+func (c *wsConn) SetWriteDeadline(t time.Time) error { return c.ws.SetWriteDeadline(t) }

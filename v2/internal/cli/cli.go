@@ -1747,38 +1747,6 @@ func runManagementConsoleWizard(paths app.Paths, prompter ui.Prompter) error {
 			return err
 		}
 		cfg.PSKKey = psk
-
-		// SSH tunnel settings — default ssh_host to the server URL hostname.
-		defaultSSHHost := ""
-		if u, parseErr := url.Parse(cfg.ServerURL); parseErr == nil {
-			defaultSSHHost = u.Hostname()
-		}
-		sshHostPrompt := fmt.Sprintf("SSH host for tunnel (Enter to use %q)", defaultSSHHost)
-		sshHost, err := prompter.AskOptional(sshHostPrompt)
-		if err != nil {
-			return err
-		}
-		if sshHost == "" {
-			sshHost = defaultSSHHost
-		}
-		cfg.SSHHost = sshHost
-
-		sshPortPrompt := "SSH port for tunnel (Enter for 22)"
-		sshPortStr, err := prompter.AskOptional(sshPortPrompt)
-		if err != nil {
-			return err
-		}
-		if sshPortStr == "" {
-			cfg.SSHPort = 22
-		} else {
-			port, parseErr := strconv.Atoi(sshPortStr)
-			if parseErr != nil || port < 1 || port > 65535 {
-				ui.StatusError("Invalid port number — using 22")
-				cfg.SSHPort = 22
-			} else {
-				cfg.SSHPort = port
-			}
-		}
 	}
 
 	if err := config.SaveAppConfig(paths.RootDir, cfg); err != nil {

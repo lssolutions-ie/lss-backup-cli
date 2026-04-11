@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -84,22 +83,9 @@ func Run(paths app.Paths) error {
 
 	// Start reverse SSH tunnel if management console is configured.
 	var tunnelMgr *tunnel.Manager
-	if appCfg, err := config.LoadAppConfig(paths.RootDir); err == nil && appCfg.Enabled {
-		sshHost := appCfg.SSHHost
-		if sshHost == "" {
-			// Default to the hostname from the server URL.
-			if u, err := url.Parse(appCfg.ServerURL); err == nil {
-				sshHost = u.Hostname()
-			}
-		}
-		sshPort := appCfg.SSHPort
-		if sshPort == 0 {
-			sshPort = 22
-		}
-		if sshHost != "" {
-			tunnelMgr = tunnel.NewManager(paths.StateDir)
-			go tunnelMgr.Run(ctx, sshHost, sshPort, appCfg.NodeID)
-		}
+	if appCfg, err := config.LoadAppConfig(paths.RootDir); err == nil && appCfg.Enabled && appCfg.ServerURL != "" {
+		tunnelMgr = tunnel.NewManager(paths.StateDir)
+		go tunnelMgr.Run(ctx, appCfg.ServerURL, appCfg.NodeID, appCfg.PSKKey)
 	}
 
 	return loop(ctx, paths, reloadCh, tunnelMgr)
