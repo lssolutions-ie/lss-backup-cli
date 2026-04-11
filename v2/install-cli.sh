@@ -337,10 +337,6 @@ UNIT
 	<true/>
 	<key>KeepAlive</key>
 	<true/>
-	<key>StandardOutPath</key>
-	<string>${LOGS_DIR}/daemon.log</string>
-	<key>StandardErrorPath</key>
-	<string>${LOGS_DIR}/daemon.log</string>
 </dict>
 </plist>
 PLIST
