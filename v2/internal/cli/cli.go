@@ -65,6 +65,17 @@ func Run(args []string) error {
 		return err
 	}
 	if err := paths.EnsureLayout(); err != nil {
+		if os.IsPermission(err) && runtime.GOOS != "windows" {
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, "  [ERROR]   Permission denied creating required directories.")
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, "  LSS Backup CLI must be run as root on this platform.")
+			fmt.Fprintln(os.Stderr, "  Please run again with:")
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, "    sudo lss-backup-cli")
+			fmt.Fprintln(os.Stderr, "")
+			os.Exit(1)
+		}
 		return err
 	}
 
