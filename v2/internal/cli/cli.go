@@ -2199,8 +2199,86 @@ func runRepoDumpZip(paths app.Paths, jobID, snapshotID string, filePaths []strin
 
 // addPathToZip dumps a path from a restic snapshot as a tar archive and adds
 // each entry to the zip writer.
-func addPathToZip(zw *zip.Writer, resticBin string, job config.Job, snapshotID, path string) error {
-	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "dump", "--archive", "tar", snapshotID, path)
+// addPathToZip adds a path from a restic snapshot to the zip writer.
+// For directories: uses restic dump --archive tar and converts entries.
+// For files: uses restic dump (raw) and adds directly.
+func addPathToZip(zw *zip.Writer, resticBin string, job config.Job, snapshotID, filePath string) error {
+	// First try as a directory (tar archive).
+	if err := addDirToZip(zw, resticBin, job, snapshotID, filePath); err == nil {
+		return nil
+	}
+
+	// Fall back to single file dump.
+	return addFileToZip(zw, resticBin, job, snapshotID, filePath)
+}
+
+// addDirToZip dumps a directory as tar and converts to zip entries.
+func addDirToZip(zw *zip.Writer, resticBin string, job config.Job, snapshotID, dirPath string) error {
+	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "dump", "--archive", "tar", snapshotID, dirPath)
+	cmd.Env = engines.ResticEnvForJob(job)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	tr := tar.NewReader(stdout)
+	found := false
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			// Not a valid tar — this is a file, not a directory.
+			// Drain and kill the process.
+			io.Copy(io.Discard, stdout) //nolint:errcheck
+			cmd.Wait()                  //nolint:errcheck
+			if !found {
+				return fmt.Errorf("not a tar archive")
+			}
+			break
+		}
+
+		if header.Typeflag == tar.TypeDir {
+			continue
+		}
+
+		name := strings.TrimPrefix(header.Name, "/")
+		if name == "" {
+			continue
+		}
+
+		zh := &zip.FileHeader{
+			Name:     name,
+			Method:   zip.Store,
+			Modified: header.ModTime,
+		}
+		zh.SetMode(header.FileInfo().Mode())
+
+		w, err := zw.CreateHeader(zh)
+		if err != nil {
+			io.Copy(io.Discard, stdout) //nolint:errcheck
+			cmd.Wait()                  //nolint:errcheck
+			return fmt.Errorf("create zip entry %s: %w", name, err)
+		}
+		if _, err := io.Copy(w, tr); err != nil {
+			io.Copy(io.Discard, stdout) //nolint:errcheck
+			cmd.Wait()                  //nolint:errcheck
+			return fmt.Errorf("write zip entry %s: %w", name, err)
+		}
+		found = true
+	}
+
+	return cmd.Wait()
+}
+
+// addFileToZip dumps a single file and adds it to the zip.
+func addFileToZip(zw *zip.Writer, resticBin string, job config.Job, snapshotID, filePath string) error {
+	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "dump", snapshotID, filePath)
 	cmd.Env = engines.ResticEnvForJob(job)
 	cmd.Stderr = os.Stderr
 
@@ -2212,41 +2290,26 @@ func addPathToZip(zw *zip.Writer, resticBin string, job config.Job, snapshotID, 
 		return fmt.Errorf("start restic dump: %w", err)
 	}
 
-	tr := tar.NewReader(stdout)
-	for {
-		header, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			break
-		}
+	// Use just the filename for the zip entry.
+	name := strings.TrimPrefix(filePath, "/")
+	if idx := strings.LastIndex(name, "/"); idx >= 0 {
+		// Keep full path for context within the zip.
+	}
 
-		// Skip directories as zip entries — they're implicit from file paths.
-		if header.Typeflag == tar.TypeDir {
-			continue
-		}
+	zh := &zip.FileHeader{
+		Name:   name,
+		Method: zip.Store,
+	}
 
-		// Strip leading slash for clean zip paths.
-		name := strings.TrimPrefix(header.Name, "/")
-		if name == "" {
-			continue
-		}
-
-		zh := &zip.FileHeader{
-			Name:     name,
-			Method:   zip.Store, // no compression for streaming speed
-			Modified: header.ModTime,
-		}
-		zh.SetMode(header.FileInfo().Mode())
-
-		w, err := zw.CreateHeader(zh)
-		if err != nil {
-			return fmt.Errorf("create zip entry %s: %w", name, err)
-		}
-		if _, err := io.Copy(w, tr); err != nil {
-			return fmt.Errorf("write zip entry %s: %w", name, err)
-		}
+	w, err := zw.CreateHeader(zh)
+	if err != nil {
+		io.Copy(io.Discard, stdout) //nolint:errcheck
+		cmd.Wait()                  //nolint:errcheck
+		return fmt.Errorf("create zip entry %s: %w", name, err)
+	}
+	if _, err := io.Copy(w, stdout); err != nil {
+		cmd.Wait() //nolint:errcheck
+		return fmt.Errorf("write zip entry %s: %w", name, err)
 	}
 
 	return cmd.Wait()
