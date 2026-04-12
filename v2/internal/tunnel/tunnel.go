@@ -52,9 +52,14 @@ type Manager struct {
 	stateDir  string
 }
 
-// NewManager creates a tunnel manager. Call Run() to start the tunnel.
+// NewManager creates a tunnel manager and loads (or generates) the key pair
+// eagerly so Status().PublicKey is available before Run() starts.
 func NewManager(stateDir string) *Manager {
-	return &Manager{stateDir: stateDir}
+	m := &Manager{stateDir: stateDir}
+	if _, pubKeyStr, err := m.loadOrGenerateKey(); err == nil {
+		m.publicKey = pubKeyStr
+	}
+	return m
 }
 
 // Status returns the current tunnel state for inclusion in heartbeat payloads.
