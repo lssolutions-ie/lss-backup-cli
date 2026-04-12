@@ -2314,14 +2314,14 @@ func commonDirPrefix(paths []string) string {
 	if len(paths) == 0 {
 		return ""
 	}
-	// Use the directory of the first path as starting prefix.
-	prefix := filepath.Dir(paths[0]) + "/"
+	// Use posixDir (forward slashes) since restic paths always use forward slashes.
+	prefix := posixDir(paths[0]) + "/"
 	for _, p := range paths[1:] {
-		dir := filepath.Dir(p) + "/"
+		dir := posixDir(p) + "/"
 		// Shrink prefix until it matches.
 		for !strings.HasPrefix(dir, prefix) {
-			prefix = filepath.Dir(strings.TrimRight(prefix, "/")) + "/"
-			if prefix == "/" || prefix == "./" {
+			prefix = posixDir(strings.TrimRight(prefix, "/")) + "/"
+			if prefix == "/" {
 				return "/"
 			}
 		}
