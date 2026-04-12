@@ -3,6 +3,7 @@ package cli
 import (
 	"archive/tar"
 	"archive/zip"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -2336,18 +2337,27 @@ func commonDirPrefix(paths []string) string {
 // For files: uses restic dump (raw) and adds directly.
 func addPathToZip(zw *zip.Writer, resticBin string, job config.Job, snapshotID, filePath, stripPrefix string) error {
 	// First try as a directory (tar archive).
-	if err := addDirToZip(zw, resticBin, job, snapshotID, filePath, stripPrefix); err == nil {
+	err := addDirToZip(zw, resticBin, job, snapshotID, filePath, stripPrefix)
+	if err == nil {
 		return nil
 	}
+	fmt.Fprintf(os.Stderr, "zip: dir mode failed for %s: %v, trying file mode\n", filePath, err)
 
 	// Fall back to single file dump.
-	return addFileToZip(zw, resticBin, job, snapshotID, filePath, stripPrefix)
+	if err := addFileToZip(zw, resticBin, job, snapshotID, filePath, stripPrefix); err != nil {
+		fmt.Fprintf(os.Stderr, "zip: file mode also failed for %s: %v\n", filePath, err)
+		return err
+	}
+	return nil
 }
 
 // addDirToZip dumps a directory as tar and converts to zip entries.
 func addDirToZip(zw *zip.Writer, resticBin string, job config.Job, snapshotID, dirPath, stripPrefix string) error {
 	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "dump", "--archive", "tar", snapshotID, dirPath)
 	cmd.Env = engines.ResticEnvForJob(job)
+
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -2406,7 +2416,17 @@ func addDirToZip(zw *zip.Writer, resticBin string, job config.Job, snapshotID, d
 		found = true
 	}
 
-	return cmd.Wait()
+	if waitErr := cmd.Wait(); waitErr != nil {
+		if s := stderrBuf.String(); s != "" {
+			fmt.Fprintf(os.Stderr, "zip: restic dump stderr for %s: %s\n", dirPath, strings.TrimSpace(s))
+		}
+		if !found {
+			return fmt.Errorf("restic dump failed: %w", waitErr)
+		}
+		// Some entries were written — partial success, log but don't fail.
+		fmt.Fprintf(os.Stderr, "zip: restic dump for %s exited with error (partial): %v\n", dirPath, waitErr)
+	}
+	return nil
 }
 
 // addFileToZip dumps a single file and adds it to the zip.
