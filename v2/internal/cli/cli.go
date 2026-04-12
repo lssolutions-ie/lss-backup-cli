@@ -130,6 +130,21 @@ func Run(args []string) error {
 			}
 			return runRepoLS(paths, jobID, snapID, subPath)
 		}
+		if args[0] == "repo-dump" && len(args) >= 4 && args[1] == "--json" {
+			// repo-dump --json <job-id> <snapshot-id> --path <file-path>
+			jobID := args[2]
+			snapID := args[3]
+			filePath := ""
+			for i := 4; i < len(args)-1; i++ {
+				if args[i] == "--path" {
+					filePath = args[i+1]
+				}
+			}
+			if filePath == "" {
+				return errors.New("repo-dump requires --path <file-path>")
+			}
+			return runRepoDump(paths, jobID, snapID, filePath)
+		}
 		return errors.New("v2 is menu-driven; run lss-backup-cli with no arguments to open the menu")
 	}
 
@@ -2057,6 +2072,44 @@ func runRepoLS(paths app.Paths, jobID, snapshotID, subPath string) error {
 
 // mountIfNeededForRepo mounts SMB/NFS if needed for repo commands.
 // Returns a cleanup function.
+// runRepoDump streams raw file content from a restic snapshot to stdout.
+func runRepoDump(paths app.Paths, jobID, snapshotID, filePath string) error {
+	job, err := jobs.Load(paths, jobID)
+	if err != nil {
+		return err
+	}
+
+	if job.Program != "restic" {
+		return fmt.Errorf("repo-dump is only supported for restic jobs (job %s uses %s)", jobID, job.Program)
+	}
+
+	if strings.TrimSpace(job.Secrets.ResticPassword) == "" {
+		return fmt.Errorf("RESTIC_PASSWORD is required for restic jobs")
+	}
+
+	resticBin, err := engines.LookResticPath()
+	if err != nil {
+		return err
+	}
+
+	// Mount if needed for SMB/NFS destinations.
+	unmount, mountErr := mountIfNeededForRepo(job)
+	if mountErr != nil {
+		return mountErr
+	}
+	defer unmount()
+
+	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "dump", snapshotID, filePath)
+	cmd.Env = engines.ResticEnvForJob(job)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("restic dump failed: %w", err)
+	}
+	return nil
+}
+
 func mountIfNeededForRepo(job config.Job) (func(), error) {
 	noop := func() {}
 
