@@ -92,7 +92,12 @@ func Run(paths app.Paths) error {
 		// tunnel public key before we attempt to connect.
 		scheduled, err := buildSchedule(paths, time.Now())
 		if err == nil {
-			sendInitialHeartbeat(paths, scheduled, tunnelMgr)
+			resp := sendInitialHeartbeat(paths, scheduled, tunnelMgr)
+			if resp.TunnelKeyRegistered {
+				log.Println("Tunnel: server confirmed key registered, starting tunnel")
+			} else {
+				log.Println("Tunnel: server did not confirm key registration, starting tunnel anyway")
+			}
 		}
 
 		go tunnelMgr.Run(ctx, appCfg.ServerURL, appCfg.NodeID, appCfg.PSKKey)
@@ -379,15 +384,15 @@ func fireReport(paths app.Paths, scheduled []scheduledJob, reportType string, tu
 
 // sendInitialHeartbeat sends a synchronous heartbeat so the server registers
 // the tunnel public key before the tunnel attempts to connect.
-func sendInitialHeartbeat(paths app.Paths, scheduled []scheduledJob, tunnelMgr *tunnel.Manager) {
+func sendInitialHeartbeat(paths app.Paths, scheduled []scheduledJob, tunnelMgr *tunnel.Manager) reporting.ReportResponse {
 	appCfg, err := config.LoadAppConfig(paths.RootDir)
 	if err != nil || !appCfg.Enabled {
-		return
+		return reporting.ReportResponse{}
 	}
 
 	allJobs, err := jobs.LoadAll(paths)
 	if err != nil || len(allJobs) == 0 {
-		return
+		return reporting.ReportResponse{}
 	}
 
 	nextRunByID := make(map[string]time.Time, len(scheduled))
@@ -414,7 +419,7 @@ func sendInitialHeartbeat(paths app.Paths, scheduled []scheduledJob, tunnelMgr *
 
 	log.Printf("Report: sending initial heartbeat for %d jobs (node_id=%s, psk_len=%d)", len(allJobs), appCfg.NodeID, len(appCfg.PSKKey))
 	reporter := reporting.NewReporter(appCfg, paths.RootDir, paths.LogsDir)
-	reporter.ReportSync(status)
+	return reporter.ReportSync(status)
 }
 
 func logSchedule(scheduled []scheduledJob) {

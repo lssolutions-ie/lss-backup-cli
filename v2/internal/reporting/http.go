@@ -56,15 +56,20 @@ func (r *httpReporter) Report(status NodeStatus) {
 }
 
 // ReportSync sends the status synchronously, blocking until complete.
-func (r *httpReporter) ReportSync(status NodeStatus) {
-	r.send(status)
+// Returns the server response so callers can check tunnel_key_registered.
+func (r *httpReporter) ReportSync(status NodeStatus) ReportResponse {
+	return r.doSend(status)
 }
 
 func (r *httpReporter) send(status NodeStatus) {
+	r.doSend(status)
+}
+
+func (r *httpReporter) doSend(status NodeStatus) ReportResponse {
 	// Re-read config fresh so any settings update is picked up immediately.
 	cfg, err := config.LoadAppConfig(r.rootDir)
 	if err != nil || !cfg.Enabled || cfg.ServerURL == "" || cfg.NodeID == "" || len(cfg.PSKKey) != 128 {
-		return
+		return ReportResponse{}
 	}
 
 	// Resolve node name: config field → hostname fallback.
@@ -77,20 +82,20 @@ func (r *httpReporter) send(status NodeStatus) {
 	plaintext, err := json.Marshal(status)
 	if err != nil {
 		r.warn("marshal payload: " + err.Error())
-		return
+		return ReportResponse{}
 	}
 
 	encrypted, err := encryptAESGCM(cfg.PSKKey, plaintext)
 	if err != nil {
 		r.warn("encrypt payload: " + err.Error())
-		return
+		return ReportResponse{}
 	}
 
 	env := envelope{V: "1", UID: cfg.NodeID, Data: encrypted}
 	body, err := json.Marshal(env)
 	if err != nil {
 		r.warn("marshal envelope: " + err.Error())
-		return
+		return ReportResponse{}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), reportTimeout)
@@ -99,17 +104,21 @@ func (r *httpReporter) send(status NodeStatus) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.ServerURL+reportEndpoint, bytes.NewReader(body))
 	if err != nil {
 		r.warn("build request: " + err.Error())
-		return
+		return ReportResponse{}
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		r.warn("send failed: " + err.Error())
-		return
+		return ReportResponse{}
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body) //nolint:errcheck
+
+	// Read and parse the response body.
+	respBody, _ := io.ReadAll(resp.Body)
+	var result ReportResponse
+	json.Unmarshal(respBody, &result) //nolint:errcheck
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		msg := fmt.Sprintf("server returned %s", resp.Status)
@@ -118,6 +127,8 @@ func (r *httpReporter) send(status NodeStatus) {
 		}
 		r.warn(msg)
 	}
+
+	return result
 }
 
 func (r *httpReporter) warn(msg string) {
