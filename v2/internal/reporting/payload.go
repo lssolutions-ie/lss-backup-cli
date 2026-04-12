@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/hwinfo"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/runner"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/schedule"
 )
@@ -29,6 +30,7 @@ type NodeStatus struct {
 	NodeName       string        `json:"node_name"`
 	ReportedAt     time.Time     `json:"reported_at"`
 	Tunnel         *TunnelStatus `json:"tunnel,omitempty"`
+	Hardware       *hwinfo.Info  `json:"hardware,omitempty"` // included on heartbeat reports
 	Jobs           []JobStatus   `json:"jobs"`
 }
 
@@ -174,10 +176,18 @@ func BuildNodeStatus(nodeName string, allJobs []config.Job, nextRunByID map[stri
 		statuses = append(statuses, js)
 	}
 
-	return NodeStatus{
+	ns := NodeStatus{
 		PayloadVersion: "1",
 		NodeName:       nodeName,
 		ReportedAt:     time.Now().UTC(),
 		Jobs:           statuses,
 	}
+
+	// Include hardware info on heartbeat reports only.
+	if includeConfig {
+		hw := hwinfo.Collect()
+		ns.Hardware = &hw
+	}
+
+	return ns
 }
