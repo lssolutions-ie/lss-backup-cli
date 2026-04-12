@@ -159,6 +159,17 @@ func Run(args []string) error {
 			}
 			return runRepoDump(paths, jobID, snapID, filePath)
 		}
+		if args[0] == "repo-ls-rsync" && len(args) >= 3 && args[1] == "--json" {
+			jobID := args[2]
+			subPath := ""
+			for i := 3; i < len(args)-1; i++ {
+				if args[i] == "--path" {
+					subPath = args[i+1]
+					i++
+				}
+			}
+			return runRepoLSRsync(paths, jobID, subPath)
+		}
 		if args[0] == "repo-dump-zip" && len(args) >= 4 && args[1] == "--json" {
 			// repo-dump-zip --json <job-id> <snapshot-id> --path <p1> --path <p2> ...
 			jobID := args[2]
@@ -2161,6 +2172,70 @@ func runRepoDump(paths app.Paths, jobID, snapshotID, filePath string) error {
 // runRepoDumpZip streams a ZIP archive to stdout containing the specified paths
 // from a restic snapshot. Uses restic dump --archive tar for each path, then
 // converts the tar entries to zip entries.
+// runRepoLSRsync lists files in an rsync job's destination directory.
+func runRepoLSRsync(appPaths app.Paths, jobID, subPath string) error {
+	job, err := jobs.Load(appPaths, jobID)
+	if err != nil {
+		return err
+	}
+	if job.Program != "rsync" {
+		return fmt.Errorf("repo-ls-rsync is only for rsync jobs (job %s uses %s)", jobID, job.Program)
+	}
+
+	// Mount if needed for SMB/NFS destinations.
+	unmount, mountErr := mountIfNeededForRepo(job)
+	if mountErr != nil {
+		return mountErr
+	}
+	defer unmount()
+
+	dir := job.Destination.Path
+	if subPath != "" {
+		dir = filepath.Join(dir, subPath)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("read directory %s: %w", dir, err)
+	}
+
+	type fileEntry struct {
+		Name  string `json:"name"`
+		Type  string `json:"type"`
+		Size  int64  `json:"size"`
+		Mtime string `json:"mtime"`
+		Path  string `json:"path"`
+	}
+
+	type lsResponse struct {
+		Files []fileEntry `json:"files"`
+	}
+
+	var resp lsResponse
+	for _, e := range entries {
+		info, infoErr := e.Info()
+		if infoErr != nil {
+			continue
+		}
+		fe := fileEntry{
+			Name:  e.Name(),
+			Path:  filepath.Join(dir, e.Name()),
+			Mtime: info.ModTime().Format(time.RFC3339),
+		}
+		if e.IsDir() {
+			fe.Type = "dir"
+		} else {
+			fe.Type = "file"
+			fe.Size = info.Size()
+		}
+		resp.Files = append(resp.Files, fe)
+	}
+
+	out, _ := json.MarshalIndent(resp, "", "  ")
+	fmt.Println(string(out))
+	return nil
+}
+
 func runRepoDumpZip(paths app.Paths, jobID, snapshotID string, filePaths []string) error {
 	job, err := jobs.Load(paths, jobID)
 	if err != nil {
