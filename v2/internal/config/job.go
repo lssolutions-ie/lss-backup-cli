@@ -31,9 +31,13 @@ type Job struct {
 }
 
 type Endpoint struct {
-	Type        string
+	Type        string // "local", "s3", "smb", "nfs"
 	Path        string
 	ExcludeFile string // optional path to an exclude file; source only
+	Host        string // IP or hostname for SMB/NFS
+	ShareName   string // share name for SMB/NFS
+	Username    string // username for SMB/NFS (not a secret — stored in job.toml)
+	Domain      string // optional domain for SMB
 }
 
 type Schedule struct {
@@ -71,8 +75,10 @@ type Secrets struct {
 	AWSAccessKeyID     string
 	AWSSecretAccessKey string
 	AWSDefaultRegion   string
-	SMBPassword        string
-	NFSPassword        string
+	SMBPassword        string // source SMB password
+	NFSPassword        string // source NFS password
+	SMBDestPassword    string // destination SMB password
+	NFSDestPassword    string // destination NFS password
 }
 
 func LoadJob(jobDir string) (Job, error) {
@@ -194,6 +200,14 @@ func assignValue(job *Job, section string, key string, value string) error {
 			job.Source.Path = parseString(value)
 		case "exclude_file":
 			job.Source.ExcludeFile = parseString(value)
+		case "host":
+			job.Source.Host = parseString(value)
+		case "share_name":
+			job.Source.ShareName = parseString(value)
+		case "username":
+			job.Source.Username = parseString(value)
+		case "domain":
+			job.Source.Domain = parseString(value)
 		default:
 			return fmt.Errorf("unsupported [source] key %q", key)
 		}
@@ -203,6 +217,14 @@ func assignValue(job *Job, section string, key string, value string) error {
 			job.Destination.Type = parseString(value)
 		case "path":
 			job.Destination.Path = parseString(value)
+		case "host":
+			job.Destination.Host = parseString(value)
+		case "share_name":
+			job.Destination.ShareName = parseString(value)
+		case "username":
+			job.Destination.Username = parseString(value)
+		case "domain":
+			job.Destination.Domain = parseString(value)
 		default:
 			return fmt.Errorf("unsupported [destination] key %q", key)
 		}
@@ -335,6 +357,10 @@ func LoadSecrets(path string) (Secrets, error) {
 			secrets.SMBPassword = value
 		case "NFS_PASSWORD":
 			secrets.NFSPassword = value
+		case "SMB_DEST_PASSWORD":
+			secrets.SMBDestPassword = value
+		case "NFS_DEST_PASSWORD":
+			secrets.NFSDestPassword = value
 		}
 	}
 
@@ -416,70 +442,70 @@ func parseIntArray(value string) ([]int, error) {
 
 func RenderJobTOML(job Job) string {
 	days := renderDays(job.Schedule.Days)
-	return fmt.Sprintf(`id = %q
-name = %q
-program = %q
-enabled = %t
-rsync_no_permissions = %t
 
-[source]
-type = %q
-path = %q
-exclude_file = %q
+	var b strings.Builder
+	fmt.Fprintf(&b, "id = %q\n", job.ID)
+	fmt.Fprintf(&b, "name = %q\n", job.Name)
+	fmt.Fprintf(&b, "program = %q\n", job.Program)
+	fmt.Fprintf(&b, "enabled = %t\n", job.Enabled)
+	fmt.Fprintf(&b, "rsync_no_permissions = %t\n", job.RsyncNoPermissions)
 
-[destination]
-type = %q
-path = %q
+	b.WriteString("\n[source]\n")
+	fmt.Fprintf(&b, "type = %q\n", job.Source.Type)
+	fmt.Fprintf(&b, "path = %q\n", job.Source.Path)
+	fmt.Fprintf(&b, "exclude_file = %q\n", job.Source.ExcludeFile)
+	if job.Source.Host != "" {
+		fmt.Fprintf(&b, "host = %q\n", job.Source.Host)
+	}
+	if job.Source.ShareName != "" {
+		fmt.Fprintf(&b, "share_name = %q\n", job.Source.ShareName)
+	}
+	if job.Source.Username != "" {
+		fmt.Fprintf(&b, "username = %q\n", job.Source.Username)
+	}
+	if job.Source.Domain != "" {
+		fmt.Fprintf(&b, "domain = %q\n", job.Source.Domain)
+	}
 
-[schedule]
-mode = %q
-minute = %d
-hour = %d
-days = %s
-day_of_month = %d
-cron_expression = %q
+	b.WriteString("\n[destination]\n")
+	fmt.Fprintf(&b, "type = %q\n", job.Destination.Type)
+	fmt.Fprintf(&b, "path = %q\n", job.Destination.Path)
+	if job.Destination.Host != "" {
+		fmt.Fprintf(&b, "host = %q\n", job.Destination.Host)
+	}
+	if job.Destination.ShareName != "" {
+		fmt.Fprintf(&b, "share_name = %q\n", job.Destination.ShareName)
+	}
+	if job.Destination.Username != "" {
+		fmt.Fprintf(&b, "username = %q\n", job.Destination.Username)
+	}
+	if job.Destination.Domain != "" {
+		fmt.Fprintf(&b, "domain = %q\n", job.Destination.Domain)
+	}
 
-[retention]
-mode = %q
-keep_last = %d
-keep_within = %q
-keep_daily = %d
-keep_weekly = %d
-keep_monthly = %d
-keep_yearly = %d
+	b.WriteString("\n[schedule]\n")
+	fmt.Fprintf(&b, "mode = %q\n", job.Schedule.Mode)
+	fmt.Fprintf(&b, "minute = %d\n", job.Schedule.Minute)
+	fmt.Fprintf(&b, "hour = %d\n", job.Schedule.Hour)
+	fmt.Fprintf(&b, "days = %s\n", days)
+	fmt.Fprintf(&b, "day_of_month = %d\n", job.Schedule.DayOfMonth)
+	fmt.Fprintf(&b, "cron_expression = %q\n", job.Schedule.CronExpression)
 
-[notifications]
-healthchecks_enabled = %t
-healthchecks_domain = %q
-healthchecks_id = %q
-`,
-		job.ID,
-		job.Name,
-		job.Program,
-		job.Enabled,
-		job.RsyncNoPermissions,
-		job.Source.Type,
-		job.Source.Path,
-		job.Source.ExcludeFile,
-		job.Destination.Type,
-		job.Destination.Path,
-		job.Schedule.Mode,
-		job.Schedule.Minute,
-		job.Schedule.Hour,
-		days,
-		job.Schedule.DayOfMonth,
-		job.Schedule.CronExpression,
-		job.Retention.Mode,
-		job.Retention.KeepLast,
-		job.Retention.KeepWithin,
-		job.Retention.KeepDaily,
-		job.Retention.KeepWeekly,
-		job.Retention.KeepMonthly,
-		job.Retention.KeepYearly,
-		job.Notifications.HealthchecksEnabled,
-		job.Notifications.HealthchecksDomain,
-		job.Notifications.HealthchecksID,
-	)
+	b.WriteString("\n[retention]\n")
+	fmt.Fprintf(&b, "mode = %q\n", job.Retention.Mode)
+	fmt.Fprintf(&b, "keep_last = %d\n", job.Retention.KeepLast)
+	fmt.Fprintf(&b, "keep_within = %q\n", job.Retention.KeepWithin)
+	fmt.Fprintf(&b, "keep_daily = %d\n", job.Retention.KeepDaily)
+	fmt.Fprintf(&b, "keep_weekly = %d\n", job.Retention.KeepWeekly)
+	fmt.Fprintf(&b, "keep_monthly = %d\n", job.Retention.KeepMonthly)
+	fmt.Fprintf(&b, "keep_yearly = %d\n", job.Retention.KeepYearly)
+
+	b.WriteString("\n[notifications]\n")
+	fmt.Fprintf(&b, "healthchecks_enabled = %t\n", job.Notifications.HealthchecksEnabled)
+	fmt.Fprintf(&b, "healthchecks_domain = %q\n", job.Notifications.HealthchecksDomain)
+	fmt.Fprintf(&b, "healthchecks_id = %q\n", job.Notifications.HealthchecksID)
+
+	return b.String()
 }
 
 // RunScriptName returns the platform-appropriate run script filename.

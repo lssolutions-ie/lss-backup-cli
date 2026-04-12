@@ -52,7 +52,7 @@ func (e ResticEngine) Init(job config.Job, output io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if !isRemoteRepo(job) {
+	if !isNetworkDest(job) {
 		if err := os.MkdirAll(job.Destination.Path, 0o755); err != nil {
 			return fmt.Errorf("create destination path: %w", err)
 		}
@@ -70,7 +70,7 @@ func (e ResticEngine) Run(job config.Job, output io.Writer) error {
 		return err
 	}
 
-	if !isRemoteRepo(job) {
+	if !isNetworkDest(job) {
 		if err := os.MkdirAll(job.Destination.Path, 0o755); err != nil {
 			return fmt.Errorf("create destination path: %w", err)
 		}
@@ -350,8 +350,10 @@ func (e RsyncEngine) Name() string {
 
 // Init creates the destination directory. rsync has no repository concept.
 func (e RsyncEngine) Init(job config.Job, output io.Writer) error {
-	if err := os.MkdirAll(job.Destination.Path, 0o755); err != nil {
-		return fmt.Errorf("create destination directory: %w", err)
+	if !isNetworkDest(job) {
+		if err := os.MkdirAll(job.Destination.Path, 0o755); err != nil {
+			return fmt.Errorf("create destination directory: %w", err)
+		}
 	}
 	fmt.Fprintf(output, "Destination directory ready: %s\n", job.Destination.Path)
 	return nil
@@ -363,8 +365,10 @@ func (e RsyncEngine) Run(job config.Job, output io.Writer) error {
 		return err
 	}
 
-	if err := os.MkdirAll(job.Destination.Path, 0o755); err != nil {
-		return fmt.Errorf("create destination path: %w", err)
+	if !isNetworkDest(job) {
+		if err := os.MkdirAll(job.Destination.Path, 0o755); err != nil {
+			return fmt.Errorf("create destination path: %w", err)
+		}
 	}
 
 	sourcePath := filepath.Clean(job.Source.Path) + string(os.PathSeparator)
@@ -431,7 +435,7 @@ func (e RsyncEngine) Restore(job config.Job, snapshotID string, target string, o
 }
 
 func ensureResticRepo(job config.Job, resticBin string, output io.Writer) error {
-	if !isRemoteRepo(job) {
+	if !isNetworkDest(job) {
 		// For local repositories, the presence of the 'config' file indicates an
 		// initialised repo. This avoids running 'restic snapshots' as a probe,
 		// which would produce misleading errors (e.g. wrong password → init attempt).
@@ -452,7 +456,7 @@ func ensureResticRepo(job config.Job, resticBin string, output io.Writer) error 
 
 	if err := initCmd.Run(); err != nil {
 		// "already exists" / "already initialised" is not an error for remote repos.
-		if isRemoteRepo(job) {
+		if isNetworkDest(job) {
 			return nil
 		}
 		return fmt.Errorf("restic repository init failed: %w", err)
@@ -461,9 +465,14 @@ func ensureResticRepo(job config.Job, resticBin string, output io.Writer) error 
 	return nil
 }
 
-// isRemoteRepo returns true if the job destination is a remote repository (S3, etc.).
-func isRemoteRepo(job config.Job) bool {
-	return job.Destination.Type == "s3"
+// isNetworkDest returns true if the job destination is a network target (S3, SMB, NFS).
+// For these types, local filesystem operations (MkdirAll, Stat) are skipped.
+func isNetworkDest(job config.Job) bool {
+	switch job.Destination.Type {
+	case "s3", "smb", "nfs":
+		return true
+	}
+	return false
 }
 
 // resticEnv builds the environment for restic commands, including AWS credentials.

@@ -29,9 +29,17 @@ type CreateInput struct {
 	Program            string
 	SourceType         string
 	SourcePath         string
+	SourceHost         string // SMB/NFS host
+	SourceShareName    string // SMB/NFS share name
+	SourceUsername     string // SMB/NFS username
+	SourceDomain       string // SMB domain (optional)
 	ExcludeFile        string // optional path to an exclude file
 	DestType           string
 	DestPath           string
+	DestHost           string // SMB/NFS host
+	DestShareName      string // SMB/NFS share name
+	DestUsername        string // SMB/NFS username
+	DestDomain         string // SMB domain (optional)
 	Schedule           config.Schedule
 	Enabled            bool
 	RsyncNoPermissions bool
@@ -175,7 +183,7 @@ func Import(paths app.Paths, sourceJobFile string, newID string) (config.Job, er
 	}
 
 	secretsSource := filepath.Join(filepath.Dir(sourceJobFile), "secrets.env")
-	secretsData := []byte("RESTIC_PASSWORD=\nAWS_ACCESS_KEY_ID=\nAWS_SECRET_ACCESS_KEY=\nAWS_DEFAULT_REGION=\nSMB_PASSWORD=\nNFS_PASSWORD=\n")
+	secretsData := []byte("RESTIC_PASSWORD=\nAWS_ACCESS_KEY_ID=\nAWS_SECRET_ACCESS_KEY=\nAWS_DEFAULT_REGION=\nSMB_PASSWORD=\nNFS_PASSWORD=\nSMB_DEST_PASSWORD=\nNFS_DEST_PASSWORD=\n")
 	if data, err := os.ReadFile(secretsSource); err == nil {
 		secretsData = data
 	}
@@ -233,10 +241,18 @@ jobDir := filepath.Join(paths.JobsDir, input.ID)
 			Type:        input.SourceType,
 			Path:        input.SourcePath,
 			ExcludeFile: input.ExcludeFile,
+			Host:        input.SourceHost,
+			ShareName:   input.SourceShareName,
+			Username:    input.SourceUsername,
+			Domain:      input.SourceDomain,
 		},
 		Destination: config.Endpoint{
-			Type: input.DestType,
-			Path: input.DestPath,
+			Type:      input.DestType,
+			Path:      input.DestPath,
+			Host:      input.DestHost,
+			ShareName: input.DestShareName,
+			Username:  input.DestUsername,
+			Domain:    input.DestDomain,
 		},
 		Schedule:      input.Schedule,
 		Retention:     input.Retention,
@@ -367,14 +383,16 @@ func Export(paths app.Paths, id string, targetDir string) error {
 // If secrets is nil the keys are written with empty values.
 func buildSecretsContent(secrets *config.Secrets) string {
 	if secrets == nil {
-		return "RESTIC_PASSWORD=\nAWS_ACCESS_KEY_ID=\nAWS_SECRET_ACCESS_KEY=\nAWS_DEFAULT_REGION=\nSMB_PASSWORD=\nNFS_PASSWORD=\n"
+		return "RESTIC_PASSWORD=\nAWS_ACCESS_KEY_ID=\nAWS_SECRET_ACCESS_KEY=\nAWS_DEFAULT_REGION=\nSMB_PASSWORD=\nNFS_PASSWORD=\nSMB_DEST_PASSWORD=\nNFS_DEST_PASSWORD=\n"
 	}
-	return fmt.Sprintf("RESTIC_PASSWORD=%s\nAWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\nAWS_DEFAULT_REGION=%s\nSMB_PASSWORD=%s\nNFS_PASSWORD=%s\n",
+	return fmt.Sprintf("RESTIC_PASSWORD=%s\nAWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\nAWS_DEFAULT_REGION=%s\nSMB_PASSWORD=%s\nNFS_PASSWORD=%s\nSMB_DEST_PASSWORD=%s\nNFS_DEST_PASSWORD=%s\n",
 		secrets.ResticPassword,
 		secrets.AWSAccessKeyID,
 		secrets.AWSSecretAccessKey,
 		secrets.AWSDefaultRegion,
 		secrets.SMBPassword,
 		secrets.NFSPassword,
+		secrets.SMBDestPassword,
+		secrets.NFSDestPassword,
 	)
 }

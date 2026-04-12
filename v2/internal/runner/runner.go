@@ -13,6 +13,7 @@ import (
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/engines"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/healthchecks"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/logcleanup"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/mount"
 	"golang.org/x/term"
 )
 
@@ -43,6 +44,19 @@ func (s Service) Run(job config.Job) (RunResult, error) {
 		return RunResult{}, err
 	}
 	defer closeLog()
+
+	// Mount network shares if needed.
+	unmountSource, err := mountIfNeeded(job.Source, job.ID, "source", job.Secrets.SMBPassword, job.Secrets.NFSPassword)
+	if err != nil {
+		return RunResult{}, fmt.Errorf("mount source: %w", err)
+	}
+	defer unmountSource()
+
+	unmountDest, err := mountIfNeeded(job.Destination, job.ID, "destination", job.Secrets.SMBDestPassword, job.Secrets.NFSDestPassword)
+	if err != nil {
+		return RunResult{}, fmt.Errorf("mount destination: %w", err)
+	}
+	defer unmountDest()
 
 	fmt.Fprintf(writer, "Starting job %s (%s)\n", job.ID, engine.Name())
 	fmt.Fprintf(writer, "Source: %s\n", job.Source.Path)
@@ -99,6 +113,13 @@ func (s Service) Restore(job config.Job, snapshotID string, snapshotTime time.Ti
 		return err
 	}
 
+	// Mount destination share if needed (restore reads from destination).
+	unmountDest, err := mountIfNeeded(job.Destination, job.ID, "destination", job.Secrets.SMBDestPassword, job.Secrets.NFSDestPassword)
+	if err != nil {
+		return fmt.Errorf("mount destination: %w", err)
+	}
+	defer unmountDest()
+
 	logFile, writer, closeLog, err := prepareLogInDir(job, "restore")
 	if err != nil {
 		return err
@@ -138,11 +159,17 @@ func validateSupportedSlice(job config.Job) error {
 	if strings.TrimSpace(job.Name) == "" {
 		return fmt.Errorf("job name is empty")
 	}
-	if job.Source.Type != "local" {
-		return fmt.Errorf("only local source is supported in the first execution slice")
+	switch job.Source.Type {
+	case "local", "smb", "nfs":
+		// supported
+	default:
+		return fmt.Errorf("unsupported source type %q (supported: local, smb, nfs)", job.Source.Type)
 	}
-	if job.Destination.Type != "local" && job.Destination.Type != "s3" {
-		return fmt.Errorf("unsupported destination type %q (supported: local, s3)", job.Destination.Type)
+	switch job.Destination.Type {
+	case "local", "s3", "smb", "nfs":
+		// supported
+	default:
+		return fmt.Errorf("unsupported destination type %q (supported: local, s3, smb, nfs)", job.Destination.Type)
 	}
 	if job.Schedule.Mode != "" && job.Schedule.Mode != "manual" && job.Schedule.Mode != "daily" && job.Schedule.Mode != "weekly" && job.Schedule.Mode != "monthly" && job.Schedule.Mode != "cron" {
 		return fmt.Errorf("unsupported schedule mode %q", job.Schedule.Mode)
@@ -272,4 +299,50 @@ func prepareLogInDir(job config.Job, subdir string) (string, io.Writer, func(), 
 	}
 
 	return logFile, writer, closeFn, nil
+}
+
+// mountIfNeeded mounts an SMB or NFS share if the endpoint type requires it.
+// Returns a cleanup function that unmounts the share. For local and S3 endpoints,
+// the cleanup function is a no-op.
+func mountIfNeeded(ep config.Endpoint, jobID, role, smbPassword, nfsPassword string) (func(), error) {
+	noop := func() {}
+
+	switch ep.Type {
+	case "smb", "nfs":
+		// Build mount spec.
+		var mountPoint string
+		if role == "source" {
+			mountPoint = mount.SourceMountPoint(jobID)
+		} else {
+			mountPoint = mount.DestMountPoint(jobID)
+		}
+
+		password := ""
+		if ep.Type == "smb" {
+			password = smbPassword
+		} else {
+			password = nfsPassword
+		}
+
+		spec := mount.Spec{
+			Type:       ep.Type,
+			Host:       ep.Host,
+			ShareName:  ep.ShareName,
+			Username:   ep.Username,
+			Password:   password,
+			Domain:     ep.Domain,
+			MountPoint: mountPoint,
+		}
+
+		if err := mount.Mount(spec); err != nil {
+			return noop, err
+		}
+
+		return func() {
+			mount.Unmount(mountPoint)
+		}, nil
+
+	default:
+		return noop, nil
+	}
 }

@@ -27,6 +27,7 @@ import (
 	healthchecksPkg "github.com/lssolutions-ie/lss-backup-cli/v2/internal/healthchecks"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/installmanifest"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/jobs"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/mount"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/legacyimport"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/platform"
 	retentionPkg "github.com/lssolutions-ie/lss-backup-cli/v2/internal/retention"
@@ -482,9 +483,12 @@ func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Promp
 		return err
 	} else if ok {
 		var validator func(string) error
-		if job.Destination.Type == "s3" {
+		switch job.Destination.Type {
+		case "s3":
 			validator = validateS3Path
-		} else {
+		case "smb", "nfs":
+			validator = validateNotEmpty
+		default:
 			validator = validateDestinationPath
 		}
 		newDest, err := prompter.Ask("New destination path", validator)
@@ -607,11 +611,56 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 		return errCancelled
 	}
 
-	sourcePath, err := prompter.Ask("Local source directory", validateExistingDirectory)
-	if err != nil {
-		return err
+	// Source type — SMB/NFS only on Linux/macOS.
+	sourceType := "local"
+	var sourceHost, sourceShareName, sourceUsername, sourceDomain, sourcePassword string
+	var sourcePath string
+
+	if runtime.GOOS != "windows" {
+		_, srcChoice, err := prompter.Select("Source type", []string{"Local", "SMB", "NFS"})
+		if err != nil {
+			return err
+		}
+		if srcChoice == "" {
+			return errCancelled
+		}
+		switch srcChoice {
+		case "SMB":
+			sourceType = "smb"
+		case "NFS":
+			sourceType = "nfs"
+		}
 	}
-	sourcePath = cleanPath(sourcePath)
+
+	if sourceType == "smb" || sourceType == "nfs" {
+		sourceHost, err = prompter.Ask("Host (IP or hostname)", validateNotEmpty)
+		if err != nil {
+			return err
+		}
+		sourceShareName, err = prompter.Ask("Share name", validateNotEmpty)
+		if err != nil {
+			return err
+		}
+		sourceUsername, err = prompter.Ask("Username", validateNotEmpty)
+		if err != nil {
+			return err
+		}
+		sourceDomain, err = prompter.AskOptional("Domain (optional)")
+		if err != nil {
+			return err
+		}
+		sourcePassword, err = prompter.AskPassword("Password", validateNotEmpty)
+		if err != nil {
+			return err
+		}
+		sourcePath = mount.SourceMountPoint(jobID)
+	} else {
+		sourcePath, err = prompter.Ask("Local source directory", validateExistingDirectory)
+		if err != nil {
+			return err
+		}
+		sourcePath = cleanPath(sourcePath)
+	}
 
 	var excludeFile string
 	_, hasExclude, err := prompter.Select("Exclude specific files or directories?", []string{
@@ -632,26 +681,44 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 		excludeFile = cleanPath(excludeFile)
 	}
 
-	// Destination type — S3 is only available for restic.
+	// Destination type — options depend on program and OS.
 	destType := "local"
 	var destinationPath string
 	var awsKeyID, awsSecretKey, awsRegion string
+	var destHost, destShareName, destUsername, destDomain, destPassword string
 
-	if program == "restic" {
-		destOptions := []string{"Local", "S3"}
-		_, destChoice, err := prompter.Select("Destination type", destOptions)
-		if err != nil {
-			return err
+	{
+		var destOptions []string
+		if program == "restic" && runtime.GOOS != "windows" {
+			destOptions = []string{"Local", "S3", "SMB", "NFS"}
+		} else if program == "restic" {
+			destOptions = []string{"Local", "S3"}
+		} else if runtime.GOOS != "windows" {
+			destOptions = []string{"Local", "SMB", "NFS"}
 		}
-		if destChoice == "" {
-			return errCancelled
-		}
-		if destChoice == "S3" {
-			destType = "s3"
+		// On Windows with rsync: no choice needed (local only).
+
+		if len(destOptions) > 0 {
+			_, destChoice, err := prompter.Select("Destination type", destOptions)
+			if err != nil {
+				return err
+			}
+			if destChoice == "" {
+				return errCancelled
+			}
+			switch destChoice {
+			case "S3":
+				destType = "s3"
+			case "SMB":
+				destType = "smb"
+			case "NFS":
+				destType = "nfs"
+			}
 		}
 	}
 
-	if destType == "s3" {
+	switch destType {
+	case "s3":
 		s3Path, err := prompter.Ask("S3 repository URL (e.g. s3:s3.amazonaws.com/bucket/path)", validateS3Path)
 		if err != nil {
 			return err
@@ -670,7 +737,31 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 		if err != nil {
 			return err
 		}
-	} else {
+
+	case "smb", "nfs":
+		destHost, err = prompter.Ask("Host (IP or hostname)", validateNotEmpty)
+		if err != nil {
+			return err
+		}
+		destShareName, err = prompter.Ask("Share name", validateNotEmpty)
+		if err != nil {
+			return err
+		}
+		destUsername, err = prompter.Ask("Username", validateNotEmpty)
+		if err != nil {
+			return err
+		}
+		destDomain, err = prompter.AskOptional("Domain (optional)")
+		if err != nil {
+			return err
+		}
+		destPassword, err = prompter.AskPassword("Password", validateNotEmpty)
+		if err != nil {
+			return err
+		}
+		destinationPath = filepath.Join(mount.DestMountPoint(jobID), jobID)
+
+	default:
 		destinationBase, err := prompter.Ask("Local destination directory", validateDestinationPath)
 		if err != nil {
 			return err
@@ -711,26 +802,43 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 		return err
 	}
 
-	var secrets *config.Secrets
-	if program == "restic" {
-		secrets = &config.Secrets{
-			ResticPassword:     resticPassword,
-			AWSAccessKeyID:     awsKeyID,
-			AWSSecretAccessKey: awsSecretKey,
-			AWSDefaultRegion:   awsRegion,
-		}
+	secrets := &config.Secrets{
+		ResticPassword:     resticPassword,
+		AWSAccessKeyID:     awsKeyID,
+		AWSSecretAccessKey: awsSecretKey,
+		AWSDefaultRegion:   awsRegion,
+	}
+	// Source network password.
+	if sourceType == "smb" {
+		secrets.SMBPassword = sourcePassword
+	} else if sourceType == "nfs" {
+		secrets.NFSPassword = sourcePassword
+	}
+	// Destination network password.
+	if destType == "smb" {
+		secrets.SMBDestPassword = destPassword
+	} else if destType == "nfs" {
+		secrets.NFSDestPassword = destPassword
 	}
 
 	input := jobs.CreateInput{
 		ID:                 jobID,
 		Name:               name,
 		Program:            program,
-		SourceType:         "local",
+		SourceType:         sourceType,
 		SourcePath:         sourcePath,
+		SourceHost:         sourceHost,
+		SourceShareName:    sourceShareName,
+		SourceUsername:     sourceUsername,
+		SourceDomain:       sourceDomain,
 		ExcludeFile:        strings.TrimSpace(excludeFile),
 		RsyncNoPermissions: rsyncNoPerms,
 		DestType:           destType,
 		DestPath:           destinationPath,
+		DestHost:           destHost,
+		DestShareName:      destShareName,
+		DestUsername:        destUsername,
+		DestDomain:         destDomain,
 		Schedule:           schedule,
 		Enabled:            true,
 		Retention:          retention,
@@ -2362,6 +2470,9 @@ func removeJob(paths app.Paths, prompter ui.Prompter, id string) error {
 		if job.Destination.Type == "s3" {
 			ui.StatusWarn("S3 data must be deleted manually from your S3 provider.")
 			ui.StatusWarn("Bucket/path: " + job.Destination.Path)
+		} else if job.Destination.Type == "smb" || job.Destination.Type == "nfs" {
+			ui.StatusWarn(fmt.Sprintf("Data on remote %s share must be deleted manually.", strings.ToUpper(job.Destination.Type)))
+			ui.StatusWarn(fmt.Sprintf("Host: %s  Share: %s", job.Destination.Host, job.Destination.ShareName))
 		} else {
 			fmt.Printf("  Deleting backed up data at %s...\n", job.Destination.Path)
 			if err := os.RemoveAll(job.Destination.Path); err != nil {

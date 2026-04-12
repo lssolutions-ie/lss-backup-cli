@@ -68,16 +68,19 @@ func Parse(path string) (Result, error) {
 	case "local", "":
 		res.Input.SourceType = "local"
 	case "smb":
-		res.Input.SourceType = "local"
-		w := "source type SMB is not supported in v2; source path imported as local"
-		if ip := kv["MPTARGETIP"]; ip != "" {
-			w += fmt.Sprintf(" (was SMB share //%s/%s as %s\\%s)",
-				ip, kv["MPSN"], kv["DOMAIN"], kv["USERNAME"])
-		}
-		warns = append(warns, w)
+		res.Input.SourceType = "smb"
+		res.Input.SourceHost = kv["MPTARGETIP"]
+		res.Input.SourceShareName = kv["MPSN"]
+		res.Input.SourceUsername = kv["USERNAME"]
+		res.Input.SourceDomain = kv["DOMAIN"]
+		warns = append(warns, fmt.Sprintf("source SMB share imported: //%s/%s as %s", kv["MPTARGETIP"], kv["MPSN"], kv["USERNAME"]))
 	case "nfs":
-		res.Input.SourceType = "local"
-		warns = append(warns, "source type NFS is not supported in v2; source path imported as local")
+		res.Input.SourceType = "nfs"
+		res.Input.SourceHost = kv["MPTARGETIP"]
+		res.Input.SourceShareName = kv["MPSN"]
+		res.Input.SourceUsername = kv["USERNAME"]
+		res.Input.SourceDomain = kv["DOMAIN"]
+		warns = append(warns, fmt.Sprintf("source NFS share imported: %s:/%s", kv["MPTARGETIP"], kv["MPSN"]))
 	default:
 		res.Input.SourceType = "local"
 		warns = append(warns, fmt.Sprintf("unknown source type %q treated as local", sourceType))
@@ -92,15 +95,19 @@ func Parse(path string) (Result, error) {
 	case "s3":
 		res.Input.DestType = "s3"
 	case "smb":
-		res.Input.DestType = "local"
-		warns = append(warns, "destination type SMB is not supported in v2; destination path imported as-is")
+		res.Input.DestType = "smb"
+		res.Input.DestHost = kv["DMPTARGETIP"]
+		res.Input.DestShareName = kv["DMPSN"]
+		res.Input.DestUsername = kv["DUSERNAME"]
+		res.Input.DestDomain = kv["DDOMAIN"]
+		warns = append(warns, fmt.Sprintf("destination SMB share imported: //%s/%s", kv["DMPTARGETIP"], kv["DMPSN"]))
 	case "nfs":
-		res.Input.DestType = "local"
-		w := "destination type NFS is not supported in v2; destination path imported as local"
-		if ip := kv["DMPTARGETIP"]; ip != "" {
-			w += fmt.Sprintf(" (was NFS share %s:%s)", ip, kv["DMPSN"])
-		}
-		warns = append(warns, w)
+		res.Input.DestType = "nfs"
+		res.Input.DestHost = kv["DMPTARGETIP"]
+		res.Input.DestShareName = kv["DMPSN"]
+		res.Input.DestUsername = kv["DUSERNAME"]
+		res.Input.DestDomain = kv["DDOMAIN"]
+		warns = append(warns, fmt.Sprintf("destination NFS share imported: %s:/%s", kv["DMPTARGETIP"], kv["DMPSN"]))
 	default:
 		res.Input.DestType = "local"
 		warns = append(warns, fmt.Sprintf("unknown destination type %q treated as local", destType))
