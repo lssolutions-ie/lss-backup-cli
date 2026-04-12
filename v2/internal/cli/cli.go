@@ -2232,9 +2232,11 @@ func runRepoLSRsync(appPaths app.Paths, jobID, subPath string) error {
 	}
 	defer unmount()
 
+	// --path is an absolute path (from the initial listing's path field),
+	// so use it directly — don't prepend the destination.
 	dir := job.Destination.Path
 	if subPath != "" {
-		dir = filepath.Join(dir, subPath)
+		dir = subPath
 	}
 
 	entries, err := os.ReadDir(dir)
