@@ -2096,6 +2096,14 @@ func runRepoLS(paths app.Paths, jobID, snapshotID, subPath string) error {
 		Files []fileEntry `json:"files"`
 	}
 
+	// Determine the parent directory for filtering direct children.
+	// restic ls returns ALL entries recursively — we only want immediate children.
+	parentDir := subPath
+	if parentDir == "" {
+		parentDir = "/"
+	}
+	parentDir = strings.TrimRight(parentDir, "/")
+
 	var resp lsResponse
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		line = strings.TrimSpace(line)
@@ -2110,10 +2118,20 @@ func runRepoLS(paths app.Paths, jobID, snapshotID, subPath string) error {
 		if entry["struct_type"] != "node" {
 			continue
 		}
+
+		entryPath := fmt.Sprintf("%v", entry["path"])
+
+		// Filter: only include direct children of parentDir.
+		// A direct child's parent directory equals parentDir.
+		entryParent := filepath.Dir(entryPath)
+		if entryParent != parentDir {
+			continue
+		}
+
 		fe := fileEntry{
 			Name: fmt.Sprintf("%v", entry["name"]),
 			Type: fmt.Sprintf("%v", entry["type"]),
-			Path: fmt.Sprintf("%v", entry["path"]),
+			Path: entryPath,
 		}
 		if mtime, ok := entry["mtime"]; ok {
 			fe.Mtime = fmt.Sprintf("%v", mtime)
