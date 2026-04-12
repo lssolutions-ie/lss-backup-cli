@@ -1226,6 +1226,7 @@ func runSystemLogBrowser(paths app.Paths, prompter ui.Prompter) {
 			"System Audit Events",
 			"Activity Log",
 			"Daemon Log",
+			"SSH Logs",
 			"Job Run Logs",
 		})
 		if err != nil || choice == "" {
@@ -1241,6 +1242,9 @@ func runSystemLogBrowser(paths app.Paths, prompter ui.Prompter) {
 			pauseForEnter()
 		case "Daemon Log":
 			showStructuredLogNewestFirst(filepath.Join(paths.StateDir, "daemon.log"), "Daemon Log")
+			pauseForEnter()
+		case "SSH Logs":
+			showSSHLogs(paths)
 			pauseForEnter()
 		case "Job Run Logs":
 			runJobRunLogBrowserGlobal(paths, prompter)
@@ -1477,6 +1481,46 @@ func showStructuredLogNewestFirst(path, title string) {
 	rows := make([]logRow, len(lines))
 	for i, l := range lines {
 		rows[len(lines)-1-i] = parseLogLine(l)
+	}
+
+	printLogTable(rows, auditPageSize)
+}
+
+// showSSHLogs filters daemon.log for SSH tunnel and credential entries and
+// displays them newest-first using the same structured log viewer.
+func showSSHLogs(paths app.Paths) {
+	ui.ClearScreen()
+	ui.Header("SSH Logs")
+
+	daemonLog := filepath.Join(paths.StateDir, "daemon.log")
+	lines, ok := readLogLines(daemonLog)
+	if !ok {
+		return
+	}
+
+	// Filter for SSH/tunnel-related log lines.
+	var filtered []string
+	for _, l := range lines {
+		if strings.Contains(l, "Tunnel:") ||
+			strings.Contains(l, "SSH:") ||
+			strings.Contains(l, "tunnel") ||
+			strings.Contains(l, "key registered") ||
+			strings.Contains(l, "key pair") ||
+			strings.Contains(l, "heartbeat") ||
+			strings.Contains(l, "Heartbeat") {
+			filtered = append(filtered, l)
+		}
+	}
+
+	if len(filtered) == 0 {
+		ui.StatusInfo("No SSH or tunnel log entries found.")
+		return
+	}
+
+	// Reverse so newest is first.
+	rows := make([]logRow, len(filtered))
+	for i, l := range filtered {
+		rows[len(filtered)-1-i] = parseLogLine(l)
 	}
 
 	printLogTable(rows, auditPageSize)

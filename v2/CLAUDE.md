@@ -295,7 +295,7 @@ Main menu shows a `●` daemon status dot (green = running, yellow = stopped) di
    - Delete Backup (asks whether to also destroy backed-up data, double confirmation)
 3. **Import Backup** — v2 job.toml or v1 {BKID}-Configuration.env
 4. **Settings** — Manage Notification Channels (stub) / Backup Config (stub) / Management Console (stub) / Restart Daemon / Check For Updates
-5. **Audit Log** — submenu: System Audit Events / Activity Log / Daemon Log / Job Run Logs (pick job → pick file → view)
+5. **Audit Log** — submenu: System Audit Events / Activity Log / Daemon Log / SSH Logs / Job Run Logs (pick job → pick file → view)
 6. **About** — version, platform, paths, install manifest, daemon status (green/red), installed tool versions (restic, rsync)
 7. **Exit**
 
