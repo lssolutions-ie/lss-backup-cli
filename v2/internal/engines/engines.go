@@ -52,8 +52,10 @@ func (e ResticEngine) Init(job config.Job, output io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(job.Destination.Path, 0o755); err != nil {
-		return fmt.Errorf("create destination path: %w", err)
+	if !isRemoteRepo(job) {
+		if err := os.MkdirAll(job.Destination.Path, 0o755); err != nil {
+			return fmt.Errorf("create destination path: %w", err)
+		}
 	}
 	return ensureResticRepo(job, resticBin, output)
 }
@@ -68,8 +70,10 @@ func (e ResticEngine) Run(job config.Job, output io.Writer) error {
 		return err
 	}
 
-	if err := os.MkdirAll(job.Destination.Path, 0o755); err != nil {
-		return fmt.Errorf("create destination path: %w", err)
+	if !isRemoteRepo(job) {
+		if err := os.MkdirAll(job.Destination.Path, 0o755); err != nil {
+			return fmt.Errorf("create destination path: %w", err)
+		}
 	}
 
 	if err := ensureResticRepo(job, resticBin, output); err != nil {
@@ -89,11 +93,7 @@ func (e ResticEngine) Run(job config.Job, output io.Writer) error {
 	executil.HideWindow(cmd)
 	cmd.Stdout = output
 	cmd.Stderr = output
-	cmd.Env = buildEnv(
-		"RESTIC_PASSWORD="+job.Secrets.ResticPassword,
-		"AWS_ACCESS_KEY_ID="+job.Secrets.AWSAccessKeyID,
-		"AWS_SECRET_ACCESS_KEY="+job.Secrets.AWSSecretAccessKey,
-	)
+	cmd.Env = resticEnv(job)
 
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
@@ -124,11 +124,7 @@ func runForget(job config.Job, resticBin string, output io.Writer) error {
 	executil.HideWindow(cmd)
 	cmd.Stdout = output
 	cmd.Stderr = output
-	cmd.Env = buildEnv(
-		"RESTIC_PASSWORD="+job.Secrets.ResticPassword,
-		"AWS_ACCESS_KEY_ID="+job.Secrets.AWSAccessKeyID,
-		"AWS_SECRET_ACCESS_KEY="+job.Secrets.AWSSecretAccessKey,
-	)
+	cmd.Env = resticEnv(job)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("restic forget: %w", err)
 	}
@@ -154,11 +150,7 @@ func (e ResticEngine) Restore(job config.Job, snapshotID string, target string, 
 	executil.HideWindow(cmd)
 	cmd.Stdout = output
 	cmd.Stderr = output
-	cmd.Env = buildEnv(
-		"RESTIC_PASSWORD="+job.Secrets.ResticPassword,
-		"AWS_ACCESS_KEY_ID="+job.Secrets.AWSAccessKeyID,
-		"AWS_SECRET_ACCESS_KEY="+job.Secrets.AWSSecretAccessKey,
-	)
+	cmd.Env = resticEnv(job)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("restic restore failed: %w", err)
 	}
@@ -287,11 +279,7 @@ func (e ResticEngine) ListSnapshots(job config.Job) ([]Snapshot, error) {
 
 	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "snapshots", "--json")
 	executil.HideWindow(cmd)
-	cmd.Env = buildEnv(
-		"RESTIC_PASSWORD="+job.Secrets.ResticPassword,
-		"AWS_ACCESS_KEY_ID="+job.Secrets.AWSAccessKeyID,
-		"AWS_SECRET_ACCESS_KEY="+job.Secrets.AWSSecretAccessKey,
-	)
+	cmd.Env = resticEnv(job)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("restic snapshots failed: %w", err)
@@ -317,11 +305,7 @@ func (e ResticEngine) Snapshots(job config.Job, output io.Writer) error {
 	executil.HideWindow(cmd)
 	cmd.Stdout = output
 	cmd.Stderr = output
-	cmd.Env = buildEnv(
-		"RESTIC_PASSWORD="+job.Secrets.ResticPassword,
-		"AWS_ACCESS_KEY_ID="+job.Secrets.AWSAccessKeyID,
-		"AWS_SECRET_ACCESS_KEY="+job.Secrets.AWSSecretAccessKey,
-	)
+	cmd.Env = resticEnv(job)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("restic snapshots failed: %w", err)
 	}
@@ -447,28 +431,50 @@ func (e RsyncEngine) Restore(job config.Job, snapshotID string, target string, o
 }
 
 func ensureResticRepo(job config.Job, resticBin string, output io.Writer) error {
-	// For local repositories, the presence of the 'config' file indicates an
-	// initialised repo. This avoids running 'restic snapshots' as a probe,
-	// which would produce misleading errors (e.g. wrong password → init attempt).
-	repoConfig := filepath.Join(job.Destination.Path, "config")
-	if _, err := os.Stat(repoConfig); err == nil {
-		return nil
+	if !isRemoteRepo(job) {
+		// For local repositories, the presence of the 'config' file indicates an
+		// initialised repo. This avoids running 'restic snapshots' as a probe,
+		// which would produce misleading errors (e.g. wrong password → init attempt).
+		repoConfig := filepath.Join(job.Destination.Path, "config")
+		if _, err := os.Stat(repoConfig); err == nil {
+			return nil
+		}
 	}
 
-	fmt.Fprintln(output, "Restic repository not found, initialising...")
+	// For remote repos (S3), always attempt init — restic will return
+	// "repository master key and target already exist" if already initialised.
+	fmt.Fprintln(output, "Checking restic repository...")
 	initCmd := exec.Command(resticBin, "-r", job.Destination.Path, "init")
 	executil.HideWindow(initCmd)
 	initCmd.Stdout = output
 	initCmd.Stderr = output
-	initCmd.Env = buildEnv(
-		"RESTIC_PASSWORD="+job.Secrets.ResticPassword,
-		"AWS_ACCESS_KEY_ID="+job.Secrets.AWSAccessKeyID,
-		"AWS_SECRET_ACCESS_KEY="+job.Secrets.AWSSecretAccessKey,
-	)
+	initCmd.Env = resticEnv(job)
 
 	if err := initCmd.Run(); err != nil {
+		// "already exists" / "already initialised" is not an error for remote repos.
+		if isRemoteRepo(job) {
+			return nil
+		}
 		return fmt.Errorf("restic repository init failed: %w", err)
 	}
 
 	return nil
+}
+
+// isRemoteRepo returns true if the job destination is a remote repository (S3, etc.).
+func isRemoteRepo(job config.Job) bool {
+	return job.Destination.Type == "s3"
+}
+
+// resticEnv builds the environment for restic commands, including AWS credentials.
+func resticEnv(job config.Job) []string {
+	vars := []string{
+		"RESTIC_PASSWORD=" + job.Secrets.ResticPassword,
+		"AWS_ACCESS_KEY_ID=" + job.Secrets.AWSAccessKeyID,
+		"AWS_SECRET_ACCESS_KEY=" + job.Secrets.AWSSecretAccessKey,
+	}
+	if job.Secrets.AWSDefaultRegion != "" {
+		vars = append(vars, "AWS_DEFAULT_REGION="+job.Secrets.AWSDefaultRegion)
+	}
+	return buildEnv(vars...)
 }

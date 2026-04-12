@@ -141,8 +141,8 @@ func validateSupportedSlice(job config.Job) error {
 	if job.Source.Type != "local" {
 		return fmt.Errorf("only local source is supported in the first execution slice")
 	}
-	if job.Destination.Type != "local" {
-		return fmt.Errorf("only local destination is supported in the first execution slice")
+	if job.Destination.Type != "local" && job.Destination.Type != "s3" {
+		return fmt.Errorf("unsupported destination type %q (supported: local, s3)", job.Destination.Type)
 	}
 	if job.Schedule.Mode != "" && job.Schedule.Mode != "manual" && job.Schedule.Mode != "daily" && job.Schedule.Mode != "weekly" && job.Schedule.Mode != "monthly" && job.Schedule.Mode != "cron" {
 		return fmt.Errorf("unsupported schedule mode %q", job.Schedule.Mode)

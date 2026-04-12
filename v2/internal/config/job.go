@@ -67,11 +67,12 @@ type Notifications struct {
 }
 
 type Secrets struct {
-	ResticPassword    string
-	AWSAccessKeyID    string
+	ResticPassword     string
+	AWSAccessKeyID     string
 	AWSSecretAccessKey string
-	SMBPassword       string
-	NFSPassword       string
+	AWSDefaultRegion   string
+	SMBPassword        string
+	NFSPassword        string
 }
 
 func LoadJob(jobDir string) (Job, error) {
@@ -328,6 +329,8 @@ func LoadSecrets(path string) (Secrets, error) {
 			secrets.AWSAccessKeyID = value
 		case "AWS_SECRET_ACCESS_KEY":
 			secrets.AWSSecretAccessKey = value
+		case "AWS_DEFAULT_REGION":
+			secrets.AWSDefaultRegion = value
 		case "SMB_PASSWORD":
 			secrets.SMBPassword = value
 		case "NFS_PASSWORD":

@@ -481,14 +481,23 @@ func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Promp
 	if ok, err := prompter.Confirm(fmt.Sprintf("Destination path [%s] — change?", job.Destination.Path)); err != nil {
 		return err
 	} else if ok {
-		newDest, err := prompter.Ask("New destination path", validateDestinationPath)
+		var validator func(string) error
+		if job.Destination.Type == "s3" {
+			validator = validateS3Path
+		} else {
+			validator = validateDestinationPath
+		}
+		newDest, err := prompter.Ask("New destination path", validator)
 		if err != nil {
 			return err
 		}
-		job.Destination.Path = cleanPath(newDest)
-		if _, statErr := os.Stat(job.Destination.Path); os.IsNotExist(statErr) {
-			fmt.Printf("  Note: %s does not exist yet — it will be created automatically.\n", job.Destination.Path)
+		if job.Destination.Type != "s3" {
+			newDest = cleanPath(newDest)
+			if _, statErr := os.Stat(newDest); os.IsNotExist(statErr) {
+				fmt.Printf("  Note: %s does not exist yet — it will be created automatically.\n", newDest)
+			}
 		}
+		job.Destination.Path = newDest
 		changed = true
 	}
 
@@ -623,12 +632,52 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 		excludeFile = cleanPath(excludeFile)
 	}
 
-	destinationBase, err := prompter.Ask("Local destination directory", validateDestinationPath)
-	if err != nil {
-		return err
+	// Destination type — S3 is only available for restic.
+	destType := "local"
+	var destinationPath string
+	var awsKeyID, awsSecretKey, awsRegion string
+
+	if program == "restic" {
+		destOptions := []string{"Local", "S3"}
+		_, destChoice, err := prompter.Select("Destination type", destOptions)
+		if err != nil {
+			return err
+		}
+		if destChoice == "" {
+			return errCancelled
+		}
+		if destChoice == "S3" {
+			destType = "s3"
+		}
 	}
-	destinationPath := filepath.Join(cleanPath(destinationBase), jobID)
-	ui.Println2("Backup will be stored in: " + destinationPath)
+
+	if destType == "s3" {
+		s3Path, err := prompter.Ask("S3 repository URL (e.g. s3:s3.amazonaws.com/bucket/path)", validateS3Path)
+		if err != nil {
+			return err
+		}
+		destinationPath = s3Path
+
+		awsKeyID, err = prompter.Ask("AWS Access Key ID", validateNotEmpty)
+		if err != nil {
+			return err
+		}
+		awsSecretKey, err = prompter.AskPassword("AWS Secret Access Key", validateNotEmpty)
+		if err != nil {
+			return err
+		}
+		awsRegion, err = prompter.AskOptional("AWS Region (e.g. eu-west-1, optional)")
+		if err != nil {
+			return err
+		}
+	} else {
+		destinationBase, err := prompter.Ask("Local destination directory", validateDestinationPath)
+		if err != nil {
+			return err
+		}
+		destinationPath = filepath.Join(cleanPath(destinationBase), jobID)
+		ui.Println2("Backup will be stored in: " + destinationPath)
+	}
 
 	rsyncNoPerms := false
 	if program == "rsync" {
@@ -664,7 +713,12 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 
 	var secrets *config.Secrets
 	if program == "restic" {
-		secrets = &config.Secrets{ResticPassword: resticPassword}
+		secrets = &config.Secrets{
+			ResticPassword:     resticPassword,
+			AWSAccessKeyID:     awsKeyID,
+			AWSSecretAccessKey: awsSecretKey,
+			AWSDefaultRegion:   awsRegion,
+		}
 	}
 
 	input := jobs.CreateInput{
@@ -675,7 +729,7 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 		SourcePath:         sourcePath,
 		ExcludeFile:        strings.TrimSpace(excludeFile),
 		RsyncNoPermissions: rsyncNoPerms,
-		DestType:           "local",
+		DestType:           destType,
 		DestPath:           destinationPath,
 		Schedule:           schedule,
 		Enabled:            true,
@@ -2305,12 +2359,17 @@ func removeJob(paths app.Paths, prompter ui.Prompter, id string) error {
 
 	if deleteData {
 		fmt.Println()
-		fmt.Printf("  Deleting backed up data at %s...\n", job.Destination.Path)
-		if err := os.RemoveAll(job.Destination.Path); err != nil {
-			ui.StatusError(fmt.Sprintf("Could not delete backed up data: %v", err))
-			ui.StatusWarn("You may need to delete it manually: " + job.Destination.Path)
+		if job.Destination.Type == "s3" {
+			ui.StatusWarn("S3 data must be deleted manually from your S3 provider.")
+			ui.StatusWarn("Bucket/path: " + job.Destination.Path)
 		} else {
-			ui.StatusOK("Backed up data deleted.")
+			fmt.Printf("  Deleting backed up data at %s...\n", job.Destination.Path)
+			if err := os.RemoveAll(job.Destination.Path); err != nil {
+				ui.StatusError(fmt.Sprintf("Could not delete backed up data: %v", err))
+				ui.StatusWarn("You may need to delete it manually: " + job.Destination.Path)
+			} else {
+				ui.StatusOK("Backed up data deleted.")
+			}
 		}
 	}
 
@@ -2865,6 +2924,23 @@ func validateDestinationPath(value string) error {
 	}
 	if !filepath.IsAbs(value) {
 		return fmt.Errorf("path must be absolute (e.g. C:\\Backup\\...)")
+	}
+	return nil
+}
+
+func validateS3Path(value string) error {
+	if !strings.HasPrefix(value, "s3:") {
+		return fmt.Errorf("S3 path must start with s3: (e.g. s3:s3.amazonaws.com/bucket/path)")
+	}
+	if len(value) < 5 {
+		return fmt.Errorf("S3 path is too short")
+	}
+	return nil
+}
+
+func validateNotEmpty(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("value cannot be empty")
 	}
 	return nil
 }

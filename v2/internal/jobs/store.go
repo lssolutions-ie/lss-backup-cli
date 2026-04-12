@@ -175,7 +175,7 @@ func Import(paths app.Paths, sourceJobFile string, newID string) (config.Job, er
 	}
 
 	secretsSource := filepath.Join(filepath.Dir(sourceJobFile), "secrets.env")
-	secretsData := []byte("RESTIC_PASSWORD=\nAWS_ACCESS_KEY_ID=\nAWS_SECRET_ACCESS_KEY=\nSMB_PASSWORD=\nNFS_PASSWORD=\n")
+	secretsData := []byte("RESTIC_PASSWORD=\nAWS_ACCESS_KEY_ID=\nAWS_SECRET_ACCESS_KEY=\nAWS_DEFAULT_REGION=\nSMB_PASSWORD=\nNFS_PASSWORD=\n")
 	if data, err := os.ReadFile(secretsSource); err == nil {
 		secretsData = data
 	}
@@ -367,12 +367,13 @@ func Export(paths app.Paths, id string, targetDir string) error {
 // If secrets is nil the keys are written with empty values.
 func buildSecretsContent(secrets *config.Secrets) string {
 	if secrets == nil {
-		return "RESTIC_PASSWORD=\nAWS_ACCESS_KEY_ID=\nAWS_SECRET_ACCESS_KEY=\nSMB_PASSWORD=\nNFS_PASSWORD=\n"
+		return "RESTIC_PASSWORD=\nAWS_ACCESS_KEY_ID=\nAWS_SECRET_ACCESS_KEY=\nAWS_DEFAULT_REGION=\nSMB_PASSWORD=\nNFS_PASSWORD=\n"
 	}
-	return fmt.Sprintf("RESTIC_PASSWORD=%s\nAWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\nSMB_PASSWORD=%s\nNFS_PASSWORD=%s\n",
+	return fmt.Sprintf("RESTIC_PASSWORD=%s\nAWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\nAWS_DEFAULT_REGION=%s\nSMB_PASSWORD=%s\nNFS_PASSWORD=%s\n",
 		secrets.ResticPassword,
 		secrets.AWSAccessKeyID,
 		secrets.AWSSecretAccessKey,
+		secrets.AWSDefaultRegion,
 		secrets.SMBPassword,
 		secrets.NFSPassword,
 	)

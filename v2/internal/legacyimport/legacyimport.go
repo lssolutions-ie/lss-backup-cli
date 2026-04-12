@@ -90,8 +90,7 @@ func Parse(path string) (Result, error) {
 	case "local", "":
 		res.Input.DestType = "local"
 	case "s3":
-		res.Input.DestType = "local"
-		warns = append(warns, "destination type S3 is not supported in v2; destination path imported as-is — backup will fail until S3 support is added")
+		res.Input.DestType = "s3"
 	case "smb":
 		res.Input.DestType = "local"
 		warns = append(warns, "destination type SMB is not supported in v2; destination path imported as-is")
