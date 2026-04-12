@@ -2078,8 +2078,14 @@ func runRepoLS(paths app.Paths, jobID, snapshotID, subPath string) error {
 
 	cmd := exec.Command(resticBin, args...)
 	cmd.Env = engines.ResticEnvForJob(job)
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
 	out, err := cmd.Output()
 	if err != nil {
+		errMsg := strings.TrimSpace(stderrBuf.String())
+		if errMsg != "" {
+			return fmt.Errorf("restic ls failed: %w — %s", err, errMsg)
+		}
 		return fmt.Errorf("restic ls failed: %w", err)
 	}
 
