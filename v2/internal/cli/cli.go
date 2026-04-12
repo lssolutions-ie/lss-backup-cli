@@ -2099,10 +2099,11 @@ func runRepoLS(paths app.Paths, jobID, snapshotID, subPath string) error {
 	// Determine the parent directory for filtering direct children.
 	// restic ls returns ALL entries recursively — we only want immediate children.
 	parentDir := subPath
-	if parentDir == "" {
+	if parentDir == "" || parentDir == "/" {
 		parentDir = "/"
+	} else {
+		parentDir = strings.TrimRight(parentDir, "/")
 	}
-	parentDir = strings.TrimRight(parentDir, "/")
 
 	var resp lsResponse
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
