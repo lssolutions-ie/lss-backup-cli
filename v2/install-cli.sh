@@ -366,6 +366,22 @@ PLIST
 		rm -f "${TMP_PLIST}"
 		sudo launchctl bootstrap system "${PLIST_PATH}"
 		echo "Daemon service enabled and started (launchd)"
+		echo ""
+		echo "================================================================"
+		echo "  IMPORTANT: Full Disk Access required on macOS"
+		echo "================================================================"
+		echo ""
+		echo "  The backup daemon needs Full Disk Access to read user"
+		echo "  directories. Without it, scheduled backups will produce"
+		echo "  empty snapshots."
+		echo ""
+		echo "  1. Open System Settings > Privacy & Security > Full Disk Access"
+		echo "  2. Click + and add: ${TARGET}"
+		echo "  3. Ensure the toggle is ON"
+		echo ""
+		echo "  You must repeat this after each update."
+		echo "================================================================"
+		echo ""
 		;;
 esac
 

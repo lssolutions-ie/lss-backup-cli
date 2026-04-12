@@ -23,7 +23,7 @@ operator-friendliness over cleverness.
 
 | Platform    | Status     | Notes                                              |
 |-------------|------------|----------------------------------------------------|
-| macOS       | Supported  | Primary dev platform                               |
+| macOS       | Supported  | Primary dev platform. **Full Disk Access required** for daemon. |
 | Linux       | Supported  | Debian/Ubuntu focus. Tested with apt.              |
 | Windows 11+ | Supported  | rsync NOT available. Uses PowerShell + winget.     |
 
@@ -598,6 +598,12 @@ Two distinct display modes are used, depending on whether the log has timestamps
 
 ## Things To Watch Out For
 
+- **macOS Full Disk Access:** The launchd daemon MUST have Full Disk Access granted in
+  System Settings > Privacy & Security > Full Disk Access for `/usr/local/bin/lss-backup-cli`.
+  Without it, backups of user directories silently produce empty snapshots (restic gets
+  "operation not permitted" but exits with code 3, which is treated as a warning). This must
+  be re-granted after every binary update. The install script and `--update` flow both print
+  reminders. This cannot be automated — it requires manual operator action in the macOS UI.
 - The TOML parser rejects unknown keys. When adding new config fields, update `assignValue` in `config/job.go`.
 - Secrets are never exported in plain text outside of their 0o600 files — keep it that way.
 - Scheduling is daemon-based — do NOT add cron file writing or `schtasks` calls per job.

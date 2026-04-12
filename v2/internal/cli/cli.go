@@ -338,6 +338,11 @@ func runCheckForUpdates(paths app.Paths, prompter ui.Prompter) error {
 		daemon.RestartService()
 		ui.StatusOK("lss-backup-cli updated to " + result.LatestVersion + ". Please restart.")
 		fmt.Println()
+		if runtime.GOOS == "darwin" {
+			ui.StatusWarn("macOS: Re-grant Full Disk Access to /usr/local/bin/lss-backup-cli")
+			ui.StatusWarn("System Settings > Privacy & Security > Full Disk Access")
+			fmt.Println()
+		}
 		ui.Println2("Press Enter to exit...")
 		fmt.Scanln()
 		os.Exit(0)
@@ -371,6 +376,11 @@ func runUpdateCLI(paths app.Paths) error {
 		fmt.Println()
 		ui.StatusOK("lss-backup-cli updated to " + result.LatestVersion)
 		fmt.Println()
+		if runtime.GOOS == "darwin" {
+			ui.StatusWarn("macOS: Re-grant Full Disk Access to /usr/local/bin/lss-backup-cli")
+			ui.StatusWarn("System Settings > Privacy & Security > Full Disk Access")
+			fmt.Println()
+		}
 	} else {
 		ui.StatusOK(result.Message)
 		fmt.Println()

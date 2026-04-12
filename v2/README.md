@@ -9,7 +9,7 @@ A cross-platform backup manager built on [restic](https://restic.net/) and [rsyn
 | Platform | Prerequisites |
 |----------|--------------|
 | Windows 11 | PowerShell 5.1+, run as Administrator |
-| macOS | Terminal access (do **not** run as root) |
+| macOS | Terminal access (do **not** run as root), **Full Disk Access** for the daemon (see below) |
 | Linux (Debian/Ubuntu) | `sudo` access |
 
 The install scripts automatically install all missing dependencies (Go, restic, rsync). You do not need to install them manually.
@@ -74,6 +74,21 @@ The installer will:
 - Create logs at `/Library/Logs/LSS Backup/`
 - Install and start the **backup daemon** as a launchd system service (auto-starts on boot, restarts on failure)
 - Write an install manifest to `/Library/Application Support/LSS Backup/state/install-manifest.json`
+
+> **IMPORTANT — Full Disk Access required on macOS:**
+>
+> The backup daemon runs as a system service via launchd. macOS requires **Full Disk Access** for any process that reads user directories (e.g. `/Users/*/Documents`, `/Users/*/Downloads`).
+>
+> **Without Full Disk Access, scheduled backups of user directories will silently produce empty snapshots.**
+>
+> After installation (and after every update), grant Full Disk Access to the CLI binary:
+>
+> 1. Open **System Settings** (or System Preferences on older macOS)
+> 2. Go to **Privacy & Security** > **Full Disk Access**
+> 3. Click the **+** button and add `/usr/local/bin/lss-backup-cli`
+> 4. Ensure the toggle is **ON**
+>
+> You must repeat this step after each update, as the binary is replaced.
 
 After installation, run the CLI from any terminal:
 ```sh
@@ -144,6 +159,8 @@ The daemon checks `next_run.json` in each job directory to track upcoming runs. 
 Run the installer script again from the `v2` directory. It will build and replace the binary and restart the daemon service automatically.
 
 Alternatively, use the built-in update check from the CLI main menu: **Check For Updates**. This downloads the latest release, builds it, and restarts the daemon without any manual steps.
+
+> **macOS users:** After each update, you must re-grant **Full Disk Access** to `/usr/local/bin/lss-backup-cli` in System Settings > Privacy & Security > Full Disk Access. The binary is replaced during updates, which revokes the previous permission.
 
 ---
 
