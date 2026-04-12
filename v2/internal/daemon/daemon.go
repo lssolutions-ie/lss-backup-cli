@@ -104,6 +104,13 @@ func Run(paths app.Paths) error {
 			}
 		}
 
+		// Send a heartbeat when the tunnel connects so the server gets
+		// the real port and connected status immediately.
+		tunnelMgr.OnConnected(func() {
+			log.Println("Tunnel: connected — sending status heartbeat")
+			fireReport(paths, nil, reporting.ReportTypeHeartbeat, tunnelMgr)
+		})
+
 		go tunnelMgr.Run(ctx, appCfg.ServerURL, appCfg.NodeID, appCfg.PSKKey)
 	}
 

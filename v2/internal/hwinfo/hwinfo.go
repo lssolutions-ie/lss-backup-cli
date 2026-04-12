@@ -11,7 +11,16 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
+)
+
+// Public IP cache — refreshed every publicIPRefreshInterval calls to Collect().
+var (
+	cachedPublicIP     string
+	publicIPCallCount  int
+	publicIPMu         sync.Mutex
+	publicIPRefreshInterval = 12 // ~1 hour at 5-min heartbeat intervals
 )
 
 // Info holds the hardware and network snapshot for a node.
@@ -48,7 +57,7 @@ func Collect() Info {
 	info.RAM = totalRAM()
 	info.Storage = diskUsage()
 	info.LANIP = lanIP()
-	info.PublicIP = publicIP()
+	info.PublicIP = cachedPublicIPFetch()
 
 	return info
 }
@@ -64,9 +73,23 @@ func lanIP() string {
 	return addr.IP.String()
 }
 
-// publicIP fetches the public IP from a lightweight API.
+// cachedPublicIPFetch returns the cached public IP, refreshing it every
+// publicIPRefreshInterval calls (about once per hour at 5-min heartbeats).
+func cachedPublicIPFetch() string {
+	publicIPMu.Lock()
+	defer publicIPMu.Unlock()
+
+	publicIPCallCount++
+	if cachedPublicIP == "" || publicIPCallCount >= publicIPRefreshInterval {
+		publicIPCallCount = 0
+		cachedPublicIP = fetchPublicIP()
+	}
+	return cachedPublicIP
+}
+
+// fetchPublicIP fetches the public IP from a lightweight API.
 // 5-second timeout to avoid blocking the heartbeat.
-func publicIP() string {
+func fetchPublicIP() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

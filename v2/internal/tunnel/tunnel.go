@@ -45,11 +45,12 @@ type Status struct {
 
 // Manager holds the tunnel state and provides status for heartbeat reporting.
 type Manager struct {
-	mu        sync.RWMutex
-	port      int
-	connected bool
-	publicKey string
-	stateDir  string
+	mu          sync.RWMutex
+	port        int
+	connected   bool
+	publicKey   string
+	stateDir    string
+	onConnected func() // called when tunnel connects, if set
 }
 
 // NewManager creates a tunnel manager and loads (or generates) the key pair
@@ -62,6 +63,15 @@ func NewManager(stateDir string) *Manager {
 		log.Printf("Tunnel: failed to load/generate key in NewManager: %v", err)
 	}
 	return m
+}
+
+// OnConnected sets a callback that fires each time the tunnel establishes
+// a connection. Used by the daemon to send an immediate heartbeat with
+// the real tunnel port and connected status.
+func (m *Manager) OnConnected(fn func()) {
+	m.mu.Lock()
+	m.onConnected = fn
+	m.mu.Unlock()
 }
 
 // Status returns the current tunnel state for inclusion in heartbeat payloads.
@@ -177,6 +187,14 @@ func (m *Manager) connect(ctx context.Context, wsURL, nodeID, pskKey string, ssh
 
 	log.Printf("Tunnel: connected via WebSocket, remote port %d → %s", port, localSSHTarget)
 	m.setConnected(true, port)
+
+	// Notify the daemon so it can send a heartbeat with the real tunnel status.
+	m.mu.RLock()
+	cb := m.onConnected
+	m.mu.RUnlock()
+	if cb != nil {
+		go cb()
+	}
 
 	// Accept connections and forward them to local SSH.
 	doneCh := make(chan struct{})
