@@ -2184,11 +2184,14 @@ func runRepoDumpZip(paths app.Paths, jobID, snapshotID string, filePaths []strin
 	}
 	defer unmountFn()
 
+	// Compute common directory prefix to strip from zip entry names.
+	stripPrefix := commonDirPrefix(filePaths)
+
 	zipWriter := zip.NewWriter(os.Stdout)
 	defer zipWriter.Close()
 
 	for _, p := range filePaths {
-		if err := addPathToZip(zipWriter, resticBin, job, snapshotID, p); err != nil {
+		if err := addPathToZip(zipWriter, resticBin, job, snapshotID, p, stripPrefix); err != nil {
 			// Log error to stderr but continue with remaining paths.
 			fmt.Fprintf(os.Stderr, "warning: failed to add %s: %v\n", p, err)
 		}
@@ -2197,23 +2200,44 @@ func runRepoDumpZip(paths app.Paths, jobID, snapshotID string, filePaths []strin
 	return nil
 }
 
+// commonDirPrefix finds the common parent directory of all paths.
+// e.g. ["/home/user/Downloads/a.txt", "/home/user/Downloads/b.txt"] → "/home/user/Downloads/"
+func commonDirPrefix(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	// Use the directory of the first path as starting prefix.
+	prefix := filepath.Dir(paths[0]) + "/"
+	for _, p := range paths[1:] {
+		dir := filepath.Dir(p) + "/"
+		// Shrink prefix until it matches.
+		for !strings.HasPrefix(dir, prefix) {
+			prefix = filepath.Dir(strings.TrimRight(prefix, "/")) + "/"
+			if prefix == "/" || prefix == "./" {
+				return "/"
+			}
+		}
+	}
+	return prefix
+}
+
 // addPathToZip dumps a path from a restic snapshot as a tar archive and adds
 // each entry to the zip writer.
 // addPathToZip adds a path from a restic snapshot to the zip writer.
 // For directories: uses restic dump --archive tar and converts entries.
 // For files: uses restic dump (raw) and adds directly.
-func addPathToZip(zw *zip.Writer, resticBin string, job config.Job, snapshotID, filePath string) error {
+func addPathToZip(zw *zip.Writer, resticBin string, job config.Job, snapshotID, filePath, stripPrefix string) error {
 	// First try as a directory (tar archive).
-	if err := addDirToZip(zw, resticBin, job, snapshotID, filePath); err == nil {
+	if err := addDirToZip(zw, resticBin, job, snapshotID, filePath, stripPrefix); err == nil {
 		return nil
 	}
 
 	// Fall back to single file dump.
-	return addFileToZip(zw, resticBin, job, snapshotID, filePath)
+	return addFileToZip(zw, resticBin, job, snapshotID, filePath, stripPrefix)
 }
 
 // addDirToZip dumps a directory as tar and converts to zip entries.
-func addDirToZip(zw *zip.Writer, resticBin string, job config.Job, snapshotID, dirPath string) error {
+func addDirToZip(zw *zip.Writer, resticBin string, job config.Job, snapshotID, dirPath, stripPrefix string) error {
 	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "dump", "--archive", "tar", snapshotID, dirPath)
 	cmd.Env = engines.ResticEnvForJob(job)
 
@@ -2248,6 +2272,7 @@ func addDirToZip(zw *zip.Writer, resticBin string, job config.Job, snapshotID, d
 		}
 
 		name := strings.TrimPrefix(header.Name, "/")
+		name = strings.TrimPrefix(name, strings.TrimPrefix(stripPrefix, "/"))
 		if name == "" {
 			continue
 		}
@@ -2277,7 +2302,7 @@ func addDirToZip(zw *zip.Writer, resticBin string, job config.Job, snapshotID, d
 }
 
 // addFileToZip dumps a single file and adds it to the zip.
-func addFileToZip(zw *zip.Writer, resticBin string, job config.Job, snapshotID, filePath string) error {
+func addFileToZip(zw *zip.Writer, resticBin string, job config.Job, snapshotID, filePath, stripPrefix string) error {
 	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "dump", snapshotID, filePath)
 	cmd.Env = engines.ResticEnvForJob(job)
 	cmd.Stderr = os.Stderr
@@ -2290,11 +2315,9 @@ func addFileToZip(zw *zip.Writer, resticBin string, job config.Job, snapshotID, 
 		return fmt.Errorf("start restic dump: %w", err)
 	}
 
-	// Use just the filename for the zip entry.
+	// Strip common prefix for clean zip entry names.
 	name := strings.TrimPrefix(filePath, "/")
-	if idx := strings.LastIndex(name, "/"); idx >= 0 {
-		// Keep full path for context within the zip.
-	}
+	name = strings.TrimPrefix(name, strings.TrimPrefix(stripPrefix, "/"))
 
 	zh := &zip.FileHeader{
 		Name:   name,
