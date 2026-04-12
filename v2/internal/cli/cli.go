@@ -644,6 +644,7 @@ func runReconfigureBackupWizard(paths app.Paths, jobID string, prompter ui.Promp
 		return err
 	}
 	ui.StatusOK("Job updated.")
+	fireImmediateReport(paths)
 	pauseForEnter()
 	return nil
 }
@@ -947,6 +948,7 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 	activitylog.Audit(paths.LogsDir, fmt.Sprintf("Job Created by user %q via interactive CLI: %s (%s) — engine: %s, source: %s", currentOSUser(), job.ID, job.Name, job.Program, job.Source.Path))
 	audit.Record(job.JobDir, "Job Created", fmt.Sprintf("engine: %s, source: %s", job.Program, job.Source.Path))
 	daemon.TriggerReload(paths.StateDir)
+	fireImmediateReport(paths)
 
 	ui.ClearScreen()
 	ui.Header("Job Created")
@@ -1103,6 +1105,7 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 				activitylog.Audit(paths.LogsDir, fmt.Sprintf("Job Modified by user %q via interactive CLI: %s (%s) — schedule changed to: %s", currentOSUser(), job.ID, job.Name, cronSchedule.Describe(reloaded.Schedule)))
 				audit.Record(job.JobDir, "Configure Schedule", cronSchedule.Describe(reloaded.Schedule))
 				daemon.TriggerReload(paths.StateDir)
+				fireImmediateReport(paths)
 			}
 		case "Configure Retention":
 			updatedJob, err := jobs.Load(paths, job.ID)
@@ -1120,6 +1123,7 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 				activitylog.Audit(paths.LogsDir, fmt.Sprintf("Job Modified by user %q via interactive CLI: %s (%s) — retention changed to: %s", currentOSUser(), job.ID, job.Name, reloaded.Retention.Mode))
 				audit.Record(job.JobDir, "Configure Retention", fmt.Sprintf("mode: %s", reloaded.Retention.Mode))
 				daemon.TriggerReload(paths.StateDir)
+				fireImmediateReport(paths)
 			}
 		case "Configure Notifications":
 			updatedJob, err := jobs.Load(paths, job.ID)
@@ -1141,6 +1145,7 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 				activitylog.Audit(paths.LogsDir, fmt.Sprintf("Job Modified by user %q via interactive CLI: %s (%s) — notifications: %s", currentOSUser(), job.ID, job.Name, notifDetail))
 				audit.Record(job.JobDir, "Configure Notifications", notifDetail)
 				daemon.TriggerReload(paths.StateDir)
+				fireImmediateReport(paths)
 			}
 		case "Show Job Configuration":
 			if err := showJob(paths, job.ID); err != nil {
@@ -1181,6 +1186,7 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			}
 			activitylog.Audit(paths.LogsDir, fmt.Sprintf("Job Deleted by user %q via interactive CLI: %s (%s) — destination: %s", currentOSUser(), job.ID, job.Name, job.Destination.Path))
 			daemon.TriggerReload(paths.StateDir)
+			fireImmediateReport(paths)
 			return nil
 		case "Back To Main Menu":
 			return nil
@@ -1964,7 +1970,7 @@ func runJobByID(paths app.Paths, id string) error {
 			if nodeName == "" {
 				nodeName, _ = os.Hostname()
 			}
-			status := reporting.BuildNodeStatus(nodeName, allJobs, nil, false)
+			status := reporting.BuildNodeStatus(nodeName, allJobs, nil, true)
 			status.ReportType = reporting.ReportTypePostRun
 			reporting.NewReporter(appCfg, paths.RootDir, paths.LogsDir).Report(status)
 		}
@@ -2514,6 +2520,26 @@ func mountIfNeededForRepo(job config.Job) (func(), error) {
 	}
 
 	return noop, nil
+}
+
+// fireImmediateReport sends a heartbeat-type report with all jobs so the
+// server dashboard stays in sync after job create/delete/edit operations.
+func fireImmediateReport(paths app.Paths) {
+	appCfg, err := config.LoadAppConfig(paths.RootDir)
+	if err != nil || !appCfg.Enabled {
+		return
+	}
+	allJobs, err := jobs.LoadAll(paths)
+	if err != nil {
+		return
+	}
+	nodeName := appCfg.NodeHostname
+	if nodeName == "" {
+		nodeName, _ = os.Hostname()
+	}
+	status := reporting.BuildNodeStatus(nodeName, allJobs, nil, true)
+	status.ReportType = reporting.ReportTypeHeartbeat
+	reporting.NewReporter(appCfg, paths.RootDir, paths.LogsDir).Report(status)
 }
 
 func runManagementConsoleWizard(paths app.Paths, prompter ui.Prompter) error {

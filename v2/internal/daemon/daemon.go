@@ -378,8 +378,8 @@ func fireReport(paths app.Paths, scheduled []scheduledJob, reportType string, tu
 		nodeName, _ = os.Hostname()
 	}
 
-	includeConfig := reportType == reporting.ReportTypeHeartbeat
-	status := reporting.BuildNodeStatus(nodeName, allJobs, nextRunByID, includeConfig)
+	// Always include config — keeps the server in sync on every report.
+	status := reporting.BuildNodeStatus(nodeName, allJobs, nextRunByID, true)
 	status.ReportType = reportType
 
 	// Attach tunnel status if available.
