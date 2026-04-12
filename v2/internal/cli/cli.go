@@ -115,8 +115,19 @@ func Run(args []string) error {
 		if args[0] == "run" && len(args) == 2 {
 			return runJobByID(paths, args[1])
 		}
-		if args[0] == "repo-info" && len(args) == 2 && args[1] == "--json" {
-			return runRepoInfo(paths)
+		if args[0] == "repo-info" && len(args) >= 2 && args[1] == "--json" {
+			summary := false
+			filterJobID := ""
+			for i := 2; i < len(args); i++ {
+				if args[i] == "--summary" {
+					summary = true
+				}
+				if args[i] == "--job" && i+1 < len(args) {
+					filterJobID = args[i+1]
+					i++
+				}
+			}
+			return runRepoInfoFiltered(paths, summary, filterJobID)
 		}
 		if args[0] == "repo-ls" && len(args) >= 4 && args[1] == "--json" {
 			// repo-ls --json <job-id> <snapshot-id> [--path <subdir>]
@@ -1922,21 +1933,36 @@ func runJobByID(paths app.Paths, id string) error {
 }
 
 // runRepoInfo outputs JSON with all jobs' repository info including snapshots.
-func runRepoInfo(paths app.Paths) error {
-	allJobs, err := jobs.LoadAll(paths)
-	if err != nil {
-		return err
+// runRepoInfoFiltered outputs JSON with job repository info.
+// summary=true: metadata only with snapshot count (no restic call for rsync jobs).
+// filterJobID: if non-empty, only return info for that job.
+func runRepoInfoFiltered(paths app.Paths, summary bool, filterJobID string) error {
+	var jobList []config.Job
+
+	if filterJobID != "" {
+		job, err := jobs.Load(paths, filterJobID)
+		if err != nil {
+			return err
+		}
+		jobList = []config.Job{job}
+	} else {
+		var err error
+		jobList, err = jobs.LoadAll(paths)
+		if err != nil {
+			return err
+		}
 	}
 
 	registry := engines.NewRegistry()
 
 	type repoJobInfo struct {
-		JobID       string             `json:"job_id"`
-		JobName     string             `json:"job_name"`
-		Program     string             `json:"program"`
-		Destination string             `json:"destination"`
-		Snapshots   []engines.Snapshot `json:"snapshots,omitempty"`
-		Error       string             `json:"error,omitempty"`
+		JobID         string             `json:"job_id"`
+		JobName       string             `json:"job_name"`
+		Program       string             `json:"program"`
+		Destination   string             `json:"destination"`
+		SnapshotCount *int               `json:"snapshot_count,omitempty"`
+		Snapshots     []engines.Snapshot `json:"snapshots,omitempty"`
+		Error         string             `json:"error,omitempty"`
 	}
 
 	type repoInfoResponse struct {
@@ -1944,7 +1970,7 @@ func runRepoInfo(paths app.Paths) error {
 	}
 
 	var resp repoInfoResponse
-	for _, job := range allJobs {
+	for _, job := range jobList {
 		info := repoJobInfo{
 			JobID:       job.ID,
 			JobName:     job.Name,
@@ -1972,6 +1998,9 @@ func runRepoInfo(paths app.Paths) error {
 
 		if snapErr != nil {
 			info.Error = snapErr.Error()
+		} else if summary {
+			count := len(snaps)
+			info.SnapshotCount = &count
 		} else {
 			info.Snapshots = snaps
 		}
