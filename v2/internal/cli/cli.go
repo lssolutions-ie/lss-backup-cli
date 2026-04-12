@@ -2071,10 +2071,10 @@ func runRepoLS(paths app.Paths, jobID, snapshotID, subPath string) error {
 	}
 	defer unmount()
 
+	// Don't pass --path to restic — it filters too aggressively (returns
+	// the path entry itself but not its children). Instead, list everything
+	// and filter to direct children client-side.
 	args := []string{"-r", job.Destination.Path, "ls", "--json", snapshotID}
-	if subPath != "" {
-		args = append(args, subPath)
-	}
 
 	cmd := exec.Command(resticBin, args...)
 	cmd.Env = engines.ResticEnvForJob(job)
