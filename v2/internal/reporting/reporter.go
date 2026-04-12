@@ -5,9 +5,14 @@ package reporting
 // block a backup job or propagate an error to the caller.
 type Reporter interface {
 	Report(status NodeStatus)
+	// ReportSync sends the status synchronously, blocking until complete.
+	// Used at daemon startup to ensure the server has the tunnel key
+	// before the tunnel attempts to connect.
+	ReportSync(status NodeStatus)
 }
 
 // NoOpReporter is used when reporting is disabled.
 type NoOpReporter struct{}
 
-func (NoOpReporter) Report(status NodeStatus) {}
+func (NoOpReporter) Report(status NodeStatus)     {}
+func (NoOpReporter) ReportSync(status NodeStatus) {}

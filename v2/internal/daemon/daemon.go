@@ -82,9 +82,19 @@ func Run(paths app.Paths) error {
 	watchReloadSignal(ctx, paths.StateDir, reloadCh)
 
 	// Start reverse SSH tunnel if management console is configured.
+	// The initial heartbeat must complete before the tunnel starts so the
+	// server has the node's public key in authorized_keys.
 	var tunnelMgr *tunnel.Manager
 	if appCfg, err := config.LoadAppConfig(paths.RootDir); err == nil && appCfg.Enabled && appCfg.ServerURL != "" {
 		tunnelMgr = tunnel.NewManager(paths.StateDir)
+
+		// Send a synchronous heartbeat first so the server registers the
+		// tunnel public key before we attempt to connect.
+		scheduled, err := buildSchedule(paths, time.Now())
+		if err == nil {
+			sendInitialHeartbeat(paths, scheduled, tunnelMgr)
+		}
+
 		go tunnelMgr.Run(ctx, appCfg.ServerURL, appCfg.NodeID, appCfg.PSKKey)
 	}
 
@@ -365,6 +375,46 @@ func fireReport(paths app.Paths, scheduled []scheduledJob, reportType string, tu
 
 	reporter := reporting.NewReporter(appCfg, paths.RootDir, paths.LogsDir)
 	reporter.Report(status)
+}
+
+// sendInitialHeartbeat sends a synchronous heartbeat so the server registers
+// the tunnel public key before the tunnel attempts to connect.
+func sendInitialHeartbeat(paths app.Paths, scheduled []scheduledJob, tunnelMgr *tunnel.Manager) {
+	appCfg, err := config.LoadAppConfig(paths.RootDir)
+	if err != nil || !appCfg.Enabled {
+		return
+	}
+
+	allJobs, err := jobs.LoadAll(paths)
+	if err != nil || len(allJobs) == 0 {
+		return
+	}
+
+	nextRunByID := make(map[string]time.Time, len(scheduled))
+	for _, sj := range scheduled {
+		nextRunByID[sj.job.ID] = sj.nextRun
+	}
+
+	nodeName := appCfg.NodeHostname
+	if nodeName == "" {
+		nodeName, _ = os.Hostname()
+	}
+
+	status := reporting.BuildNodeStatus(nodeName, allJobs, nextRunByID, true)
+	status.ReportType = reporting.ReportTypeHeartbeat
+
+	if tunnelMgr != nil {
+		ts := tunnelMgr.Status()
+		status.Tunnel = &reporting.TunnelStatus{
+			Port:      ts.Port,
+			PublicKey: ts.PublicKey,
+			Connected: ts.Connected,
+		}
+	}
+
+	log.Printf("Report: sending initial heartbeat for %d jobs (node_id=%s, psk_len=%d)", len(allJobs), appCfg.NodeID, len(appCfg.PSKKey))
+	reporter := reporting.NewReporter(appCfg, paths.RootDir, paths.LogsDir)
+	reporter.ReportSync(status)
 }
 
 func logSchedule(scheduled []scheduledJob) {

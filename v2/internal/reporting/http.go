@@ -55,6 +55,11 @@ func (r *httpReporter) Report(status NodeStatus) {
 	go r.send(status)
 }
 
+// ReportSync sends the status synchronously, blocking until complete.
+func (r *httpReporter) ReportSync(status NodeStatus) {
+	r.send(status)
+}
+
 func (r *httpReporter) send(status NodeStatus) {
 	// Re-read config fresh so any settings update is picked up immediately.
 	cfg, err := config.LoadAppConfig(r.rootDir)
