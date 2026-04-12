@@ -13,7 +13,7 @@ rsync), runs them, logs results, and reports to a central management server.
 V2 is a clean rewrite of a v1 shell-script-based tool. The goal is durability, safety, and
 operator-friendliness over cleverness.
 
-**Version:** v2.1.135
+**Version:** v2.1.141
 **Module:** `github.com/lssolutions-ie/lss-backup-cli/v2`
 **Go version:** 1.25.0
 
@@ -506,11 +506,17 @@ not by OS-level cron or Task Scheduler entries.
 - End-to-end tested: Linux, macOS, Windows nodes reporting to live server
 - SSH credentials: auto-created OS user (lss_* prefix, sudo/admin), encrypted storage with operator password
 - Settings → SSH Details: view/reset credentials, --setup-ssh flag for install scripts
+- SSH user creation: Linux (useradd + chpasswd + sudo), macOS (sysadminctl -admin), Windows (net user + PowerShell Set-LocalUser for >14 char passwords)
+- sshd password auth: `Match User lss_*` block auto-added to sshd_config on Linux/macOS, idempotent
 - Reverse SSH tunnel over WebSocket: wss://<server>/ws/ssh-tunnel with HMAC-SHA256 auth
-- Per-node ed25519 key pair generated and stored in state dir, public key sent in heartbeat
+- Per-node ed25519 key pair generated and stored in state dir, loaded eagerly in NewManager
+- Public key sent in initial sync heartbeat; server returns tunnel_key_registered confirmation
 - Tunnel auto-reconnects on disconnect, reports port/connected status in heartbeat
+- Daemon startup: sync heartbeat → confirm key registered → start tunnel (no auth race)
+- Windows PID lock: waits up to 10s for departing process during restart (no race)
 - Install scripts set up SSH server on all platforms (openssh-server, Remote Login, OpenSSH capability)
 - gorilla/websocket + golang.org/x/crypto/ssh dependencies added
+- End-to-end tested: browser → WebSocket → server → reverse tunnel → node sshd → interactive shell (all 3 platforms)
 
 ### Fully stubbed (menu exists, no implementation)
 
@@ -591,4 +597,4 @@ Two distinct display modes are used, depending on whether the log has timestamps
 
 ---
 
-_Last updated: 2026-04-12 (v2.1.135)_
+_Last updated: 2026-04-12 (v2.1.141)_

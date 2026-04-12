@@ -4,6 +4,7 @@ package sshcreds
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -12,12 +13,9 @@ import (
 // CreateUser creates an OS user with admin privileges for SSH access.
 func CreateUser(creds Credentials) error {
 	// sysadminctl creates the user with a password in one step.
-	if err := exec.Command("sysadminctl",
-		"-addUser", creds.Username,
-		"-password", creds.Password,
-		"-admin",
-	).Run(); err != nil {
-		return fmt.Errorf("create user: %w", err)
+	cmd := exec.Command("sysadminctl", "-addUser", creds.Username, "-password", creds.Password, "-admin")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("create user: %w — %s", err, string(out))
 	}
 
 	// Ensure sshd allows password auth for lss_* users.
@@ -56,18 +54,23 @@ func ensureSSHPasswordAuth() error {
 	f.Close()
 
 	// Reload sshd on macOS.
-	exec.Command("launchctl", "unload", "/System/Library/LaunchDaemons/ssh.plist").Run() //nolint:errcheck
-	exec.Command("launchctl", "load", "/System/Library/LaunchDaemons/ssh.plist").Run()   //nolint:errcheck
+	if out, err := exec.Command("launchctl", "unload", "/System/Library/LaunchDaemons/ssh.plist").CombinedOutput(); err != nil {
+		log.Printf("SSH: warning: launchctl unload ssh failed: %v — %s", err, string(out))
+	}
+	if out, err := exec.Command("launchctl", "load", "/System/Library/LaunchDaemons/ssh.plist").CombinedOutput(); err != nil {
+		log.Printf("SSH: warning: launchctl load ssh failed: %v — %s", err, string(out))
+		return fmt.Errorf("reload sshd: %w", err)
+	}
+	log.Println("SSH: sshd_config updated with Match User lss_* block, sshd reloaded")
 
 	return nil
 }
 
 // DeleteUser removes the OS user and their home directory.
 func DeleteUser(username string) error {
-	if err := exec.Command("sysadminctl",
-		"-deleteUser", username,
-	).Run(); err != nil {
-		return fmt.Errorf("delete user: %w", err)
+	cmd := exec.Command("sysadminctl", "-deleteUser", username)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("delete user: %w — %s", err, string(out))
 	}
 	return nil
 }

@@ -95,10 +95,12 @@ func Run(paths app.Paths) error {
 		if err == nil {
 			resp := sendInitialHeartbeat(paths, scheduled, tunnelMgr)
 			sentInitialHeartbeat = true
-			if resp.TunnelKeyRegistered {
+			if resp.OK && resp.TunnelKeyRegistered {
 				log.Println("Tunnel: server confirmed key registered, starting tunnel")
+			} else if resp.OK {
+				log.Println("Tunnel: heartbeat accepted, key not confirmed, starting tunnel anyway")
 			} else {
-				log.Println("Tunnel: server did not confirm key registration, starting tunnel anyway")
+				log.Println("Tunnel: initial heartbeat failed or not acknowledged, starting tunnel anyway")
 			}
 		}
 

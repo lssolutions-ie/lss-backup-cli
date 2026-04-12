@@ -4,6 +4,7 @@ package sshcreds
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -11,28 +12,27 @@ import (
 
 // CreateUser creates an OS user with sudo privileges for SSH access.
 func CreateUser(creds Credentials) error {
-	// Create user with no login shell initially.
-	if err := exec.Command("useradd",
-		"-m",
-		"-s", "/bin/bash",
-		creds.Username,
-	).Run(); err != nil {
+	// Create user with bash shell.
+	cmd := exec.Command("useradd", "-m", "-s", "/bin/bash", creds.Username)
+	if out, err := cmd.CombinedOutput(); err != nil {
 		// User might already exist.
-		if !strings.Contains(err.Error(), "already exists") {
-			return fmt.Errorf("create user: %w", err)
+		if !strings.Contains(string(out), "already exists") && !strings.Contains(err.Error(), "already exists") {
+			return fmt.Errorf("create user: %w — %s", err, string(out))
 		}
+		log.Printf("SSH: user %s already exists, updating password", creds.Username)
 	}
 
 	// Set the password.
-	cmd := exec.Command("chpasswd")
+	cmd = exec.Command("chpasswd")
 	cmd.Stdin = strings.NewReader(creds.Username + ":" + creds.Password)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("set password: %w", err)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("set password: %w — %s", err, string(out))
 	}
 
 	// Add to sudo group.
-	if err := exec.Command("usermod", "-aG", "sudo", creds.Username).Run(); err != nil {
-		return fmt.Errorf("add to sudo group: %w", err)
+	cmd = exec.Command("usermod", "-aG", "sudo", creds.Username)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("add to sudo group: %w — %s", err, string(out))
 	}
 
 	// Ensure sshd allows password auth for lss_* users.
@@ -72,17 +72,23 @@ func ensureSSHPasswordAuth() error {
 
 	// Reload sshd — try systemctl first, fall back to service.
 	if err := exec.Command("systemctl", "reload", "ssh").Run(); err != nil {
-		exec.Command("systemctl", "reload", "sshd").Run()   //nolint:errcheck
-		exec.Command("service", "sshd", "reload").Run()      //nolint:errcheck
+		if err2 := exec.Command("systemctl", "reload", "sshd").Run(); err2 != nil {
+			if err3 := exec.Command("service", "sshd", "reload").Run(); err3 != nil {
+				log.Printf("SSH: warning: failed to reload sshd (tried ssh, sshd, service): %v", err3)
+				return fmt.Errorf("reload sshd: all methods failed")
+			}
+		}
 	}
+	log.Println("SSH: sshd_config updated with Match User lss_* block, sshd reloaded")
 
 	return nil
 }
 
 // DeleteUser removes the OS user and their home directory.
 func DeleteUser(username string) error {
-	if err := exec.Command("userdel", "-r", username).Run(); err != nil {
-		return fmt.Errorf("delete user: %w", err)
+	cmd := exec.Command("userdel", "-r", username)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("delete user: %w — %s", err, string(out))
 	}
 	return nil
 }

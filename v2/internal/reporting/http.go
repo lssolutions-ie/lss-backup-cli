@@ -116,14 +116,29 @@ func (r *httpReporter) doSend(status NodeStatus) ReportResponse {
 	defer resp.Body.Close()
 
 	// Read and parse the response body.
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		r.warn(fmt.Sprintf("read response body: %v", readErr))
+		return ReportResponse{}
+	}
+
 	var result ReportResponse
-	json.Unmarshal(respBody, &result) //nolint:errcheck
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		r.warn(fmt.Sprintf("parse response body: %v (body: %.200s)", err, string(respBody)))
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		msg := fmt.Sprintf("server returned %s", resp.Status)
 		if resp.StatusCode == 400 {
 			msg += " — possible clock drift; verify system time is correct (NTP)"
+		}
+		// Include response body for debugging (truncated).
+		if len(respBody) > 0 {
+			body := string(respBody)
+			if len(body) > 500 {
+				body = body[:500] + "..."
+			}
+			msg += " — " + body
 		}
 		r.warn(msg)
 	}

@@ -58,6 +58,8 @@ func NewManager(stateDir string) *Manager {
 	m := &Manager{stateDir: stateDir}
 	if _, pubKeyStr, err := m.loadOrGenerateKey(); err == nil {
 		m.publicKey = pubKeyStr
+	} else {
+		log.Printf("Tunnel: failed to load/generate key in NewManager: %v", err)
 	}
 	return m
 }
@@ -165,7 +167,11 @@ func (m *Manager) connect(ctx context.Context, wsURL, nodeID, pskKey string, ssh
 	defer listener.Close()
 
 	// Extract the allocated port.
-	_, portStr, _ := net.SplitHostPort(listener.Addr().String())
+	addr := listener.Addr().String()
+	_, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		log.Printf("Tunnel: failed to parse listener address %q: %v", addr, err)
+	}
 	port := 0
 	fmt.Sscanf(portStr, "%d", &port)
 
@@ -179,6 +185,7 @@ func (m *Manager) connect(ctx context.Context, wsURL, nodeID, pskKey string, ssh
 		for {
 			remote, err := listener.Accept()
 			if err != nil {
+				log.Printf("Tunnel: listener accept failed: %v", err)
 				return
 			}
 			go m.forward(remote)
@@ -200,6 +207,7 @@ func (m *Manager) forward(remote net.Conn) {
 
 	local, err := net.DialTimeout("tcp", localSSHTarget, 5*time.Second)
 	if err != nil {
+		log.Printf("Tunnel: failed to connect to local SSH (%s): %v", localSSHTarget, err)
 		return
 	}
 	defer local.Close()

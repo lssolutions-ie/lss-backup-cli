@@ -26,14 +26,15 @@ Guiding Principles
 - Reporting must never fail or block a backup job.
 
 
-Current Version: v2.1.135
+Current Version: v2.1.141
 Current State: All three platforms (macOS, Linux, Windows) tested and working.
                CI builds and attaches binaries for all 6 platform/arch combos
                on every v2.* tag push. In-app updater downloads pre-built
                binaries. Management server deployed and receiving reports from
-               all three platforms. Reverse SSH tunnel over WebSocket built.
-               SSH credentials auto-creation built. Pending end-to-end tunnel test.
-               M6, M7, M11 complete.
+               all three platforms. Reverse SSH tunnel over WebSocket tested
+               end-to-end: browser → server → tunnel → node sshd on all 3
+               platforms. SSH credentials auto-creation with sshd password
+               auth configuration. M6, M7, M11 complete.
 
 
 Milestone M1: Define The Foundation
