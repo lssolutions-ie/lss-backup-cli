@@ -611,12 +611,12 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 		return errCancelled
 	}
 
-	// Source type — SMB/NFS only on Linux/macOS.
+	// Source type — SMB/NFS only on Linux (not macOS or Windows).
 	sourceType := "local"
 	var sourceHost, sourceShareName, sourceUsername, sourceDomain, sourcePassword string
 	var sourcePath string
 
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS == "linux" {
 		_, srcChoice, err := prompter.Select("Source type", []string{"Local", "SMB", "NFS"})
 		if err != nil {
 			return err
@@ -689,14 +689,14 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 
 	{
 		var destOptions []string
-		if program == "restic" && runtime.GOOS != "windows" {
+		if program == "restic" && runtime.GOOS == "linux" {
 			destOptions = []string{"Local", "S3", "SMB", "NFS"}
 		} else if program == "restic" {
 			destOptions = []string{"Local", "S3"}
-		} else if runtime.GOOS != "windows" {
+		} else if runtime.GOOS == "linux" {
 			destOptions = []string{"Local", "SMB", "NFS"}
 		}
-		// On Windows with rsync: no choice needed (local only).
+		// On Windows/macOS with rsync: no choice needed (local only).
 
 		if len(destOptions) > 0 {
 			_, destChoice, err := prompter.Select("Destination type", destOptions)
