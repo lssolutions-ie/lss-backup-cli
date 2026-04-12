@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"archive/tar"
+	"archive/zip"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -155,6 +158,22 @@ func Run(args []string) error {
 				return errors.New("repo-dump requires --path <file-path>")
 			}
 			return runRepoDump(paths, jobID, snapID, filePath)
+		}
+		if args[0] == "repo-dump-zip" && len(args) >= 4 && args[1] == "--json" {
+			// repo-dump-zip --json <job-id> <snapshot-id> --path <p1> --path <p2> ...
+			jobID := args[2]
+			snapID := args[3]
+			var paths2 []string
+			for i := 4; i < len(args)-1; i++ {
+				if args[i] == "--path" {
+					paths2 = append(paths2, args[i+1])
+					i++
+				}
+			}
+			if len(paths2) == 0 {
+				return errors.New("repo-dump-zip requires at least one --path <path>")
+			}
+			return runRepoDumpZip(paths, jobID, snapID, paths2)
 		}
 		return errors.New("v2 is menu-driven; run lss-backup-cli with no arguments to open the menu")
 	}
@@ -2137,6 +2156,100 @@ func runRepoDump(paths app.Paths, jobID, snapshotID, filePath string) error {
 		return fmt.Errorf("restic dump failed: %w", err)
 	}
 	return nil
+}
+
+// runRepoDumpZip streams a ZIP archive to stdout containing the specified paths
+// from a restic snapshot. Uses restic dump --archive tar for each path, then
+// converts the tar entries to zip entries.
+func runRepoDumpZip(paths app.Paths, jobID, snapshotID string, filePaths []string) error {
+	job, err := jobs.Load(paths, jobID)
+	if err != nil {
+		return err
+	}
+	if job.Program != "restic" {
+		return fmt.Errorf("repo-dump-zip is only supported for restic jobs")
+	}
+	if strings.TrimSpace(job.Secrets.ResticPassword) == "" {
+		return fmt.Errorf("RESTIC_PASSWORD is required")
+	}
+
+	resticBin, err := engines.LookResticPath()
+	if err != nil {
+		return err
+	}
+
+	unmountFn, mountErr := mountIfNeededForRepo(job)
+	if mountErr != nil {
+		return mountErr
+	}
+	defer unmountFn()
+
+	zipWriter := zip.NewWriter(os.Stdout)
+	defer zipWriter.Close()
+
+	for _, p := range filePaths {
+		if err := addPathToZip(zipWriter, resticBin, job, snapshotID, p); err != nil {
+			// Log error to stderr but continue with remaining paths.
+			fmt.Fprintf(os.Stderr, "warning: failed to add %s: %v\n", p, err)
+		}
+	}
+
+	return nil
+}
+
+// addPathToZip dumps a path from a restic snapshot as a tar archive and adds
+// each entry to the zip writer.
+func addPathToZip(zw *zip.Writer, resticBin string, job config.Job, snapshotID, path string) error {
+	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "dump", "--archive", "tar", snapshotID, path)
+	cmd.Env = engines.ResticEnvForJob(job)
+	cmd.Stderr = os.Stderr
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("create pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start restic dump: %w", err)
+	}
+
+	tr := tar.NewReader(stdout)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			break
+		}
+
+		// Skip directories as zip entries — they're implicit from file paths.
+		if header.Typeflag == tar.TypeDir {
+			continue
+		}
+
+		// Strip leading slash for clean zip paths.
+		name := strings.TrimPrefix(header.Name, "/")
+		if name == "" {
+			continue
+		}
+
+		zh := &zip.FileHeader{
+			Name:     name,
+			Method:   zip.Store, // no compression for streaming speed
+			Modified: header.ModTime,
+		}
+		zh.SetMode(header.FileInfo().Mode())
+
+		w, err := zw.CreateHeader(zh)
+		if err != nil {
+			return fmt.Errorf("create zip entry %s: %w", name, err)
+		}
+		if _, err := io.Copy(w, tr); err != nil {
+			return fmt.Errorf("write zip entry %s: %w", name, err)
+		}
+	}
+
+	return cmd.Wait()
 }
 
 func mountIfNeededForRepo(job config.Job) (func(), error) {
