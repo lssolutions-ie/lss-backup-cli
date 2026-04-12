@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
 	osuser "os/user"
 	"path/filepath"
 	"regexp"
@@ -112,6 +114,21 @@ func Run(args []string) error {
 		}
 		if args[0] == "run" && len(args) == 2 {
 			return runJobByID(paths, args[1])
+		}
+		if args[0] == "repo-info" && len(args) == 2 && args[1] == "--json" {
+			return runRepoInfo(paths)
+		}
+		if args[0] == "repo-ls" && len(args) >= 4 && args[1] == "--json" {
+			// repo-ls --json <job-id> <snapshot-id> [--path <subdir>]
+			jobID := args[2]
+			snapID := args[3]
+			subPath := ""
+			for i := 4; i < len(args)-1; i++ {
+				if args[i] == "--path" {
+					subPath = args[i+1]
+				}
+			}
+			return runRepoLS(paths, jobID, snapID, subPath)
 		}
 		return errors.New("v2 is menu-driven; run lss-backup-cli with no arguments to open the menu")
 	}
@@ -1887,6 +1904,191 @@ func runJobByID(paths app.Paths, id string) error {
 	}
 
 	return runErr
+}
+
+// runRepoInfo outputs JSON with all jobs' repository info including snapshots.
+func runRepoInfo(paths app.Paths) error {
+	allJobs, err := jobs.LoadAll(paths)
+	if err != nil {
+		return err
+	}
+
+	registry := engines.NewRegistry()
+
+	type repoJobInfo struct {
+		JobID       string             `json:"job_id"`
+		JobName     string             `json:"job_name"`
+		Program     string             `json:"program"`
+		Destination string             `json:"destination"`
+		Snapshots   []engines.Snapshot `json:"snapshots,omitempty"`
+		Error       string             `json:"error,omitempty"`
+	}
+
+	type repoInfoResponse struct {
+		Jobs []repoJobInfo `json:"jobs"`
+	}
+
+	var resp repoInfoResponse
+	for _, job := range allJobs {
+		info := repoJobInfo{
+			JobID:       job.ID,
+			JobName:     job.Name,
+			Program:     job.Program,
+			Destination: job.Destination.Path,
+		}
+
+		engine, engErr := registry.Get(job.Program)
+		if engErr != nil {
+			info.Error = engErr.Error()
+			resp.Jobs = append(resp.Jobs, info)
+			continue
+		}
+
+		// Mount if needed for SMB/NFS destinations.
+		unmount, mountErr := mountIfNeededForRepo(job)
+		if mountErr != nil {
+			info.Error = mountErr.Error()
+			resp.Jobs = append(resp.Jobs, info)
+			continue
+		}
+
+		snaps, snapErr := engine.ListSnapshots(job)
+		unmount()
+
+		if snapErr != nil {
+			info.Error = snapErr.Error()
+		} else {
+			info.Snapshots = snaps
+		}
+
+		resp.Jobs = append(resp.Jobs, info)
+	}
+
+	out, _ := json.MarshalIndent(resp, "", "  ")
+	fmt.Println(string(out))
+	return nil
+}
+
+// runRepoLS outputs JSON with the file listing for a specific restic snapshot.
+func runRepoLS(paths app.Paths, jobID, snapshotID, subPath string) error {
+	job, err := jobs.Load(paths, jobID)
+	if err != nil {
+		return err
+	}
+
+	if job.Program != "restic" {
+		return fmt.Errorf("repo-ls is only supported for restic jobs (job %s uses %s)", jobID, job.Program)
+	}
+
+	if strings.TrimSpace(job.Secrets.ResticPassword) == "" {
+		return fmt.Errorf("RESTIC_PASSWORD is required for restic jobs")
+	}
+
+	resticBin, err := engines.LookResticPath()
+	if err != nil {
+		return err
+	}
+
+	// Mount if needed for SMB/NFS destinations.
+	unmount, mountErr := mountIfNeededForRepo(job)
+	if mountErr != nil {
+		return mountErr
+	}
+	defer unmount()
+
+	args := []string{"-r", job.Destination.Path, "ls", "--json", snapshotID}
+	if subPath != "" {
+		args = append(args, subPath)
+	}
+
+	cmd := exec.Command(resticBin, args...)
+	cmd.Env = engines.ResticEnvForJob(job)
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("restic ls failed: %w", err)
+	}
+
+	// restic ls --json outputs one JSON object per line (JSONL).
+	// Parse each line and collect into an array.
+	type fileEntry struct {
+		Name  string `json:"name"`
+		Type  string `json:"type"`
+		Size  uint64 `json:"size"`
+		Mtime string `json:"mtime"`
+		Path  string `json:"path"`
+	}
+
+	type lsResponse struct {
+		Files []fileEntry `json:"files"`
+	}
+
+	var resp lsResponse
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var entry map[string]interface{}
+		if jsonErr := json.Unmarshal([]byte(line), &entry); jsonErr != nil {
+			continue
+		}
+		// restic ls --json outputs struct_type "node" for files/dirs and "snapshot" for header.
+		if entry["struct_type"] != "node" {
+			continue
+		}
+		fe := fileEntry{
+			Name: fmt.Sprintf("%v", entry["name"]),
+			Type: fmt.Sprintf("%v", entry["type"]),
+			Path: fmt.Sprintf("%v", entry["path"]),
+		}
+		if mtime, ok := entry["mtime"]; ok {
+			fe.Mtime = fmt.Sprintf("%v", mtime)
+		}
+		if size, ok := entry["size"].(float64); ok {
+			fe.Size = uint64(size)
+		}
+		resp.Files = append(resp.Files, fe)
+	}
+
+	jsonOut, _ := json.MarshalIndent(resp, "", "  ")
+	fmt.Println(string(jsonOut))
+	return nil
+}
+
+// mountIfNeededForRepo mounts SMB/NFS if needed for repo commands.
+// Returns a cleanup function.
+func mountIfNeededForRepo(job config.Job) (func(), error) {
+	noop := func() {}
+
+	switch job.Destination.Type {
+	case "smb", "nfs":
+		smbPass := job.Secrets.SMBDestPassword
+		nfsPass := job.Secrets.NFSDestPassword
+		password := ""
+		if job.Destination.Type == "smb" {
+			password = smbPass
+		} else {
+			password = nfsPass
+		}
+
+		mountPoint := mount.DestMountPoint(job.ID, job.Destination.Host, job.Destination.ShareName)
+		spec := mount.Spec{
+			Type:       job.Destination.Type,
+			Host:       job.Destination.Host,
+			ShareName:  job.Destination.ShareName,
+			Username:   job.Destination.Username,
+			Password:   password,
+			Domain:     job.Destination.Domain,
+			MountPoint: mountPoint,
+		}
+
+		if err := mount.Mount(spec); err != nil {
+			return noop, err
+		}
+		return func() { mount.Unmount(mountPoint) }, nil
+	}
+
+	return noop, nil
 }
 
 func runManagementConsoleWizard(paths app.Paths, prompter ui.Prompter) error {

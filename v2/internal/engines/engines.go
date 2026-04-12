@@ -465,6 +465,16 @@ func ensureResticRepo(job config.Job, resticBin string, output io.Writer) error 
 	return nil
 }
 
+// LookResticPath returns the path to the restic binary, or an error if not found.
+func LookResticPath() (string, error) {
+	return lookPath("restic")
+}
+
+// ResticEnvForJob returns the environment variables needed for restic commands.
+func ResticEnvForJob(job config.Job) []string {
+	return resticEnv(job)
+}
+
 // isNetworkDest returns true if the job destination cannot have local filesystem
 // operations (MkdirAll, Stat). S3 has no local path. SMB/NFS are mounted by the
 // runner before the engine runs, so their paths are accessible — only S3 is skipped.
