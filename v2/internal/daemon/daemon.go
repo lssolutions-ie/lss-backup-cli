@@ -85,6 +85,7 @@ func Run(paths app.Paths) error {
 	// The initial heartbeat must complete before the tunnel starts so the
 	// server has the node's public key in authorized_keys.
 	var tunnelMgr *tunnel.Manager
+	sentInitialHeartbeat := false
 	if appCfg, err := config.LoadAppConfig(paths.RootDir); err == nil && appCfg.Enabled && appCfg.ServerURL != "" {
 		tunnelMgr = tunnel.NewManager(paths.StateDir)
 
@@ -93,6 +94,7 @@ func Run(paths app.Paths) error {
 		scheduled, err := buildSchedule(paths, time.Now())
 		if err == nil {
 			resp := sendInitialHeartbeat(paths, scheduled, tunnelMgr)
+			sentInitialHeartbeat = true
 			if resp.TunnelKeyRegistered {
 				log.Println("Tunnel: server confirmed key registered, starting tunnel")
 			} else {
@@ -103,10 +105,10 @@ func Run(paths app.Paths) error {
 		go tunnelMgr.Run(ctx, appCfg.ServerURL, appCfg.NodeID, appCfg.PSKKey)
 	}
 
-	return loop(ctx, paths, reloadCh, tunnelMgr)
+	return loop(ctx, paths, reloadCh, tunnelMgr, sentInitialHeartbeat)
 }
 
-func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}, tunnelMgr *tunnel.Manager) error {
+func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}, tunnelMgr *tunnel.Manager, sentInitialHeartbeat bool) error {
 	svc := runner.NewService()
 
 	scheduled, err := buildSchedule(paths, time.Now())
@@ -116,7 +118,10 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}, tunnel
 	logSchedule(scheduled)
 
 	// Fire an immediate heartbeat on startup so the server gets config right away.
-	fireReport(paths, scheduled, reporting.ReportTypeHeartbeat, tunnelMgr)
+	// Skip if the sync heartbeat was already sent before the tunnel started.
+	if !sentInitialHeartbeat {
+		fireReport(paths, scheduled, reporting.ReportTypeHeartbeat, tunnelMgr)
+	}
 
 	reloadTicker := time.NewTicker(reloadInterval)
 	defer reloadTicker.Stop()
@@ -436,6 +441,8 @@ func logSchedule(scheduled []scheduledJob) {
 // acquirePIDLock writes the current process PID to the given file.
 // If the file already exists and the recorded PID is still running,
 // it returns an error to prevent multiple daemon instances.
+// On Windows, it waits up to 10 seconds for a departing process to exit
+// (handles the race between schtasks /end and /run during restarts).
 func acquirePIDLock(path string) error {
 	data, err := os.ReadFile(path)
 	if err == nil {
@@ -443,16 +450,22 @@ func acquirePIDLock(path string) error {
 		pid := strings.TrimSpace(string(data))
 		if pid != "" {
 			if p, err := strconv.Atoi(pid); err == nil {
-				if proc, err := os.FindProcess(p); err == nil {
-					// On Unix, FindProcess always succeeds. Send signal 0 to check.
-					// On Windows, FindProcess fails if the process doesn't exist.
+				if pidIsAlive(p) {
 					if runtime.GOOS == "windows" {
-						// Process exists if FindProcess succeeded; release the handle.
-						proc.Release()
-						return fmt.Errorf("another daemon is running (PID %d)", p)
-					}
-					// Unix: signal 0 checks existence without actually signalling.
-					if proc.Signal(syscall.Signal(0)) == nil {
+						// Wait for the old process to exit during a restart cycle.
+						alive := true
+						for i := 0; i < 10; i++ {
+							time.Sleep(1 * time.Second)
+							if !pidIsAlive(p) {
+								alive = false
+								break
+							}
+						}
+						if alive {
+							return fmt.Errorf("another daemon is running (PID %d)", p)
+						}
+						log.Printf("Previous daemon (PID %d) exited, taking over", p)
+					} else {
 						return fmt.Errorf("another daemon is running (PID %d)", p)
 					}
 				}
@@ -462,6 +475,21 @@ func acquirePIDLock(path string) error {
 	}
 
 	return os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())), 0o644)
+}
+
+// pidIsAlive checks whether a process with the given PID is currently running.
+func pidIsAlive(pid int) bool {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		// On Windows, FindProcess succeeds only if the process exists.
+		proc.Release()
+		return true
+	}
+	// Unix: signal 0 checks existence without actually signalling.
+	return proc.Signal(syscall.Signal(0)) == nil
 }
 
 // removePIDLock removes the PID lock file on clean shutdown.
