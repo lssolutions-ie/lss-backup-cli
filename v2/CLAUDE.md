@@ -13,7 +13,7 @@ rsync), runs them, logs results, and reports to a central management server.
 V2 is a clean rewrite of a v1 shell-script-based tool. The goal is durability, safety, and
 operator-friendliness over cleverness.
 
-**Version:** v2.1.141
+**Version:** v2.1.145
 **Module:** `github.com/lssolutions-ie/lss-backup-cli/v2`
 **Go version:** 1.25.0
 
@@ -517,6 +517,12 @@ not by OS-level cron or Task Scheduler entries.
 - Install scripts set up SSH server on all platforms (openssh-server, Remote Login, OpenSSH capability)
 - gorilla/websocket + golang.org/x/crypto/ssh dependencies added
 - End-to-end tested: browser → WebSocket → server → reverse tunnel → node sshd → interactive shell (all 3 platforms)
+- Hardware info in heartbeats: OS, arch, CPUs, hostname, RAM, disk usage, LAN IP, public IP (`internal/hwinfo/`)
+- Platform-specific hw collection: Linux (sysinfo+statfs), macOS (sysctl+statfs), Windows (GlobalMemoryStatusEx+Get-PSDrive)
+- Public IP cached and refreshed every ~1 hour (12 heartbeat cycles) to avoid external HTTP delays
+- Tunnel OnConnected callback fires immediate heartbeat with real port and connected status
+- SSH Logs viewer in Audit Log menu (filters daemon.log for tunnel/SSH/heartbeat entries)
+- Comprehensive logging: no silent failures in tunnel, reporting, sshd config, or SSH credential flows
 
 ### Fully stubbed (menu exists, no implementation)
 
@@ -536,6 +542,7 @@ Two distinct display modes are used, depending on whether the log has timestamps
 | Log type | Display function | Time column |
 |----------|-----------------|-------------|
 | `activity.log`, `audit-events.log`, `daemon.log` | `printLogTable` | Yes — 19-char timestamp, rows grouped by second with blank line between groups |
+| SSH Logs (filtered `daemon.log`) | `printLogTable` | Yes — filtered for Tunnel:/SSH:/heartbeat/key entries |
 | Job run logs (`logs/*.log`, `logs/restore/*.log`) | `printRawLog` | No — raw restic/rsync output has no timestamps; plain word-wrapped text |
 | Per-job `audit.log` | `printLogTable` | Yes |
 
@@ -597,4 +604,4 @@ Two distinct display modes are used, depending on whether the log has timestamps
 
 ---
 
-_Last updated: 2026-04-12 (v2.1.141)_
+_Last updated: 2026-04-12 (v2.1.145)_
