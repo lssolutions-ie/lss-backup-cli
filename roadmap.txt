@@ -26,7 +26,7 @@ Guiding Principles
 - Reporting must never fail or block a backup job.
 
 
-Current Version: v2.1.145
+Current Version: v2.1.149
 Current State: All three platforms (macOS, Linux, Windows) tested and working.
                CI builds and attaches binaries for all 6 platform/arch combos
                on every v2.* tag push. In-app updater downloads pre-built
@@ -232,17 +232,18 @@ Tasks:
 
 Milestone M10: Network Sources And Destinations
 ------------------------------------------------
-Status: NOT STARTED
+Status: COMPLETE
 
 Tasks:
-- [ ] Add SMB source/destination support.
-- [ ] Add NFS source/destination support.
-- [ ] Add S3 destination support (restic native).
-- [ ] Make mount/unmount behavior explicit and testable.
-- [ ] Decide: temporary mounts vs persistent mounts.
-
-Note: S3 is easier than SMB/NFS since restic handles it natively via env vars.
-     May be worth doing S3 before SMB/NFS.
+- [x] Add S3 destination support (restic native, custom endpoints, AWS credentials).
+- [x] Add SMB source/destination support (Linux: mount -t cifs, Windows: net use).
+- [x] Add NFS source/destination support (Linux: mount -t nfs).
+- [x] Mount/unmount orchestration: runner mounts before engine, unmounts after via defer.
+- [x] Decision: temporary mounts (mount on demand, unmount after each operation).
+- [x] Separate source/destination credentials in secrets.env.
+- [x] Platform matrix: Linux (Local/S3/SMB/NFS), macOS (Local/S3), Windows (Local/S3/SMB).
+- [x] Legacy import: v1 SMB/NFS/S3 configs import with proper network fields.
+- [x] End-to-end tested: S3 on all 3 platforms, SMB on Linux+Windows, NFS on Linux.
 
 
 Milestone M11: Migration From V1

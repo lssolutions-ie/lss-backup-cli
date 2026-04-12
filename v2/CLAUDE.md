@@ -13,7 +13,7 @@ rsync), runs them, logs results, and reports to a central management server.
 V2 is a clean rewrite of a v1 shell-script-based tool. The goal is durability, safety, and
 operator-friendliness over cleverness.
 
-**Version:** v2.1.145
+**Version:** v2.1.149
 **Module:** `github.com/lssolutions-ie/lss-backup-cli/v2`
 **Go version:** 1.25.0
 
@@ -448,7 +448,7 @@ not by OS-level cron or Task Scheduler entries.
 | M7        | Management Server Integration | Done — PSK/AES-256-GCM, reporting, PID lock, e2e tested on 3 platforms |
 | M8        | Retention And Cleanup         | Done — keep-last, keep-within, tiered, forget --prune after backup |
 | M9        | Add Rsync Support             | Done        |
-| M10       | Network Sources/Destinations  | Not started |
+| M10       | Network Sources/Destinations  | Done — S3, SMB, NFS tested on all supported platforms |
 | M11       | Migration From V1             | Done — tested against 10 production v1 configs |
 | M12       | Safety Hardening              | Not started |
 | M13       | Release Readiness             | Not started |
@@ -523,6 +523,14 @@ not by OS-level cron or Task Scheduler entries.
 - Tunnel OnConnected callback fires immediate heartbeat with real port and connected status
 - SSH Logs viewer in Audit Log menu (filters daemon.log for tunnel/SSH/heartbeat entries)
 - Comprehensive logging: no silent failures in tunnel, reporting, sshd config, or SSH credential flows
+- S3 destination: restic-native, custom endpoint URLs, AWS credentials + region in secrets.env
+- SMB destination/source: Linux (mount -t cifs) + Windows (net use with UNC paths)
+- NFS destination/source: Linux only (mount -t nfs)
+- Mount orchestration in runner: mount before engine, unmount after via defer
+- Separate source/destination passwords: SMBPassword, NFSPassword, SMBDestPassword, NFSDestPassword
+- Endpoint struct extended: Host, ShareName, Username, Domain fields for SMB/NFS
+- Platform matrix: Linux (Local/S3/SMB/NFS), macOS (Local/S3), Windows (Local/S3/SMB)
+- Legacy import: v1 SMB/NFS/S3 configs import with proper type and network fields
 
 ### Fully stubbed (menu exists, no implementation)
 
@@ -531,7 +539,7 @@ not by OS-level cron or Task Scheduler entries.
 
 ### Planned but not started
 
-- Network destinations: SMB, NFS, S3
+- (none — all network destination types shipped in M10)
 
 ---
 
@@ -604,4 +612,4 @@ Two distinct display modes are used, depending on whether the log has timestamps
 
 ---
 
-_Last updated: 2026-04-12 (v2.1.145)_
+_Last updated: 2026-04-12 (v2.1.149)_
