@@ -2122,8 +2122,9 @@ func runRepoLS(paths app.Paths, jobID, snapshotID, subPath string) error {
 		entryPath := fmt.Sprintf("%v", entry["path"])
 
 		// Filter: only include direct children of parentDir.
-		// A direct child's parent directory equals parentDir.
-		entryParent := filepath.Dir(entryPath)
+		// Use path.Dir (POSIX) not filepath.Dir — restic always uses
+		// forward slashes regardless of OS.
+		entryParent := posixDir(entryPath)
 		if entryParent != parentDir {
 			continue
 		}
@@ -2295,6 +2296,19 @@ func runRepoDumpZip(paths app.Paths, jobID, snapshotID string, filePaths []strin
 
 // commonDirPrefix finds the common parent directory of all paths.
 // e.g. ["/home/user/Downloads/a.txt", "/home/user/Downloads/b.txt"] → "/home/user/Downloads/"
+// posixDir returns the parent directory of a POSIX path (forward slashes).
+// Unlike filepath.Dir, this always uses forward slashes regardless of OS.
+func posixDir(p string) string {
+	p = strings.TrimRight(p, "/")
+	if i := strings.LastIndex(p, "/"); i >= 0 {
+		if i == 0 {
+			return "/"
+		}
+		return p[:i]
+	}
+	return "/"
+}
+
 func commonDirPrefix(paths []string) string {
 	if len(paths) == 0 {
 		return ""
