@@ -465,14 +465,11 @@ func ensureResticRepo(job config.Job, resticBin string, output io.Writer) error 
 	return nil
 }
 
-// isNetworkDest returns true if the job destination is a network target (S3, SMB, NFS).
-// For these types, local filesystem operations (MkdirAll, Stat) are skipped.
+// isNetworkDest returns true if the job destination cannot have local filesystem
+// operations (MkdirAll, Stat). S3 has no local path. SMB/NFS are mounted by the
+// runner before the engine runs, so their paths are accessible — only S3 is skipped.
 func isNetworkDest(job config.Job) bool {
-	switch job.Destination.Type {
-	case "s3", "smb", "nfs":
-		return true
-	}
-	return false
+	return job.Destination.Type == "s3"
 }
 
 // resticEnv builds the environment for restic commands, including AWS credentials.

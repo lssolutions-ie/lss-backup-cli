@@ -312,9 +312,9 @@ func mountIfNeeded(ep config.Endpoint, jobID, role, smbPassword, nfsPassword str
 		// Build mount spec.
 		var mountPoint string
 		if role == "source" {
-			mountPoint = mount.SourceMountPoint(jobID)
+			mountPoint = mount.SourceMountPoint(jobID, ep.Host, ep.ShareName)
 		} else {
-			mountPoint = mount.DestMountPoint(jobID)
+			mountPoint = mount.DestMountPoint(jobID, ep.Host, ep.ShareName)
 		}
 
 		password := ""

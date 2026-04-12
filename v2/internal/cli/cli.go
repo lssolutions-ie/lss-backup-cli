@@ -611,13 +611,19 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 		return errCancelled
 	}
 
-	// Source type — SMB/NFS only on Linux (not macOS or Windows).
+	// Source type — SMB on Linux and Windows; NFS on Linux only.
 	sourceType := "local"
 	var sourceHost, sourceShareName, sourceUsername, sourceDomain, sourcePassword string
 	var sourcePath string
 
-	if runtime.GOOS == "linux" {
-		_, srcChoice, err := prompter.Select("Source type", []string{"Local", "SMB", "NFS"})
+	if runtime.GOOS == "linux" || runtime.GOOS == "windows" {
+		var srcOptions []string
+		if runtime.GOOS == "linux" {
+			srcOptions = []string{"Local", "SMB", "NFS"}
+		} else {
+			srcOptions = []string{"Local", "SMB"}
+		}
+		_, srcChoice, err := prompter.Select("Source type", srcOptions)
 		if err != nil {
 			return err
 		}
@@ -653,7 +659,7 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 		if err != nil {
 			return err
 		}
-		sourcePath = mount.SourceMountPoint(jobID)
+		sourcePath = mount.SourceMountPoint(jobID, sourceHost, sourceShareName)
 	} else {
 		sourcePath, err = prompter.Ask("Local source directory", validateExistingDirectory)
 		if err != nil {
@@ -689,14 +695,17 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 
 	{
 		var destOptions []string
-		if program == "restic" && runtime.GOOS == "linux" {
+		switch {
+		case program == "restic" && runtime.GOOS == "linux":
 			destOptions = []string{"Local", "S3", "SMB", "NFS"}
-		} else if program == "restic" {
-			destOptions = []string{"Local", "S3"}
-		} else if runtime.GOOS == "linux" {
-			destOptions = []string{"Local", "SMB", "NFS"}
+		case program == "restic" && runtime.GOOS == "windows":
+			destOptions = []string{"Local", "S3", "SMB"}
+		case program == "restic":
+			destOptions = []string{"Local", "S3"} // macOS
+		case runtime.GOOS == "linux":
+			destOptions = []string{"Local", "SMB", "NFS"} // rsync on Linux
 		}
-		// On Windows/macOS with rsync: no choice needed (local only).
+		// On macOS with rsync: local only (no prompt needed).
 
 		if len(destOptions) > 0 {
 			_, destChoice, err := prompter.Select("Destination type", destOptions)
@@ -759,7 +768,7 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 		if err != nil {
 			return err
 		}
-		destinationPath = filepath.Join(mount.DestMountPoint(jobID), jobID)
+		destinationPath = filepath.Join(mount.DestMountPoint(jobID, destHost, destShareName), jobID)
 
 	default:
 		destinationBase, err := prompter.Ask("Local destination directory", validateDestinationPath)
