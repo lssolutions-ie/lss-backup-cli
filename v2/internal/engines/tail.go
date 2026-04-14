@@ -1,6 +1,7 @@
 package engines
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -28,15 +29,34 @@ func wrapEngineError(prefix string, err error, fatalMsg, stderrTail string) erro
 // lastMeaningfulLine returns the last non-empty line from text.
 // Restic/rsync typically print the root cause on the final line ("Fatal: ...",
 // "rsync error: ..."), so the tail line is the most useful for classification.
+// If the line is a restic --json exit_error event, the embedded message is
+// extracted so classifiers see clean text rather than a raw JSON blob.
 func lastMeaningfulLine(text string) string {
 	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := strings.TrimSpace(lines[i])
-		if line != "" {
-			return line
+		if line == "" {
+			continue
 		}
+		if msg, ok := unwrapResticExitError(line); ok {
+			return msg
+		}
+		return line
 	}
 	return ""
+}
+
+func unwrapResticExitError(line string) (string, bool) {
+	if !strings.HasPrefix(line, `{"message_type":"exit_error"`) {
+		return "", false
+	}
+	var e struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(line), &e); err != nil || e.Message == "" {
+		return "", false
+	}
+	return e.Message, true
 }
 
 // errorTailBytes is the maximum size of engine error output kept for the
