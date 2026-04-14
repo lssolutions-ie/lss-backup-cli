@@ -78,11 +78,12 @@ func (s Service) Run(job config.Job) (RunResult, error) {
 	}
 	if summary != nil {
 		result.Result = &BackupResult{
-			BytesTotal: summary.BytesTotal,
-			BytesNew:   summary.BytesNew,
-			FilesTotal: summary.FilesTotal,
-			FilesNew:   summary.FilesNew,
-			SnapshotID: summary.SnapshotID,
+			BytesTotal:    summary.BytesTotal,
+			BytesNew:      summary.BytesNew,
+			FilesTotal:    summary.FilesTotal,
+			FilesNew:      summary.FilesNew,
+			SnapshotID:    summary.SnapshotID,
+			SnapshotCount: summary.SnapshotCount,
 		}
 	}
 

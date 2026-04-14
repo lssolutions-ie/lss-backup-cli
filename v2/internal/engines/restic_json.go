@@ -10,11 +10,12 @@ import (
 // BackupSummary holds structured results from a single backup run.
 // Populated by ResticEngine from the `--json` summary event. Rsync leaves it zero-valued.
 type BackupSummary struct {
-	BytesTotal int64
-	BytesNew   int64
-	FilesTotal int64
-	FilesNew   int64
-	SnapshotID string
+	BytesTotal    int64
+	BytesNew      int64
+	FilesTotal    int64
+	FilesNew      int64
+	SnapshotID    string
+	SnapshotCount int // total snapshots in the repo after this run (restic only)
 }
 
 // resticJSONParser is an io.Writer that consumes restic's `--json` stream,

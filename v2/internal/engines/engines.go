@@ -117,7 +117,16 @@ func (e ResticEngine) Run(job config.Job, output io.Writer) (*BackupSummary, err
 		fmt.Fprintf(output, "Warning: retention cleanup failed: %v\n", err)
 	}
 
-	return parser.Summary(), nil
+	summary := parser.Summary()
+	// Attach total snapshot count for repo-side anomaly detection (v2.2.6).
+	// Counted after forget so the number reflects post-retention reality.
+	// Best-effort — if it fails, the backup itself already succeeded.
+	if summary != nil {
+		if snaps, err := e.ListSnapshots(job); err == nil {
+			summary.SnapshotCount = len(snaps)
+		}
+	}
+	return summary, nil
 }
 
 func runForget(job config.Job, resticBin string, output io.Writer) error {

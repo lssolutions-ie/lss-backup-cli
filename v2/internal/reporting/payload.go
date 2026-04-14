@@ -55,11 +55,12 @@ type JobStatus struct {
 // JobResult is the server-facing view of a backup run's structured outcome.
 // Sent when the CLI has data; omitted otherwise. All fields are optional.
 type JobResult struct {
-	BytesTotal int64  `json:"bytes_total,omitempty"`
-	BytesNew   int64  `json:"bytes_new,omitempty"`
-	FilesTotal int64  `json:"files_total,omitempty"`
-	FilesNew   int64  `json:"files_new,omitempty"`
-	SnapshotID string `json:"snapshot_id,omitempty"`
+	BytesTotal    int64  `json:"bytes_total,omitempty"`
+	BytesNew      int64  `json:"bytes_new,omitempty"`
+	FilesTotal    int64  `json:"files_total,omitempty"`
+	FilesNew      int64  `json:"files_new,omitempty"`
+	SnapshotID    string `json:"snapshot_id,omitempty"`
+	SnapshotCount int    `json:"snapshot_count,omitempty"`
 }
 
 // JobConfig is a redacted view of the job's configuration, safe to send
@@ -170,11 +171,12 @@ func BuildNodeStatus(nodeName string, allJobs []config.Job, nextRunByID map[stri
 			js.LastError = lr.ErrorMessage
 			if lr.Result != nil {
 				js.Result = &JobResult{
-					BytesTotal: lr.Result.BytesTotal,
-					BytesNew:   lr.Result.BytesNew,
-					FilesTotal: lr.Result.FilesTotal,
-					FilesNew:   lr.Result.FilesNew,
-					SnapshotID: lr.Result.SnapshotID,
+					BytesTotal:    lr.Result.BytesTotal,
+					BytesNew:      lr.Result.BytesNew,
+					FilesTotal:    lr.Result.FilesTotal,
+					FilesNew:      lr.Result.FilesNew,
+					SnapshotID:    lr.Result.SnapshotID,
+					SnapshotCount: lr.Result.SnapshotCount,
 				}
 			}
 		}
