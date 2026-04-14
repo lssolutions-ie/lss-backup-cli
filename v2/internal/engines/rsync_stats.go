@@ -64,12 +64,7 @@ func parseRsyncStats(output string) *BackupSummary {
 func extractReg(line string) (int64, bool) {
 	if i := strings.Index(line, "(reg:"); i >= 0 {
 		tail := line[i+len("(reg:"):]
-		tail = strings.TrimSpace(tail)
-		end := strings.IndexAny(tail, ",)")
-		if end < 0 {
-			end = len(tail)
-		}
-		if n, ok := parseNumber(tail[:end]); ok {
+		if n, ok := consumeNumber(tail); ok {
 			return n, true
 		}
 	}
@@ -83,18 +78,24 @@ func extractFirstNumber(line string) (int64, bool) {
 	if colon < 0 {
 		return 0, false
 	}
-	tail := strings.TrimSpace(line[colon+1:])
-	// Cut at first non-digit/comma/space character.
+	return consumeNumber(line[colon+1:])
+}
+
+// consumeNumber skips leading whitespace, then reads as many digit-or-comma
+// runes as it can, then parses the result (stripping commas).
+// Handles rsync's comma-grouped integers like "1,234,567".
+func consumeNumber(s string) (int64, bool) {
+	s = strings.TrimLeft(s, " \t")
 	end := 0
-	for end < len(tail) {
-		c := tail[end]
-		if (c >= '0' && c <= '9') || c == ',' || c == ' ' {
+	for end < len(s) {
+		c := s[end]
+		if (c >= '0' && c <= '9') || c == ',' {
 			end++
 			continue
 		}
 		break
 	}
-	return parseNumber(tail[:end])
+	return parseNumber(s[:end])
 }
 
 func parseNumber(s string) (int64, bool) {
