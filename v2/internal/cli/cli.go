@@ -1972,7 +1972,11 @@ func runJobByID(paths app.Paths, id string) error {
 			}
 			status := reporting.BuildNodeStatus(nodeName, allJobs, nil, true)
 			status.ReportType = reporting.ReportTypePostRun
-			reporting.NewReporter(appCfg, paths.RootDir, paths.LogsDir).Report(status)
+			// Use ReportSync — the CLI process is about to exit, so a goroutine
+			// started by Report() would be killed before the HTTP send completed,
+			// losing the post_run data (especially bad for rapid back-to-back
+			// manual runs where last_run.json is overwritten before delivery).
+			reporting.NewReporter(appCfg, paths.RootDir, paths.LogsDir).ReportSync(status)
 		}
 	}
 
