@@ -67,7 +67,7 @@ func (s Service) Run(job config.Job) (RunResult, error) {
 		healthchecks.PingStart(hc, writer)
 	}
 
-	runErr := engine.Run(job, writer)
+	summary, runErr := engine.Run(job, writer)
 	finishedAt := time.Now()
 
 	result := RunResult{
@@ -75,6 +75,15 @@ func (s Service) Run(job config.Job) (RunResult, error) {
 		FinishedAt:      finishedAt,
 		DurationSeconds: int64(finishedAt.Sub(startedAt).Seconds()),
 		LogFile:         logFile,
+	}
+	if summary != nil {
+		result.Result = &BackupResult{
+			BytesTotal: summary.BytesTotal,
+			BytesNew:   summary.BytesNew,
+			FilesTotal: summary.FilesTotal,
+			FilesNew:   summary.FilesNew,
+			SnapshotID: summary.SnapshotID,
+		}
 	}
 
 	if runErr != nil {

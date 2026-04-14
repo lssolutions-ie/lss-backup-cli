@@ -30,7 +30,9 @@ type Snapshot struct {
 type Engine interface {
 	Name() string
 	Init(job config.Job, output io.Writer) error
-	Run(job config.Job, output io.Writer) error
+	// Run executes a backup. Returns a BackupSummary when the engine produced
+	// structured result data (restic); nil otherwise (rsync).
+	Run(job config.Job, output io.Writer) (*BackupSummary, error)
 	// Restore restores snapshotID ("latest" or a short/full snapshot ID) to target.
 	Restore(job config.Job, snapshotID string, target string, output io.Writer) error
 	// ListSnapshots returns structured snapshot metadata. Returns empty slice for
@@ -60,47 +62,52 @@ func (e ResticEngine) Init(job config.Job, output io.Writer) error {
 	return ensureResticRepo(job, resticBin, output)
 }
 
-func (e ResticEngine) Run(job config.Job, output io.Writer) error {
+func (e ResticEngine) Run(job config.Job, output io.Writer) (*BackupSummary, error) {
 	if strings.TrimSpace(job.Secrets.ResticPassword) == "" {
-		return fmt.Errorf("RESTIC_PASSWORD is required for restic jobs")
+		return nil, fmt.Errorf("RESTIC_PASSWORD is required for restic jobs")
 	}
 
 	resticBin, err := lookPath("restic")
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if !isNetworkDest(job) {
 		if err := os.MkdirAll(job.Destination.Path, 0o755); err != nil {
-			return fmt.Errorf("create destination path: %w", err)
+			return nil, fmt.Errorf("create destination path: %w", err)
 		}
 	}
 
 	if err := ensureResticRepo(job, resticBin, output); err != nil {
-		return err
+		return nil, err
 	}
 
 	resticArgs := []string{
 		"-r", job.Destination.Path,
 		"backup", job.Source.Path,
+		"--json",
 		"--exclude", "System Volume Information",
 		"--exclude", "$RECYCLE.BIN",
 	}
 	if job.Source.ExcludeFile != "" {
 		resticArgs = append(resticArgs, "--exclude-file="+job.Source.ExcludeFile)
 	}
+	parser := newResticJSONParser(output)
 	cmd := exec.Command(resticBin, resticArgs...)
 	executil.HideWindow(cmd)
-	cmd.Stdout = output
+	cmd.Stdout = parser
 	cmd.Stderr = output
 	cmd.Env = resticEnv(job)
 
-	if err := cmd.Run(); err != nil {
+	runErr := cmd.Run()
+	parser.Flush()
+
+	if runErr != nil {
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == 3 {
+		if errors.As(runErr, &exitErr) && exitErr.ExitCode() == 3 {
 			fmt.Fprintln(output, "Warning: restic exited with code 3 — some files could not be read (locked or permission denied). Backup may be incomplete.")
 		} else {
-			return fmt.Errorf("restic backup failed: %w", err)
+			return nil, fmt.Errorf("restic backup failed: %w", runErr)
 		}
 	}
 
@@ -109,7 +116,7 @@ func (e ResticEngine) Run(job config.Job, output io.Writer) error {
 		fmt.Fprintf(output, "Warning: retention cleanup failed: %v\n", err)
 	}
 
-	return nil
+	return parser.Summary(), nil
 }
 
 func runForget(job config.Job, resticBin string, output io.Writer) error {
@@ -359,15 +366,15 @@ func (e RsyncEngine) Init(job config.Job, output io.Writer) error {
 	return nil
 }
 
-func (e RsyncEngine) Run(job config.Job, output io.Writer) error {
+func (e RsyncEngine) Run(job config.Job, output io.Writer) (*BackupSummary, error) {
 	rsyncBin, err := lookPath("rsync")
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if !isNetworkDest(job) {
 		if err := os.MkdirAll(job.Destination.Path, 0o755); err != nil {
-			return fmt.Errorf("create destination path: %w", err)
+			return nil, fmt.Errorf("create destination path: %w", err)
 		}
 	}
 
@@ -395,12 +402,12 @@ func (e RsyncEngine) Run(job config.Job, output io.Writer) error {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 24 {
 			fmt.Fprintln(output, "Warning: rsync exited with code 24 — some source files vanished during transfer. This is normal in live environments.")
-			return nil
+			return nil, nil
 		}
-		return fmt.Errorf("rsync failed: %w", err)
+		return nil, fmt.Errorf("rsync failed: %w", err)
 	}
 
-	return nil
+	return nil, nil
 }
 
 func (e RsyncEngine) Snapshots(job config.Job, output io.Writer) error {

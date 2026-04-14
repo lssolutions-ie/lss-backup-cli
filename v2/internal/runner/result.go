@@ -56,12 +56,23 @@ func LoadNextRun(jobDir string) (*NextRunResult, error) {
 
 // RunResult holds the outcome of a single backup job execution.
 type RunResult struct {
-	Status          string    `json:"status"`           // "success" or "failure"
-	StartedAt       time.Time `json:"started_at"`
-	FinishedAt      time.Time `json:"finished_at"`
-	DurationSeconds int64     `json:"duration_seconds"`
-	ErrorMessage    string    `json:"error_message"`
-	LogFile         string    `json:"log_file"`
+	Status          string        `json:"status"` // "success" or "failure"
+	StartedAt       time.Time     `json:"started_at"`
+	FinishedAt      time.Time     `json:"finished_at"`
+	DurationSeconds int64         `json:"duration_seconds"`
+	ErrorMessage    string        `json:"error_message"`
+	LogFile         string        `json:"log_file"`
+	Result          *BackupResult `json:"result,omitempty"`
+}
+
+// BackupResult is the structured outcome of a backup run.
+// Populated for restic jobs; omitted for rsync (v2.2.0).
+type BackupResult struct {
+	BytesTotal int64  `json:"bytes_total,omitempty"`
+	BytesNew   int64  `json:"bytes_new,omitempty"`
+	FilesTotal int64  `json:"files_total,omitempty"`
+	FilesNew   int64  `json:"files_new,omitempty"`
+	SnapshotID string `json:"snapshot_id,omitempty"`
 }
 
 // WriteLastRun persists result to {jobDir}/last_run.json.

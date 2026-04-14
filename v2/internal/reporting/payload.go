@@ -40,13 +40,26 @@ type JobStatus struct {
 	Name                   string     `json:"name"`
 	Program                string     `json:"program"`
 	Enabled                bool       `json:"enabled"`
-	LastStatus             string     `json:"last_status"`              // "success", "failure", or ""
+	// LastStatus: "success", "failure", "". Server accepts skipped|cancelled|paused
+	// but the CLI does not emit them yet.
+	LastStatus             string     `json:"last_status"`
 	LastRunAt              *time.Time `json:"last_run_at,omitempty"`
 	LastRunDurationSeconds int64      `json:"last_run_duration_seconds"`
 	LastError              string     `json:"last_error,omitempty"`
 	NextRunAt              *time.Time `json:"next_run_at,omitempty"`
 	ScheduleDescription    string     `json:"schedule_description"`
+	Result                 *JobResult `json:"result,omitempty"` // last run's structured outcome
 	Config                 *JobConfig `json:"config,omitempty"` // only on heartbeat reports
+}
+
+// JobResult is the server-facing view of a backup run's structured outcome.
+// Sent when the CLI has data; omitted otherwise. All fields are optional.
+type JobResult struct {
+	BytesTotal int64  `json:"bytes_total,omitempty"`
+	BytesNew   int64  `json:"bytes_new,omitempty"`
+	FilesTotal int64  `json:"files_total,omitempty"`
+	FilesNew   int64  `json:"files_new,omitempty"`
+	SnapshotID string `json:"snapshot_id,omitempty"`
 }
 
 // JobConfig is a redacted view of the job's configuration, safe to send
@@ -155,6 +168,15 @@ func BuildNodeStatus(nodeName string, allJobs []config.Job, nextRunByID map[stri
 			js.LastRunAt = &t
 			js.LastRunDurationSeconds = lr.DurationSeconds
 			js.LastError = lr.ErrorMessage
+			if lr.Result != nil {
+				js.Result = &JobResult{
+					BytesTotal: lr.Result.BytesTotal,
+					BytesNew:   lr.Result.BytesNew,
+					FilesTotal: lr.Result.FilesTotal,
+					FilesNew:   lr.Result.FilesNew,
+					SnapshotID: lr.Result.SnapshotID,
+				}
+			}
 		}
 
 		// Next run — prefer daemon in-memory map, fall back to next_run.json.
@@ -177,7 +199,7 @@ func BuildNodeStatus(nodeName string, allJobs []config.Job, nextRunByID map[stri
 	}
 
 	ns := NodeStatus{
-		PayloadVersion: "1",
+		PayloadVersion: "2",
 		NodeName:       nodeName,
 		ReportedAt:     time.Now().UTC(),
 		Jobs:           statuses,
