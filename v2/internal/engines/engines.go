@@ -381,7 +381,7 @@ func (e RsyncEngine) Run(job config.Job, output io.Writer) (*BackupSummary, erro
 	sourcePath := filepath.Clean(job.Source.Path) + string(os.PathSeparator)
 	destinationPath := filepath.Clean(job.Destination.Path) + string(os.PathSeparator)
 
-	rsyncArgs := []string{"-a",
+	rsyncArgs := []string{"-a", "--stats",
 		"--exclude=System Volume Information",
 		"--exclude=$RECYCLE.BIN",
 	}
@@ -393,21 +393,27 @@ func (e RsyncEngine) Run(job config.Job, output io.Writer) (*BackupSummary, erro
 	}
 	rsyncArgs = append(rsyncArgs, sourcePath, destinationPath)
 
+	// Tee stdout to a buffer so we can parse --stats after the run completes.
+	// Force C locale so numbers are plain digits without thousands separators
+	// from locales like de_DE that use dots.
+	var statsBuf strings.Builder
 	cmd := exec.Command(rsyncBin, rsyncArgs...)
 	executil.HideWindow(cmd)
-	cmd.Stdout = output
+	cmd.Stdout = io.MultiWriter(output, &statsBuf)
 	cmd.Stderr = output
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
 
-	if err := cmd.Run(); err != nil {
+	runErr := cmd.Run()
+	if runErr != nil {
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == 24 {
+		if errors.As(runErr, &exitErr) && exitErr.ExitCode() == 24 {
 			fmt.Fprintln(output, "Warning: rsync exited with code 24 — some source files vanished during transfer. This is normal in live environments.")
-			return nil, nil
+			return parseRsyncStats(statsBuf.String()), nil
 		}
-		return nil, fmt.Errorf("rsync failed: %w", err)
+		return nil, fmt.Errorf("rsync failed: %w", runErr)
 	}
 
-	return nil, nil
+	return parseRsyncStats(statsBuf.String()), nil
 }
 
 func (e RsyncEngine) Snapshots(job config.Job, output io.Writer) error {
