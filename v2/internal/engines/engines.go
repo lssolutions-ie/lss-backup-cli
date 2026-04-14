@@ -93,10 +93,11 @@ func (e ResticEngine) Run(job config.Job, output io.Writer) (*BackupSummary, err
 		resticArgs = append(resticArgs, "--exclude-file="+job.Source.ExcludeFile)
 	}
 	parser := newResticJSONParser(output)
+	stderrTail := newTailBuffer(errorTailBytes)
 	cmd := exec.Command(resticBin, resticArgs...)
 	executil.HideWindow(cmd)
 	cmd.Stdout = parser
-	cmd.Stderr = output
+	cmd.Stderr = io.MultiWriter(output, stderrTail)
 	cmd.Env = resticEnv(job)
 
 	runErr := cmd.Run()
@@ -107,7 +108,7 @@ func (e ResticEngine) Run(job config.Job, output io.Writer) (*BackupSummary, err
 		if errors.As(runErr, &exitErr) && exitErr.ExitCode() == 3 {
 			fmt.Fprintln(output, "Warning: restic exited with code 3 — some files could not be read (locked or permission denied). Backup may be incomplete.")
 		} else {
-			return nil, fmt.Errorf("restic backup failed: %w", runErr)
+			return nil, wrapEngineError("restic backup failed", runErr, parser.FatalMessage(), stderrTail.String())
 		}
 	}
 
@@ -127,13 +128,14 @@ func runForget(job config.Job, resticBin string, output io.Writer) error {
 
 	fmt.Fprintln(output, "Running retention cleanup (restic forget --prune)...")
 	args := append([]string{"-r", job.Destination.Path, "forget", "--prune"}, flags...)
+	stderrTail := newTailBuffer(errorTailBytes)
 	cmd := exec.Command(resticBin, args...)
 	executil.HideWindow(cmd)
 	cmd.Stdout = output
-	cmd.Stderr = output
+	cmd.Stderr = io.MultiWriter(output, stderrTail)
 	cmd.Env = resticEnv(job)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("restic forget: %w", err)
+		return wrapEngineError("restic forget", err, "", stderrTail.String())
 	}
 	return nil
 }
@@ -153,13 +155,14 @@ func (e ResticEngine) Restore(job config.Job, snapshotID string, target string, 
 		snapshotID = "latest"
 	}
 
+	stderrTail := newTailBuffer(errorTailBytes)
 	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "restore", snapshotID, "--target", target)
 	executil.HideWindow(cmd)
 	cmd.Stdout = output
-	cmd.Stderr = output
+	cmd.Stderr = io.MultiWriter(output, stderrTail)
 	cmd.Env = resticEnv(job)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("restic restore failed: %w", err)
+		return wrapEngineError("restic restore failed", err, "", stderrTail.String())
 	}
 
 	// Restic recreates the full absolute source path under the target.
@@ -397,10 +400,11 @@ func (e RsyncEngine) Run(job config.Job, output io.Writer) (*BackupSummary, erro
 	// Force C locale so numbers are plain digits without thousands separators
 	// from locales like de_DE that use dots.
 	var statsBuf strings.Builder
+	stderrTail := newTailBuffer(errorTailBytes)
 	cmd := exec.Command(rsyncBin, rsyncArgs...)
 	executil.HideWindow(cmd)
 	cmd.Stdout = io.MultiWriter(output, &statsBuf)
-	cmd.Stderr = output
+	cmd.Stderr = io.MultiWriter(output, stderrTail)
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
 
 	runErr := cmd.Run()
@@ -410,7 +414,7 @@ func (e RsyncEngine) Run(job config.Job, output io.Writer) (*BackupSummary, erro
 			fmt.Fprintln(output, "Warning: rsync exited with code 24 — some source files vanished during transfer. This is normal in live environments.")
 			return parseRsyncStats(statsBuf.String()), nil
 		}
-		return nil, fmt.Errorf("rsync failed: %w", runErr)
+		return nil, wrapEngineError("rsync failed", runErr, "", stderrTail.String())
 	}
 
 	return parseRsyncStats(statsBuf.String()), nil
@@ -437,12 +441,13 @@ func (e RsyncEngine) Restore(job config.Job, snapshotID string, target string, o
 	sourcePath := filepath.Clean(job.Destination.Path) + string(os.PathSeparator)
 	targetPath := filepath.Clean(target) + string(os.PathSeparator)
 
+	stderrTail := newTailBuffer(errorTailBytes)
 	cmd := exec.Command(rsyncBin, "-a", sourcePath, targetPath)
 	executil.HideWindow(cmd)
 	cmd.Stdout = output
-	cmd.Stderr = output
+	cmd.Stderr = io.MultiWriter(output, stderrTail)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("rsync restore failed: %w", err)
+		return wrapEngineError("rsync restore failed", err, "", stderrTail.String())
 	}
 	return nil
 }
@@ -461,10 +466,11 @@ func ensureResticRepo(job config.Job, resticBin string, output io.Writer) error 
 	// For remote repos (S3), always attempt init — restic will return
 	// "repository master key and target already exist" if already initialised.
 	fmt.Fprintln(output, "Checking restic repository...")
+	stderrTail := newTailBuffer(errorTailBytes)
 	initCmd := exec.Command(resticBin, "-r", job.Destination.Path, "init")
 	executil.HideWindow(initCmd)
 	initCmd.Stdout = output
-	initCmd.Stderr = output
+	initCmd.Stderr = io.MultiWriter(output, stderrTail)
 	initCmd.Env = resticEnv(job)
 
 	if err := initCmd.Run(); err != nil {
@@ -472,7 +478,7 @@ func ensureResticRepo(job config.Job, resticBin string, output io.Writer) error 
 		if isNetworkDest(job) {
 			return nil
 		}
-		return fmt.Errorf("restic repository init failed: %w", err)
+		return wrapEngineError("restic repository init failed", err, "", stderrTail.String())
 	}
 
 	return nil

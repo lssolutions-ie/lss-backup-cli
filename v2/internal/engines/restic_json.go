@@ -21,15 +21,20 @@ type BackupSummary struct {
 // extracts the final summary, and writes a human-readable progress/summary
 // stream to the wrapped writer. Raw JSON is never written to output.
 type resticJSONParser struct {
-	out     io.Writer
-	buf     bytes.Buffer
-	summary BackupSummary
-	lastPct int // last printed progress percent (-1 = never)
+	out       io.Writer
+	buf       bytes.Buffer
+	summary   BackupSummary
+	lastPct   int    // last printed progress percent (-1 = never)
+	fatalMsg  string // populated from exit_error events (restic's structured fatal errors)
 }
 
 func newResticJSONParser(out io.Writer) *resticJSONParser {
 	return &resticJSONParser{out: out, lastPct: -1}
 }
+
+// FatalMessage returns the most recent restic exit_error message, if any.
+// Used to surface structured restic failures to last_error.
+func (p *resticJSONParser) FatalMessage() string { return p.fatalMsg }
 
 func (p *resticJSONParser) Write(data []byte) (int, error) {
 	p.buf.Write(data)
@@ -91,6 +96,8 @@ func (p *resticJSONParser) handleLine(line []byte) {
 		p.handleSummary(line)
 	case "error":
 		p.handleError(line)
+	case "exit_error":
+		p.handleExitError(line)
 	case "verbose_status":
 		// Noisy per-file events — ignore.
 	default:
@@ -147,6 +154,18 @@ func (p *resticJSONParser) handleSummary(line []byte) {
 	if p.summary.SnapshotID != "" {
 		fmt.Fprintf(p.out, "Snapshot: %s\n", p.summary.SnapshotID)
 	}
+}
+
+func (p *resticJSONParser) handleExitError(line []byte) {
+	var e struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(line, &e); err != nil {
+		return
+	}
+	p.fatalMsg = e.Message
+	fmt.Fprintln(p.out, e.Message)
 }
 
 func (p *resticJSONParser) handleError(line []byte) {
