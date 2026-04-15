@@ -30,28 +30,10 @@ func Log(logsDir, message string) {
 	trimFile(path, activityMaxLines, activityTrimTo)
 }
 
-// Audit writes a timestamped [AUDIT] entry to both activity.log and audit-events.log.
-// audit-events.log retains entries for auditRetainYears years, then prunes older ones.
-// This is the function to call for significant user actions (job created, deleted, edited, etc.).
-func Audit(logsDir, message string) {
-	if err := os.MkdirAll(logsDir, 0o755); err != nil {
-		return
-	}
-	entry := fmt.Sprintf("%s  [AUDIT] %s", time.Now().Format(timeFormat), message)
-
-	// Write to activity log (with normal retention).
-	actPath := filepath.Join(logsDir, filename)
-	appendLine(actPath, entry)
-	trimFile(actPath, activityMaxLines, activityTrimTo)
-
-	// Write to audit-events log (long-term retention).
-	auditPath := filepath.Join(logsDir, auditFilename)
-	appendLine(auditPath, entry)
-	pruneAuditEvents(auditPath)
-}
-
-// ReadAuditEvents returns all entries from audit-events.log, oldest first.
-// Returns an empty slice (not an error) if the file does not yet exist.
+// ReadAuditEvents returns all entries from the legacy audit-events.log,
+// oldest first. This file stopped growing in v2.3.1 — the audit package
+// took over as the single source of truth for structured audit events.
+// Kept only so the CLI log viewer can surface pre-v2.3.1 history.
 func ReadAuditEvents(logsDir string) ([]string, error) {
 	path := filepath.Join(logsDir, auditFilename)
 	data, err := os.ReadFile(path)

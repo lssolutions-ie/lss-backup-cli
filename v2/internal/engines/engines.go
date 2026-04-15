@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/audit"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/executil"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/retention"
@@ -107,6 +108,12 @@ func (e ResticEngine) Run(job config.Job, output io.Writer) (*BackupSummary, err
 		var exitErr *exec.ExitError
 		if errors.As(runErr, &exitErr) && exitErr.ExitCode() == 3 {
 			fmt.Fprintln(output, "Warning: restic exited with code 3 — some files could not be read (locked or permission denied). Backup may be incomplete.")
+			audit.Emit(audit.CategoryRunPermissionDenied, audit.SeverityWarn, audit.ActorSystem,
+				fmt.Sprintf("Restic backup for job %q completed with unreadable files (exit code 3)", job.ID),
+				map[string]string{
+					"job_id":    job.ID,
+					"exit_code": "3",
+				})
 		} else {
 			return nil, wrapEngineError("restic backup failed", runErr, parser.FatalMessage(), stderrTail.String())
 		}

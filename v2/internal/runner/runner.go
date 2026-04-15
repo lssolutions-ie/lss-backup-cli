@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/audit"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/engines"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/healthchecks"
@@ -94,6 +95,16 @@ func (s Service) Run(job config.Job) (RunResult, error) {
 		if hcEnabled {
 			healthchecks.PingFail(hc, runErr.Error(), writer)
 		}
+		// Emit a run_failed audit event. Server uses this for alerting on
+		// the failure path separately from the post_run status snapshot.
+		audit.Emit(audit.CategoryRunFailed, audit.SeverityWarn, audit.ActorSystem,
+			fmt.Sprintf("Backup run failed for job %q (%s): %v", job.ID, job.Name, runErr),
+			map[string]string{
+				"job_id":   job.ID,
+				"job_name": job.Name,
+				"program":  engine.Name(),
+				"error":    runErr.Error(),
+			})
 	} else {
 		result.Status = "success"
 		fmt.Fprintf(writer, "Job completed successfully.\n")

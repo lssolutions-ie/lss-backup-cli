@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,66 +15,122 @@ import (
 	"time"
 )
 
-// Queue persists audit events on disk until the management server acknowledges
-// them. It holds two files under a shared state directory:
+// Queue owns the local audit log and the sequence counter. It's the single
+// source of truth for every audit event the CLI emits.
 //
-//   audit_seq         — last assigned sequence (monotonic, never rewinds)
-//   audit_queue.jsonl — one Event per line, sorted by seq ASC
+// Files under stateDir:
 //
-// Writes are serialized by an in-process mutex. Cross-process safety is
-// currently not required: only one daemon and one interactive CLI touch
-// the files, and the CLI path calls ReportSync before exiting so races with
-// the daemon are bounded.
+//   audit.jsonl       one JSON Event per line, append-only, trimmed lazily
+//                     when it exceeds logMaxLines. Kept regardless of server
+//                     ack state — operators can always grep this locally.
+//   audit_seq         next sequence number to assign (uint64 as ASCII)
+//   audit_acked_seq   highest seq the management server has durably stored
+//   audit.lock        flock sentinel — serializes seq/log/ack mutations
+//                     across processes (daemon + interactive CLI).
+//
+// In-process writes also hold a sync.Mutex so tests that instantiate a
+// single Queue don't need the filesystem lock path to be hot.
 type Queue struct {
 	stateDir string
 	mu       sync.Mutex
 }
 
 const (
-	seqFile   = "audit_seq"
-	queueFile = "audit_queue.jsonl"
+	logFilename       = "audit.jsonl"
+	seqFilename       = "audit_seq"
+	ackedFilename     = "audit_acked_seq"
+	lockFilename      = "audit.lock"
+	legacyQueueFile   = "audit_queue.jsonl" // pre-v2.3.1 — migrated on first use
+	logMaxLines       = 100_000
+	logTrimTo         = 80_000
 )
 
 // NewQueue returns a Queue rooted at stateDir. The directory must exist.
 func NewQueue(stateDir string) *Queue {
-	return &Queue{stateDir: stateDir}
+	q := &Queue{stateDir: stateDir}
+	q.migrateLegacy()
+	return q
 }
 
-// NextSeq increments the persisted sequence counter and returns the new value.
-// Starts at 1 on first call. Caller must hold q.mu (Emit does).
-func (q *Queue) nextSeqLocked() (uint64, error) {
-	path := filepath.Join(q.stateDir, seqFile)
-	var cur uint64
-	if data, err := os.ReadFile(path); err == nil {
-		n, parseErr := strconv.ParseUint(strings.TrimSpace(string(data)), 10, 64)
-		if parseErr == nil {
-			cur = n
+// migrateLegacy one-shot upgrade from v2.3.0's audit_queue.jsonl (which held
+// unacked events only and was trimmed on ack). New model keeps events in
+// audit.jsonl permanently with ack tracked separately. If there's no legacy
+// file, this is a no-op. Safe to call repeatedly.
+func (q *Queue) migrateLegacy() {
+	legacyPath := filepath.Join(q.stateDir, legacyQueueFile)
+	newPath := filepath.Join(q.stateDir, logFilename)
+
+	legacy, err := os.Open(legacyPath)
+	if err != nil {
+		return // nothing to migrate
+	}
+	defer legacy.Close()
+
+	var minSeq uint64 = ^uint64(0)
+	var seen bool
+
+	newFile, err := os.OpenFile(newPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer newFile.Close()
+
+	scanner := bufio.NewScanner(legacy)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
 		}
-		// Corrupt file — treat as 0 and overwrite. Worse than a gap but
-		// better than wedging audit permanently.
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return 0, fmt.Errorf("read seq: %w", err)
+		var ev Event
+		if err := json.Unmarshal(line, &ev); err != nil {
+			continue
+		}
+		if ev.Seq < minSeq {
+			minSeq = ev.Seq
+		}
+		seen = true
+		if _, err := newFile.Write(append(line, '\n')); err != nil {
+			return
+		}
 	}
-	next := cur + 1
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(strconv.FormatUint(next, 10)), 0o644); err != nil {
-		return 0, fmt.Errorf("write seq: %w", err)
+
+	if seen {
+		// Everything before minSeq was already acked under the old model.
+		acked := minSeq - 1
+		_ = writeUint64(filepath.Join(q.stateDir, ackedFilename), acked)
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		return 0, fmt.Errorf("commit seq: %w", err)
+	_ = os.Remove(legacyPath)
+}
+
+// lockFile opens (creating if needed) the sentinel and returns it. Caller
+// must call releaseLock(f); f.Close().
+func (q *Queue) lockFile() (*os.File, error) {
+	path := filepath.Join(q.stateDir, lockFilename)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("open lock: %w", err)
 	}
-	return next, nil
+	if err := acquireLock(f); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("acquire lock: %w", err)
+	}
+	return f, nil
 }
 
 // Append assigns a seq, stamps the timestamp, truncates message/details to
-// protocol limits, and writes the event to the queue. Returns the committed
-// event so callers can mirror it to activity.log if they want a human trail.
-//
-// The event is fsynced before Append returns — crash after Append means the
-// event survives; crash before means it was never "emitted".
+// protocol limits, and writes the event to audit.jsonl. Returns the
+// committed event. Fsynced before return — a crash after Append means the
+// event is durably persisted.
 func (q *Queue) Append(category, severity, actor, message string, details map[string]string) (Event, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+
+	lf, err := q.lockFile()
+	if err != nil {
+		return Event{}, err
+	}
+	defer func() { _ = releaseLock(lf); lf.Close() }()
 
 	seq, err := q.nextSeqLocked()
 	if err != nil {
@@ -92,40 +149,60 @@ func (q *Queue) Append(category, severity, actor, message string, details map[st
 	if err != nil {
 		return Event{}, fmt.Errorf("marshal event: %w", err)
 	}
-	path := filepath.Join(q.stateDir, queueFile)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	logPath := filepath.Join(q.stateDir, logFilename)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
-		return Event{}, fmt.Errorf("open queue: %w", err)
+		return Event{}, fmt.Errorf("open audit.jsonl: %w", err)
 	}
-	defer f.Close()
 	if _, err := f.Write(append(line, '\n')); err != nil {
+		f.Close()
 		return Event{}, fmt.Errorf("append event: %w", err)
 	}
 	if err := f.Sync(); err != nil {
-		return Event{}, fmt.Errorf("fsync queue: %w", err)
+		f.Close()
+		return Event{}, fmt.Errorf("fsync audit.jsonl: %w", err)
 	}
+	f.Close()
+
+	// Lazy trim. Cheap check — count lines, rewrite if over cap.
+	q.maybeTrimLocked(logPath)
 	return ev, nil
 }
 
-// ReadBatch returns up to maxCount events from the queue head, sorted by seq
-// ASC. Returns nil if the queue is empty. Malformed lines are silently
-// skipped so a single corruption doesn't wedge the pipeline.
+// nextSeqLocked reads, bumps, and writes the seq counter. Caller holds both
+// the in-process mutex and the filesystem flock.
+func (q *Queue) nextSeqLocked() (uint64, error) {
+	path := filepath.Join(q.stateDir, seqFilename)
+	cur, err := readUint64(path)
+	if err != nil {
+		return 0, err
+	}
+	next := cur + 1
+	if err := writeUint64(path, next); err != nil {
+		return 0, err
+	}
+	return next, nil
+}
+
+// ReadBatch returns up to maxCount events with seq > audit_acked_seq,
+// sorted by seq ASC. Reads the full audit.jsonl each time — fine for the
+// sizes we expect (100K max). If this ever becomes a hot path, cache.
 func (q *Queue) ReadBatch(maxCount int) ([]Event, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return q.readAllLocked(maxCount)
-}
 
-func (q *Queue) readAllLocked(maxCount int) ([]Event, error) {
-	path := filepath.Join(q.stateDir, queueFile)
-	f, err := os.Open(path)
+	acked, _ := readUint64(filepath.Join(q.stateDir, ackedFilename))
+
+	logPath := filepath.Join(q.stateDir, logFilename)
+	f, err := os.Open(logPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("open queue: %w", err)
+		return nil, fmt.Errorf("open audit.jsonl: %w", err)
 	}
 	defer f.Close()
+
 	var events []Event
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -138,10 +215,13 @@ func (q *Queue) readAllLocked(maxCount int) ([]Event, error) {
 		if err := json.Unmarshal(line, &ev); err != nil {
 			continue
 		}
+		if ev.Seq <= acked {
+			continue
+		}
 		events = append(events, ev)
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan queue: %w", err)
+		return nil, fmt.Errorf("scan audit.jsonl: %w", err)
 	}
 	sort.Slice(events, func(i, j int) bool { return events[i].Seq < events[j].Seq })
 	if maxCount > 0 && len(events) > maxCount {
@@ -150,68 +230,134 @@ func (q *Queue) readAllLocked(maxCount int) ([]Event, error) {
 	return events, nil
 }
 
-// AckUpTo removes events whose seq is <= ackedSeq. Writes survivors back
-// atomically via temp file + rename. Safe to call with ackedSeq=0 (no-op).
+// AckUpTo records that the server has durably stored events through
+// ackedSeq. Idempotent; acked counter only moves forward.
+// audit.jsonl is NOT trimmed here — the ack tracker is a separate file so
+// operators always retain the full local history (subject to logMaxLines).
 func (q *Queue) AckUpTo(ackedSeq uint64) error {
 	if ackedSeq == 0 {
 		return nil
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	events, err := q.readAllLocked(0)
+
+	lf, err := q.lockFile()
 	if err != nil {
 		return err
 	}
-	remaining := events[:0]
-	for _, ev := range events {
-		if ev.Seq > ackedSeq {
-			remaining = append(remaining, ev)
-		}
-	}
-	path := filepath.Join(q.stateDir, queueFile)
-	if len(remaining) == 0 {
-		// Remove the file entirely rather than leave an empty one.
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("remove queue: %w", err)
-		}
+	defer func() { _ = releaseLock(lf); lf.Close() }()
+
+	path := filepath.Join(q.stateDir, ackedFilename)
+	cur, _ := readUint64(path)
+	if ackedSeq <= cur {
 		return nil
 	}
-	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	return writeUint64(path, ackedSeq)
+}
+
+// AckedSeq returns the highest seq the server has acked. Exported for
+// tests and introspection.
+func (q *Queue) AckedSeq() uint64 {
+	v, _ := readUint64(filepath.Join(q.stateDir, ackedFilename))
+	return v
+}
+
+// maybeTrimLocked rewrites audit.jsonl keeping the last logTrimTo lines when
+// total lines exceed logMaxLines. Cheap no-op for small logs.
+func (q *Queue) maybeTrimLocked(path string) {
+	f, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("open tmp queue: %w", err)
+		return
 	}
-	for _, ev := range remaining {
-		line, mErr := json.Marshal(ev)
-		if mErr != nil {
-			f.Close()
-			return fmt.Errorf("marshal event: %w", mErr)
+	var lines int
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := f.Read(buf)
+		for i := 0; i < n; i++ {
+			if buf[i] == '\n' {
+				lines++
+			}
 		}
-		if _, wErr := f.Write(append(line, '\n')); wErr != nil {
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
 			f.Close()
-			return fmt.Errorf("write tmp queue: %w", wErr)
+			return
 		}
 	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		return fmt.Errorf("fsync tmp queue: %w", err)
+	f.Close()
+	if lines <= logMaxLines {
+		return
 	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("close tmp queue: %w", err)
+	q.trimLocked(path, lines)
+}
+
+func (q *Queue) trimLocked(path string, totalLines int) {
+	drop := totalLines - logTrimTo
+	src, err := os.Open(path)
+	if err != nil {
+		return
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("commit queue: %w", err)
+	defer src.Close()
+
+	tmp := path + ".trim"
+	dst, err := os.Create(tmp)
+	if err != nil {
+		return
 	}
-	return nil
+
+	scanner := bufio.NewScanner(src)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var i int
+	for scanner.Scan() {
+		i++
+		if i <= drop {
+			continue
+		}
+		dst.Write(scanner.Bytes())
+		dst.Write([]byte{'\n'})
+	}
+	if err := dst.Sync(); err != nil {
+		dst.Close()
+		os.Remove(tmp)
+		return
+	}
+	dst.Close()
+	_ = os.Rename(tmp, path)
+}
+
+// --- helpers ---
+
+func readUint64(path string) (uint64, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("read %s: %w", filepath.Base(path), err)
+	}
+	s := strings.TrimSpace(string(data))
+	if s == "" {
+		return 0, nil
+	}
+	n, err := strconv.ParseUint(s, 10, 64)
+	if err != nil {
+		return 0, nil // corrupt → treat as 0
+	}
+	return n, nil
+}
+
+func writeUint64(path string, v uint64) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(strconv.FormatUint(v, 10)), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
+	}
+	return os.Rename(tmp, path)
 }
 
 // truncateMessage enforces MessageMaxChars, replacing the tail with "…".
 func truncateMessage(s string) string {
-	if len(s) <= MessageMaxChars {
-		return s
-	}
-	// Cut at the byte before the limit minus room for the ellipsis, then
-	// make sure we don't split a multibyte rune. Simpler: operate on runes.
 	runes := []rune(s)
 	if len(runes) <= MessageMaxChars {
 		return s
@@ -219,18 +365,15 @@ func truncateMessage(s string) string {
 	return string(runes[:MessageMaxChars-1]) + "…"
 }
 
-// truncateDetails drops keys until the JSON-serialized size fits within
-// DetailsMaxBytes. Preserves the map shape; never truncates individual values.
-// Drop order: alphabetical by key (stable, predictable).
+// truncateDetails drops keys (reverse-alphabetical, deterministic) until the
+// JSON-serialized size fits within DetailsMaxBytes. Preserves value shape.
 func truncateDetails(in map[string]string) map[string]string {
 	if len(in) == 0 {
 		return nil
 	}
-	// Check if the full map already fits.
 	if data, err := json.Marshal(in); err == nil && len(data) <= DetailsMaxBytes {
 		return in
 	}
-	// Drop keys in reverse alphabetical order until it fits.
 	keys := make([]string, 0, len(in))
 	for k := range in {
 		keys = append(keys, k)

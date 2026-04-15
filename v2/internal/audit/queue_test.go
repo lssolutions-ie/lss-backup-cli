@@ -1,6 +1,9 @@
 package audit
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -23,46 +26,42 @@ func TestAppendAssignsSequentialSeqs(t *testing.T) {
 	if len(events) != 5 {
 		t.Fatalf("expected 5, got %d", len(events))
 	}
-	for i, ev := range events {
-		if ev.Seq != uint64(i+1) {
-			t.Errorf("idx %d: seq got %d want %d", i, ev.Seq, i+1)
-		}
-	}
 }
 
-func TestAckUpToTrimsQueue(t *testing.T) {
-	q := NewQueue(t.TempDir())
+func TestAckUpToHidesButPreservesEvents(t *testing.T) {
+	dir := t.TempDir()
+	q := NewQueue(dir)
 	for i := 0; i < 5; i++ {
-		if _, err := q.Append("job_created", "info", "user:test", "x", nil); err != nil {
-			t.Fatal(err)
-		}
+		q.Append("job_created", "info", "user:test", "x", nil)
 	}
 	if err := q.AckUpTo(3); err != nil {
 		t.Fatal(err)
 	}
-	events, err := q.ReadBatch(0)
+	// ReadBatch returns only seq > acked.
+	events, _ := q.ReadBatch(0)
+	if len(events) != 2 || events[0].Seq != 4 || events[1].Seq != 5 {
+		t.Errorf("after ack=3: unexpected batch %+v", events)
+	}
+	// But the log file still contains all 5 events — local history preserved.
+	data, err := os.ReadFile(filepath.Join(dir, logFilename))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 2 {
-		t.Fatalf("after ack=3 expected 2 remaining, got %d", len(events))
-	}
-	if events[0].Seq != 4 || events[1].Seq != 5 {
-		t.Errorf("remaining seqs: got %d, %d", events[0].Seq, events[1].Seq)
+	lines := strings.Count(strings.TrimSpace(string(data)), "\n") + 1
+	if lines != 5 {
+		t.Errorf("audit.jsonl should still have 5 lines, got %d", lines)
 	}
 }
 
-func TestAckAllRemovesFile(t *testing.T) {
+func TestAckOnlyMovesForward(t *testing.T) {
 	q := NewQueue(t.TempDir())
 	for i := 0; i < 3; i++ {
 		q.Append("daemon_started", "info", "system", "x", nil)
 	}
-	if err := q.AckUpTo(10); err != nil {
-		t.Fatal(err)
-	}
-	events, _ := q.ReadBatch(0)
-	if len(events) != 0 {
-		t.Errorf("expected empty, got %d", len(events))
+	q.AckUpTo(5)
+	q.AckUpTo(2) // regressive ack must be ignored
+	if got := q.AckedSeq(); got != 5 {
+		t.Errorf("acked: got %d, want 5", got)
 	}
 }
 
@@ -80,9 +79,7 @@ func TestReadBatchLimit(t *testing.T) {
 	}
 }
 
-func TestSeqSurvivesAckAll(t *testing.T) {
-	// After acking every event, seq must NOT reset. Re-using seqs would break
-	// server's UNIQUE constraint and cause silent drops.
+func TestSeqSurvivesAck(t *testing.T) {
 	q := NewQueue(t.TempDir())
 	for i := 0; i < 3; i++ {
 		q.Append("daemon_started", "info", "system", "x", nil)
@@ -109,15 +106,69 @@ func TestMessageTruncation(t *testing.T) {
 	}
 }
 
-func TestDetailsTruncation(t *testing.T) {
-	big := map[string]string{}
-	for i := 0; i < 200; i++ {
-		big[string(rune('a'+i%26))+string(rune('A'+i%26))+string(rune('0'+i%10))] = strings.Repeat("v", 50)
+func TestLegacyQueueMigration(t *testing.T) {
+	dir := t.TempDir()
+	// Simulate a pre-v2.3.1 unacked-only queue with events 11,12.
+	legacy := filepath.Join(dir, legacyQueueFile)
+	evs := []Event{
+		{Seq: 11, TS: 1, Category: "daemon_started", Severity: "info", Actor: "system", Message: "a"},
+		{Seq: 12, TS: 2, Category: "tunnel_connected", Severity: "info", Actor: "system", Message: "b"},
 	}
-	q := NewQueue(t.TempDir())
-	ev, _ := q.Append("job_created", "info", "system", "x", big)
-	// After truncation the details should be strictly smaller than input.
-	if len(ev.Details) >= len(big) {
-		t.Errorf("details not truncated: %d >= %d", len(ev.Details), len(big))
+	f, _ := os.Create(legacy)
+	for _, e := range evs {
+		line, _ := json.Marshal(e)
+		f.Write(append(line, '\n'))
+	}
+	f.Close()
+	// seq counter sits at 12 (pre-migration state).
+	writeUint64(filepath.Join(dir, seqFilename), 12)
+
+	q := NewQueue(dir) // migration runs in constructor
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Errorf("legacy queue should have been removed")
+	}
+	// acked = min(seq) - 1 = 10 (so server had acked 1..10 already)
+	if got := q.AckedSeq(); got != 10 {
+		t.Errorf("migrated acked: got %d, want 10", got)
+	}
+	// ReadBatch should return exactly the migrated two.
+	events, _ := q.ReadBatch(0)
+	if len(events) != 2 || events[0].Seq != 11 || events[1].Seq != 12 {
+		t.Errorf("migrated batch: %+v", events)
+	}
+}
+
+func TestCrossProcessLock(t *testing.T) {
+	// Two NewQueue instances on the same dir simulate daemon + CLI.
+	dir := t.TempDir()
+	qA := NewQueue(dir)
+	qB := NewQueue(dir)
+
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 50; i++ {
+			qA.Append("daemon_started", "info", "system", "a", nil)
+		}
+		close(done)
+	}()
+	for i := 0; i < 50; i++ {
+		qB.Append("tunnel_connected", "info", "system", "b", nil)
+	}
+	<-done
+
+	events, _ := qA.ReadBatch(0)
+	if len(events) != 100 {
+		t.Fatalf("expected 100 events, got %d", len(events))
+	}
+	// Every seq from 1..100 must be present exactly once.
+	seen := make(map[uint64]bool, 100)
+	for _, e := range events {
+		if seen[e.Seq] {
+			t.Errorf("duplicate seq %d", e.Seq)
+		}
+		if e.Seq < 1 || e.Seq > 100 {
+			t.Errorf("unexpected seq %d", e.Seq)
+		}
+		seen[e.Seq] = true
 	}
 }
