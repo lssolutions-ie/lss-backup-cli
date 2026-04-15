@@ -13,7 +13,7 @@ rsync), runs them, logs results, and reports to a central management server.
 V2 is a clean rewrite of a v1 shell-script-based tool. The goal is durability, safety, and
 operator-friendliness over cleverness.
 
-**Version:** v2.3.2
+**Version:** v2.4.0
 **Module:** `github.com/lssolutions-ie/lss-backup-cli/v2`
 **Go version:** 1.25.0
 
@@ -286,13 +286,37 @@ Registry pattern: `NewRegistry()` → `map[string]Engine{"restic": ..., "rsync":
 
 The CLI is **menu-driven only**. No traditional flag parsing.
 
-### Special flags (parsed manually in main.go)
+### Special flags (parsed manually in cli.go)
 
 | Flag/Arg           | Behaviour                                        |
 |--------------------|--------------------------------------------------|
 | `run <job-id>`     | Run a job non-interactively                      |
 | `--uninstall`      | Trigger uninstall wizard                         |
 | `--update`         | Non-interactive update — no prompts, no restart message |
+| `--setup-ssh`      | Launch SSH credentials wizard                    |
+| `daemon`           | Start the scheduler daemon (systemd/launchd/Task Scheduler) |
+| `repo-info --json` / `repo-ls --json` / `repo-dump --json` / `repo-dump-zip --json` / `repo-ls-rsync --json` | Repository viewer subcommands used by the management server dashboard |
+
+### Scriptable API (v2.4+, implemented in `internal/cli/api.go`)
+
+Non-interactive subcommands for automation, integration tests, config-as-code.
+All mutating commands emit the matching audit event with `actor=user:<os_user>`
+and fire a synchronous post-action heartbeat before exit. Exit codes: 0 success,
+1 runtime error, 2 usage error (`cli.UsageError`).
+
+- `job list [--json]`
+- `job show --id ID [--json]`
+- `job create --id ID --name NAME --program restic|rsync --source PATH --dest PATH [--exclude-file F] [--rsync-no-perms] [--enabled=true|false] [--password-stdin]`
+- `job edit --id ID [--name N] [--source P] [--dest P] [--exclude-file F] [--clear-exclude-file] [--rsync-no-perms true|false]`
+- `job delete --id ID --yes [--destroy-data]`
+- `job enable --id ID` / `job disable --id ID`
+- `schedule set --id ID --mode manual|daily|weekly|monthly|cron [--cron EXPR] [--hour H] [--minute M] [--days 1,2,3] [--day-of-month N]`
+- `retention set --id ID --mode none|keep-last|keep-within|tiered [--keep-last N] [--keep-within 30d] [--keep-daily N] ...`
+- `notifications set --id ID [--healthchecks-on|--healthchecks-off] [--healthchecks-domain D] [--healthchecks-id UUID]`
+
+Restic jobs take the repo password via `--password-stdin` (one line from stdin).
+JSON output for `list`/`show` emits snake_case keys, omits empty fields, and
+redacts `healthchecks_id` (treated as a secret).
 
 ### Main Menu Options
 
@@ -642,4 +666,4 @@ Two distinct display modes are used, depending on whether the log has timestamps
 
 ---
 
-_Last updated: 2026-04-15 (v2.3.2)_
+_Last updated: 2026-04-15 (v2.4.0)_

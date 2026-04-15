@@ -72,7 +72,9 @@ func pauseForEnter() {
 func Run(args []string) error {
 	// On macOS all system paths require root. Enforce it up-front rather than
 	// failing mid-operation with a cryptic permission error.
-	if runtime.GOOS == "darwin" && os.Getuid() != 0 {
+	// Skip when LSS_BACKUP_V2_ROOT is set (dev/test override) — those paths
+	// are user-owned by definition.
+	if runtime.GOOS == "darwin" && os.Getuid() != 0 && os.Getenv("LSS_BACKUP_V2_ROOT") == "" {
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "  [ERROR]   LSS Backup CLI must be run as root on macOS.")
 		fmt.Fprintln(os.Stderr, "")
@@ -191,7 +193,22 @@ func Run(args []string) error {
 			}
 			return runRepoDumpZip(paths, jobID, snapID, paths2)
 		}
-		return errors.New("v2 is menu-driven; run lss-backup-cli with no arguments to open the menu")
+
+		// Scriptable, non-interactive subcommands (v2.4+) — automation, tests,
+		// config-as-code. Implemented in api.go so cli.go stays focused on
+		// menu flows.
+		switch args[0] {
+		case "job":
+			return runJobAPI(paths, args[1:])
+		case "schedule":
+			return runScheduleAPI(paths, args[1:])
+		case "retention":
+			return runRetentionAPI(paths, args[1:])
+		case "notifications":
+			return runNotificationsAPI(paths, args[1:])
+		}
+
+		return fmt.Errorf("unknown command %q (run with no arguments for the interactive menu)", args[0])
 	}
 
 	activitylog.Log(paths.LogsDir, "program started")
