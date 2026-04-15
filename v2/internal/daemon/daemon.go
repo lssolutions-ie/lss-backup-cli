@@ -18,6 +18,7 @@ import (
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/app"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/audit"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/engines"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/jobs"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/logcleanup"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/reporting"
@@ -388,6 +389,13 @@ func fireReport(paths app.Paths, scheduled []scheduledJob, reportType string, tu
 	status := reporting.BuildNodeStatus(nodeName, allJobs, nextRunByID, true)
 	status.ReportType = reportType
 
+	// Honour any pending reconcile_repo_stats request from the server:
+	// run restic stats per requested job and attach repo_size_bytes to
+	// Jobs[].result. Best-effort; failures drop from this batch and the
+	// server will re-request on a future heartbeat.
+	sizes := computeRequestedRepoSizes(allJobs)
+	reporting.AttachRepoSizes(&status, sizes)
+
 	// Attach tunnel status if available.
 	if tunnelMgr != nil {
 		ts := tunnelMgr.Status()
@@ -400,6 +408,35 @@ func fireReport(paths app.Paths, scheduled []scheduledJob, reportType string, tu
 
 	reporter := reporting.NewReporter(appCfg, paths.RootDir, paths.LogsDir)
 	reporter.Report(status)
+}
+
+// computeRequestedRepoSizes drains the reconcile queue and runs
+// ResticEngine.RepoSize on each requested job. Returns a map the caller
+// passes to reporting.AttachRepoSizes. Only restic jobs are stats-able;
+// others are silently dropped from the drain (server will stop asking
+// once it sees no repo_size_bytes response repeatedly).
+func computeRequestedRepoSizes(allJobs []config.Job) map[string]int64 {
+	ids := reporting.DrainReconcile()
+	if len(ids) == 0 {
+		return nil
+	}
+	byID := make(map[string]config.Job, len(allJobs))
+	for _, j := range allJobs {
+		byID[j.ID] = j
+	}
+	out := make(map[string]int64, len(ids))
+	for _, id := range ids {
+		j, ok := byID[id]
+		if !ok || j.Program != "restic" {
+			continue
+		}
+		if size, err := (engines.ResticEngine{}).RepoSize(j); err == nil {
+			out[id] = size
+		} else {
+			log.Printf("reconcile_repo_stats: %s: %v", id, err)
+		}
+	}
+	return out
 }
 
 // sendInitialHeartbeat sends a synchronous heartbeat so the server registers

@@ -154,6 +154,13 @@ func (r *httpReporter) doSend(status NodeStatus) ReportResponse {
 		}
 	}
 
+	// Record any reconcile-stats requests from the server. The daemon
+	// drains this set before the next heartbeat, runs restic stats per
+	// job, and attaches repo_size_bytes to the outgoing payload.
+	if len(result.ReconcileRepoStats) > 0 {
+		RequestReconcile(result.ReconcileRepoStats)
+	}
+
 	return result
 }
 

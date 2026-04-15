@@ -71,6 +71,9 @@ type JobResult struct {
 	FilesNew      int64  `json:"files_new,omitempty"`
 	SnapshotID    string `json:"snapshot_id,omitempty"`
 	SnapshotCount int    `json:"snapshot_count,omitempty"`
+	// RepoSizeBytes is populated by the reconcile_repo_stats flow when the
+	// server asks for fresh restic stats. Not written by the runner.
+	RepoSizeBytes int64  `json:"repo_size_bytes,omitempty"`
 }
 
 // JobConfig is a redacted view of the job's configuration, safe to send

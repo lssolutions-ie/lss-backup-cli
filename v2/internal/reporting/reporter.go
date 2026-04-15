@@ -8,6 +8,11 @@ type ReportResponse struct {
 	// persisted for this node. Reporter uses it to trim the local queue.
 	// Missing/zero means the server hasn't acked anything (keep queue).
 	AuditAckSeq uint64 `json:"audit_ack_seq,omitempty"`
+	// ReconcileRepoStats is the list of job IDs for which the server wants
+	// fresh restic repo statistics. The daemon runs `restic stats` for each
+	// and attaches repo_size_bytes to Jobs[].result on the next heartbeat.
+	// Empty/missing means no request — no stats calls, no cost.
+	ReconcileRepoStats []string `json:"reconcile_repo_stats,omitempty"`
 }
 
 // Reporter sends the current node status snapshot to a management server.

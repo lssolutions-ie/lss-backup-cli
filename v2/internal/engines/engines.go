@@ -253,6 +253,35 @@ func flattenResticRestore(target string, sourcePath string, output io.Writer) {
 	}
 }
 
+// RepoSize returns the total on-disk size in bytes of the restic repository
+// for this job via `restic stats --json`. Only meaningful for restic jobs;
+// rsync jobs return (0, an error). Used by the reconcile_repo_stats flow
+// where the server asks for fresh repo size numbers after a configurable
+// interval.
+func (e ResticEngine) RepoSize(job config.Job) (int64, error) {
+	if strings.TrimSpace(job.Secrets.ResticPassword) == "" {
+		return 0, fmt.Errorf("RESTIC_PASSWORD is required for restic jobs")
+	}
+	resticBin, err := lookPath("restic")
+	if err != nil {
+		return 0, err
+	}
+	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "stats", "--json")
+	executil.HideWindow(cmd)
+	cmd.Env = resticEnv(job)
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("restic stats failed: %w", err)
+	}
+	var s struct {
+		TotalSize int64 `json:"total_size"`
+	}
+	if err := json.Unmarshal(out, &s); err != nil {
+		return 0, fmt.Errorf("parse restic stats: %w", err)
+	}
+	return s.TotalSize, nil
+}
+
 // InstalledResticVersion returns the installed restic version string (e.g. "0.17.3"),
 // or an empty string if restic is not found or the version cannot be parsed.
 func InstalledResticVersion() string {
