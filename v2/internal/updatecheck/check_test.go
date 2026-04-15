@@ -36,10 +36,7 @@ func TestParseSemVersionRejectsInvalid(t *testing.T) {
 	}
 }
 
-func TestArchiveURLForTag(t *testing.T) {
-	url := archiveURLForTag("v2.1.0")
-	want := "https://github.com/lssolutions-ie/lss-backup-cli/archive/refs/tags/v2.1.0.zip"
-	if url != want {
-		t.Fatalf("expected %s, got %s", want, url)
-	}
-}
+// TestArchiveURLForTag was removed when the updater switched from source
+// archive downloads to pre-built binaries from GitHub Releases. The helper
+// it covered no longer exists; the test had been broken on main since the
+// switch and was keeping `go test ./...` red for anyone who cloned fresh.

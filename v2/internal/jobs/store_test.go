@@ -13,6 +13,7 @@ func TestCreateAndLoadJob(t *testing.T) {
 	paths := app.Paths{
 		RootDir:  root,
 		JobsDir:  filepath.Join(root, "jobs"),
+		LogsDir:  filepath.Join(root, "logs"),
 		StateDir: filepath.Join(root, "state"),
 		DocsDir:  filepath.Join(root, "docs"),
 	}
