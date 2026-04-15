@@ -286,6 +286,123 @@ func TestJobValidate(t *testing.T) {
 	r.mustFail(1, "job", "validate", "--id", "nope")
 }
 
+// --- real backup roundtrips ---
+// These tests require `restic` and `rsync` on PATH. Skipped if absent —
+// CI installs both via apt on Ubuntu runners.
+
+func TestResticBackupRoundtrip(t *testing.T) {
+	if _, err := execLookPath("restic"); err != nil {
+		t.Skip("restic not on PATH")
+	}
+	r := newRunner(t)
+	src := filepath.Join(r.rootDir, "src")
+	dst := filepath.Join(r.rootDir, "repo")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(src, "a.txt"), []byte("hello"), 0o644)
+	os.WriteFile(filepath.Join(src, "b.txt"), []byte("world"), 0o644)
+
+	// Password via stdin. cliRunner.run doesn't expose stdin, so use a raw
+	// exec.Command for the one step that needs it.
+	cmd := execCommand(r.binary, "job", "create",
+		"--id", "restic1",
+		"--name", "Restic1",
+		"--program", "restic",
+		"--source", src,
+		"--dest", dst,
+		"--password-stdin",
+	)
+	cmd.Env = append(os.Environ(), "LSS_BACKUP_V2_ROOT="+r.rootDir)
+	cmd.Stdin = strings.NewReader("testpass\n")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("create: %v\n%s", err, out)
+	}
+
+	// Run once — expect success and a snapshot_id.
+	out, stderr, code := r.run("run", "restic1")
+	if code != 0 {
+		t.Fatalf("run 1 exit %d\nstdout: %s\nstderr: %s", code, out, stderr)
+	}
+	lastRun1 := readLastRun(t, r.rootDir, "restic1")
+	if lastRun1.Status != "success" {
+		t.Fatalf("run 1 status = %q, want success; err=%q", lastRun1.Status, lastRun1.ErrorMessage)
+	}
+	if lastRun1.Result == nil || lastRun1.Result.SnapshotID == "" {
+		t.Fatalf("run 1 missing snapshot_id: %+v", lastRun1.Result)
+	}
+	firstSnap := lastRun1.Result.SnapshotID
+
+	// Add a new file, run again — expect files_new >= 1 and a fresh snapshot.
+	os.WriteFile(filepath.Join(src, "c.txt"), []byte("new file"), 0o644)
+	if out, stderr, code := r.run("run", "restic1"); code != 0 {
+		t.Fatalf("run 2 exit %d\nstdout: %s\nstderr: %s", code, out, stderr)
+	}
+	lastRun2 := readLastRun(t, r.rootDir, "restic1")
+	if lastRun2.Status != "success" {
+		t.Fatalf("run 2 status = %q", lastRun2.Status)
+	}
+	if lastRun2.Result.SnapshotID == firstSnap {
+		t.Errorf("run 2 reused snapshot id %s (expected a new one)", firstSnap)
+	}
+	if lastRun2.Result.FilesNew < 1 {
+		t.Errorf("run 2 files_new = %d, want >= 1", lastRun2.Result.FilesNew)
+	}
+	if lastRun2.Result.SnapshotCount < 2 {
+		t.Errorf("run 2 snapshot_count = %d, want >= 2", lastRun2.Result.SnapshotCount)
+	}
+}
+
+func TestRsyncBackupRoundtrip(t *testing.T) {
+	if _, err := execLookPath("rsync"); err != nil {
+		t.Skip("rsync not on PATH")
+	}
+	r := newRunner(t)
+	src := filepath.Join(r.rootDir, "src")
+	dst := filepath.Join(r.rootDir, "dst")
+	os.MkdirAll(src, 0o755)
+	os.WriteFile(filepath.Join(src, "a.txt"), []byte("hello"), 0o644)
+
+	r.mustRun("job", "create", "--id", "rs1", "--name", "RS1", "--program", "rsync", "--source", src, "--dest", dst)
+
+	if out, stderr, code := r.run("run", "rs1"); code != 0 {
+		t.Fatalf("run exit %d\nstdout: %s\nstderr: %s", code, out, stderr)
+	}
+	// rsync destination structure: rsync copies src/* into dst/
+	if data, err := os.ReadFile(filepath.Join(dst, "a.txt")); err != nil || string(data) != "hello" {
+		t.Errorf("dst/a.txt: err=%v data=%q", err, string(data))
+	}
+
+	lr := readLastRun(t, r.rootDir, "rs1")
+	if lr.Status != "success" {
+		t.Fatalf("rsync run status = %q err=%q", lr.Status, lr.ErrorMessage)
+	}
+}
+
+func TestDryRunWritesNothing(t *testing.T) {
+	if _, err := execLookPath("rsync"); err != nil {
+		t.Skip("rsync not on PATH")
+	}
+	r := newRunner(t)
+	src := filepath.Join(r.rootDir, "src")
+	dst := filepath.Join(r.rootDir, "dst")
+	os.MkdirAll(src, 0o755)
+	os.WriteFile(filepath.Join(src, "real.txt"), []byte("data"), 0o644)
+	r.mustRun("job", "create", "--id", "dr", "--name", "DR", "--program", "rsync", "--source", src, "--dest", dst)
+
+	r.mustRun("run", "dr", "--dry-run")
+
+	// Dest must be empty — rsync --dry-run writes nothing.
+	if entries, err := os.ReadDir(dst); err == nil && len(entries) > 0 {
+		t.Errorf("dry-run left %d entries in dst", len(entries))
+	}
+	// last_run.json must NOT exist (dry-run doesn't persist).
+	lrPath := filepath.Join(r.rootDir, "jobs", "dr", "last_run.json")
+	if _, err := os.Stat(lrPath); !os.IsNotExist(err) {
+		t.Errorf("dry-run should not write last_run.json; stat err: %v", err)
+	}
+}
+
 func TestUsageErrorExitCode(t *testing.T) {
 	r := newRunner(t)
 	r.mustFail(2, "job", "show")            // missing --id
@@ -296,6 +413,36 @@ func TestUsageErrorExitCode(t *testing.T) {
 
 // --- helpers ---
 
+type lastRunResult struct {
+	Status       string `json:"status"`
+	ErrorMessage string `json:"error_message"`
+	Result       *struct {
+		BytesTotal    int64  `json:"bytes_total,omitempty"`
+		BytesNew      int64  `json:"bytes_new,omitempty"`
+		FilesTotal    int64  `json:"files_total,omitempty"`
+		FilesNew      int64  `json:"files_new,omitempty"`
+		SnapshotID    string `json:"snapshot_id,omitempty"`
+		SnapshotCount int    `json:"snapshot_count,omitempty"`
+	} `json:"result,omitempty"`
+}
+
+func readLastRun(t *testing.T, rootDir, jobID string) lastRunResult {
+	t.Helper()
+	path := filepath.Join(rootDir, "jobs", jobID, "last_run.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var lr lastRunResult
+	if err := json.Unmarshal(data, &lr); err != nil {
+		t.Fatalf("unmarshal last_run: %v\n%s", err, data)
+	}
+	return lr
+}
+
+// execLookPath / execCommand are thin wrappers that exec_helpers_test.go
+// aliases to exec.LookPath / exec.Command — keeps the body of the tests
+// compact and lets us swap in stubs from unit tests later if needed.
 func parseJSON(t *testing.T, s string) map[string]any {
 	t.Helper()
 	var m map[string]any
