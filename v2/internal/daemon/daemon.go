@@ -16,6 +16,7 @@ import (
 
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/activitylog"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/app"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/audit"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/jobs"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/logcleanup"
@@ -66,6 +67,9 @@ func Run(paths app.Paths) error {
 	defer removePIDLock(pidFile)
 
 	log.Println("LSS Backup daemon starting")
+	audit.Init(paths)
+	audit.Emit(audit.CategoryDaemonStarted, audit.SeverityInfo, audit.ActorSystem,
+		"Daemon started", nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -75,6 +79,8 @@ func Run(paths app.Paths) error {
 	go func() {
 		<-sigCh
 		log.Println("Shutdown signal received, stopping daemon")
+		audit.Emit(audit.CategoryDaemonStopped, audit.SeverityInfo, audit.ActorSystem,
+			"Daemon shutting down (signal received)", nil)
 		cancel()
 	}()
 

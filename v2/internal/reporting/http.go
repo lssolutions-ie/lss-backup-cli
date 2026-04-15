@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/activitylog"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/audit"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
 )
 
@@ -91,7 +92,7 @@ func (r *httpReporter) doSend(status NodeStatus) ReportResponse {
 		return ReportResponse{}
 	}
 
-	env := envelope{V: "1", UID: cfg.NodeID, Data: encrypted}
+	env := envelope{V: "3", UID: cfg.NodeID, Data: encrypted}
 	body, err := json.Marshal(env)
 	if err != nil {
 		r.warn("marshal envelope: " + err.Error())
@@ -141,6 +142,16 @@ func (r *httpReporter) doSend(status NodeStatus) ReportResponse {
 			msg += " — " + body
 		}
 		r.warn(msg)
+		// Don't ack on non-2xx — server may not have persisted.
+		return result
+	}
+
+	// Trim the local audit queue up to the seq the server persisted.
+	// Safe with audit_ack_seq=0 (no-op).
+	if q := audit.Q(); q != nil && result.AuditAckSeq > 0 {
+		if err := q.AckUpTo(result.AuditAckSeq); err != nil {
+			r.warn("audit queue ack: " + err.Error())
+		}
 	}
 
 	return result

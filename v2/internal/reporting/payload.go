@@ -3,11 +3,17 @@ package reporting
 import (
 	"time"
 
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/audit"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/hwinfo"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/runner"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/schedule"
 )
+
+// AuditEventsPerHeartbeatCap bounds how many audit events we attach to a
+// single heartbeat payload. Server contract: 200. Larger backlogs drain
+// across successive heartbeats.
+const AuditEventsPerHeartbeatCap = 200
 
 // Report types sent in the payload so the server can distinguish them.
 const (
@@ -25,13 +31,17 @@ type TunnelStatus struct {
 // NodeStatus is the full snapshot of this node's backup state sent to the
 // management server on every report.
 type NodeStatus struct {
-	PayloadVersion string        `json:"payload_version"`
-	ReportType     string        `json:"report_type"` // "heartbeat" or "post_run"
-	NodeName       string        `json:"node_name"`
-	ReportedAt     time.Time     `json:"reported_at"`
-	Tunnel         *TunnelStatus `json:"tunnel,omitempty"`
-	Hardware       *hwinfo.Info  `json:"hardware,omitempty"` // included on heartbeat reports
-	Jobs           []JobStatus   `json:"jobs"`
+	PayloadVersion string         `json:"payload_version"`
+	ReportType     string         `json:"report_type"` // "heartbeat" or "post_run"
+	NodeName       string         `json:"node_name"`
+	ReportedAt     time.Time      `json:"reported_at"`
+	Tunnel         *TunnelStatus  `json:"tunnel,omitempty"`
+	Hardware       *hwinfo.Info   `json:"hardware,omitempty"` // included on heartbeat reports
+	Jobs           []JobStatus    `json:"jobs"`
+	// AuditEvents carries at most AuditEventsPerHeartbeatCap events with
+	// seq > last_acked_seq, sorted ASC. Present only when there's something
+	// to ship. Server returns audit_ack_seq; reporter trims the queue.
+	AuditEvents    []audit.Event  `json:"audit_events,omitempty"`
 }
 
 // JobStatus describes the current state of a single backup job.
@@ -201,7 +211,7 @@ func BuildNodeStatus(nodeName string, allJobs []config.Job, nextRunByID map[stri
 	}
 
 	ns := NodeStatus{
-		PayloadVersion: "2",
+		PayloadVersion: "3",
 		NodeName:       nodeName,
 		ReportedAt:     time.Now().UTC(),
 		Jobs:           statuses,
@@ -211,6 +221,15 @@ func BuildNodeStatus(nodeName string, allJobs []config.Job, nextRunByID map[stri
 	if includeConfig {
 		hw := hwinfo.Collect()
 		ns.Hardware = &hw
+	}
+
+	// Attach pending audit events (up to the per-heartbeat cap).
+	// Events are removed from the queue only after the server ACKs them
+	// via audit_ack_seq in the response — handled by the reporter.
+	if q := audit.Q(); q != nil {
+		if events, err := q.ReadBatch(AuditEventsPerHeartbeatCap); err == nil && len(events) > 0 {
+			ns.AuditEvents = events
+		}
 	}
 
 	return ns

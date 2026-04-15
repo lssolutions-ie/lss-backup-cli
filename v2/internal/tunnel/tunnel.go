@@ -26,6 +26,8 @@ import (
 
 	"github.com/gorilla/websocket"
 	"golang.org/x/crypto/ssh"
+
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/audit"
 )
 
 const (
@@ -187,6 +189,9 @@ func (m *Manager) connect(ctx context.Context, wsURL, nodeID, pskKey string, ssh
 
 	log.Printf("Tunnel: connected via WebSocket, remote port %d → %s", port, localSSHTarget)
 	m.setConnected(true, port)
+	audit.Emit(audit.CategoryTunnelConnected, audit.SeverityInfo, audit.ActorSystem,
+		fmt.Sprintf("Reverse SSH tunnel connected (remote port %d)", port),
+		map[string]string{"port": fmt.Sprintf("%d", port)})
 
 	// Notify the daemon so it can send a heartbeat with the real tunnel status.
 	m.mu.RLock()
@@ -211,13 +216,18 @@ func (m *Manager) connect(ctx context.Context, wsURL, nodeID, pskKey string, ssh
 	}()
 
 	// Wait for context cancellation or connection drop.
+	reason := "context cancelled"
 	select {
 	case <-ctx.Done():
 	case <-doneCh:
 		log.Println("Tunnel: connection lost")
+		reason = "connection lost"
 	}
 
 	m.setConnected(false, 0)
+	audit.Emit(audit.CategoryTunnelDisconnected, audit.SeverityWarn, audit.ActorSystem,
+		"Reverse SSH tunnel disconnected",
+		map[string]string{"reason": reason})
 }
 
 func (m *Manager) forward(remote net.Conn) {

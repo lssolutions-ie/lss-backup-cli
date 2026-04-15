@@ -102,6 +102,10 @@ func Run(args []string) error {
 		return err
 	}
 
+	// Bind audit emit helpers to this process's state directory.
+	// Daemon subcommand re-inits after its own setup; harmless.
+	audit.Init(paths)
+
 	if len(args) > 0 {
 		if len(args) == 1 && args[0] == "--uninstall" {
 			return uninstall.Run()
@@ -314,20 +318,28 @@ func runCheckForUpdates(paths app.Paths, prompter ui.Prompter) error {
 	cliUpdated := false
 	if result.UpdateAvailable {
 		ui.Println2("Downloading and installing lss-backup-cli " + result.LatestVersion + "...")
+		fromVersion := version.Current
 		if err := updatecheck.Install(result); err != nil {
 			ui.StatusError(err.Error())
 		} else {
 			activitylog.Log(paths.LogsDir, fmt.Sprintf("update installed: %s", result.LatestVersion))
+			audit.Emit(audit.CategoryUpdateInstalled, audit.SeverityInfo, audit.UserActor(),
+				fmt.Sprintf("lss-backup-cli updated from %s to %s", fromVersion, result.LatestVersion),
+				map[string]string{"component": "lss-backup-cli", "from_version": fromVersion, "to_version": result.LatestVersion})
 			cliUpdated = true
 		}
 	}
 
 	if resticErr == nil && resticResult.UpdateAvailable {
 		ui.Println2("Updating restic...")
+		fromRestic := engines.InstalledResticVersion()
 		if err := updatecheck.UpdateRestic(os.Stdout); err != nil {
 			ui.StatusError("restic update failed: " + err.Error())
 		} else {
 			activitylog.Log(paths.LogsDir, fmt.Sprintf("restic updated to %s", resticResult.LatestVersion))
+			audit.Emit(audit.CategoryUpdateInstalled, audit.SeverityInfo, audit.UserActor(),
+				fmt.Sprintf("restic updated from %s to %s", fromRestic, resticResult.LatestVersion),
+				map[string]string{"component": "restic", "from_version": fromRestic, "to_version": resticResult.LatestVersion})
 			fmt.Println()
 			ui.StatusOK("restic updated to " + resticResult.LatestVersion)
 		}
@@ -368,10 +380,14 @@ func runUpdateCLI(paths app.Paths) error {
 		ui.StatusInfo(result.Message)
 		fmt.Println()
 		ui.Println2("Downloading and installing " + result.LatestVersion + "...")
+		fromVersion := version.Current
 		if err := updatecheck.Install(result); err != nil {
 			return err
 		}
 		activitylog.Log(paths.LogsDir, fmt.Sprintf("update installed: %s", result.LatestVersion))
+		audit.Emit(audit.CategoryUpdateInstalled, audit.SeverityInfo, audit.ActorSystem,
+			fmt.Sprintf("lss-backup-cli updated from %s to %s (non-interactive)", fromVersion, result.LatestVersion),
+			map[string]string{"component": "lss-backup-cli", "from_version": fromVersion, "to_version": result.LatestVersion})
 		daemon.RestartService()
 		fmt.Println()
 		ui.StatusOK("lss-backup-cli updated to " + result.LatestVersion)
@@ -394,10 +410,14 @@ func runUpdateCLI(paths app.Paths) error {
 		ui.StatusInfo(resticResult.Message)
 		fmt.Println()
 		ui.Println2("Updating restic...")
+		fromRestic := engines.InstalledResticVersion()
 		if err := updatecheck.UpdateRestic(os.Stdout); err != nil {
 			ui.StatusError("restic update failed: " + err.Error())
 		} else {
 			activitylog.Log(paths.LogsDir, fmt.Sprintf("restic updated to %s", resticResult.LatestVersion))
+			audit.Emit(audit.CategoryUpdateInstalled, audit.SeverityInfo, audit.ActorSystem,
+				fmt.Sprintf("restic updated from %s to %s (non-interactive)", fromRestic, resticResult.LatestVersion),
+				map[string]string{"component": "restic", "from_version": fromRestic, "to_version": resticResult.LatestVersion})
 			fmt.Println()
 			ui.StatusOK("restic updated to " + resticResult.LatestVersion)
 			fmt.Println()
@@ -947,6 +967,9 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 
 	activitylog.Audit(paths.LogsDir, fmt.Sprintf("Job Created by user %q via interactive CLI: %s (%s) — engine: %s, source: %s", currentOSUser(), job.ID, job.Name, job.Program, job.Source.Path))
 	audit.Record(job.JobDir, "Job Created", fmt.Sprintf("engine: %s, source: %s", job.Program, job.Source.Path))
+	audit.Emit(audit.CategoryJobCreated, audit.SeverityInfo, audit.UserActor(),
+		fmt.Sprintf("Job %q (%s) created", job.ID, job.Name),
+		map[string]string{"job_id": job.ID, "job_name": job.Name, "program": job.Program})
 	daemon.TriggerReload(paths.StateDir)
 	fireImmediateReport(paths)
 
@@ -1063,15 +1086,24 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 			}
 			pauseForEnter()
 		case "Restore Backup":
+			audit.Emit(audit.CategoryRestoreStarted, audit.SeverityInfo, audit.UserActor(),
+				fmt.Sprintf("Restore started for job %q (%s)", job.ID, job.Name),
+				map[string]string{"job_id": job.ID, "job_name": job.Name})
 			if err := runRestoreWizard(paths, prompter, job.ID); err != nil && !errors.Is(err, errCancelled) {
 				ui.StatusError(err.Error())
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("restore failed: %s (%s) — %v", job.ID, job.Name, err))
 				audit.Record(job.JobDir, "Restore", fmt.Sprintf("FAILED: %v", err))
+				audit.Emit(audit.CategoryRestoreFailed, audit.SeverityWarn, audit.UserActor(),
+					fmt.Sprintf("Restore failed for job %q: %v", job.ID, err),
+					map[string]string{"job_id": job.ID, "error": err.Error()})
 				pauseForEnter()
 			} else if err == nil {
 				ui.StatusOK("Restore completed successfully.")
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("restore completed: %s (%s)", job.ID, job.Name))
 				audit.Record(job.JobDir, "Restore", "completed successfully")
+				audit.Emit(audit.CategoryRestoreCompleted, audit.SeverityInfo, audit.UserActor(),
+					fmt.Sprintf("Restore completed for job %q (%s)", job.ID, job.Name),
+					map[string]string{"job_id": job.ID, "job_name": job.Name})
 				pauseForEnter()
 			}
 		case "List Snapshots":
@@ -1087,6 +1119,9 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 				activitylog.Log(paths.LogsDir, fmt.Sprintf("job edited: %s (%s)", job.ID, job.Name))
 				activitylog.Audit(paths.LogsDir, fmt.Sprintf("Job Modified by user %q via interactive CLI: %s (%s) — configuration edited", currentOSUser(), job.ID, job.Name))
 				audit.Record(job.JobDir, "Edit Job", "configuration saved")
+				audit.Emit(audit.CategoryJobModified, audit.SeverityInfo, audit.UserActor(),
+					fmt.Sprintf("Job %q (%s) configuration edited", job.ID, job.Name),
+					map[string]string{"job_id": job.ID, "job_name": job.Name, "program": job.Program})
 				daemon.TriggerReload(paths.StateDir)
 			}
 		case "Configure Schedule":
@@ -1104,6 +1139,9 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 				reloaded, _ := jobs.Load(paths, job.ID)
 				activitylog.Audit(paths.LogsDir, fmt.Sprintf("Job Modified by user %q via interactive CLI: %s (%s) — schedule changed to: %s", currentOSUser(), job.ID, job.Name, cronSchedule.Describe(reloaded.Schedule)))
 				audit.Record(job.JobDir, "Configure Schedule", cronSchedule.Describe(reloaded.Schedule))
+				audit.Emit(audit.CategoryScheduleChanged, audit.SeverityInfo, audit.UserActor(),
+					fmt.Sprintf("Schedule for job %q changed to: %s", job.ID, cronSchedule.Describe(reloaded.Schedule)),
+					map[string]string{"job_id": job.ID, "schedule": cronSchedule.Describe(reloaded.Schedule)})
 				daemon.TriggerReload(paths.StateDir)
 				fireImmediateReport(paths)
 			}
@@ -1122,6 +1160,9 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 				reloaded, _ := jobs.Load(paths, job.ID)
 				activitylog.Audit(paths.LogsDir, fmt.Sprintf("Job Modified by user %q via interactive CLI: %s (%s) — retention changed to: %s", currentOSUser(), job.ID, job.Name, reloaded.Retention.Mode))
 				audit.Record(job.JobDir, "Configure Retention", fmt.Sprintf("mode: %s", reloaded.Retention.Mode))
+				audit.Emit(audit.CategoryRetentionChanged, audit.SeverityInfo, audit.UserActor(),
+					fmt.Sprintf("Retention for job %q changed to: %s", job.ID, reloaded.Retention.Mode),
+					map[string]string{"job_id": job.ID, "policy": reloaded.Retention.Mode})
 				daemon.TriggerReload(paths.StateDir)
 				fireImmediateReport(paths)
 			}
@@ -1144,6 +1185,9 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 				}
 				activitylog.Audit(paths.LogsDir, fmt.Sprintf("Job Modified by user %q via interactive CLI: %s (%s) — notifications: %s", currentOSUser(), job.ID, job.Name, notifDetail))
 				audit.Record(job.JobDir, "Configure Notifications", notifDetail)
+				audit.Emit(audit.CategoryNotificationsChanged, audit.SeverityInfo, audit.UserActor(),
+					fmt.Sprintf("Notifications for job %q changed: %s", job.ID, notifDetail),
+					map[string]string{"job_id": job.ID, "settings": notifDetail})
 				daemon.TriggerReload(paths.StateDir)
 				fireImmediateReport(paths)
 			}
@@ -1185,6 +1229,9 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 				continue
 			}
 			activitylog.Audit(paths.LogsDir, fmt.Sprintf("Job Deleted by user %q via interactive CLI: %s (%s) — destination: %s", currentOSUser(), job.ID, job.Name, job.Destination.Path))
+			audit.Emit(audit.CategoryJobDeleted, audit.SeverityWarn, audit.UserActor(),
+				fmt.Sprintf("Job %q (%s) deleted", job.ID, job.Name),
+				map[string]string{"job_id": job.ID, "job_name": job.Name, "program": job.Program})
 			daemon.TriggerReload(paths.StateDir)
 			fireImmediateReport(paths)
 			return nil
@@ -2588,6 +2635,8 @@ func runManagementConsoleWizard(paths app.Paths, prompter ui.Prompter) error {
 				return fmt.Errorf("save config: %w", err)
 			}
 			activitylog.Audit(paths.LogsDir, "management console configuration cleared")
+			audit.Emit(audit.CategoryMgmtConsoleCleared, audit.SeverityWarn, audit.UserActor(),
+				"Management console configuration cleared", nil)
 			daemon.TriggerReload(paths.StateDir)
 			ui.StatusOK("Management console configuration cleared.")
 			pauseForEnter()
@@ -2628,6 +2677,10 @@ func runManagementConsoleWizard(paths app.Paths, prompter ui.Prompter) error {
 	}
 
 	activitylog.Audit(paths.LogsDir, "management console configured: enabled="+fmt.Sprintf("%t", cfg.Enabled))
+	consoleHost := cfg.ServerURL
+	audit.Emit(audit.CategoryMgmtConsoleConfigured, audit.SeverityInfo, audit.UserActor(),
+		fmt.Sprintf("Management console configured (enabled=%t)", cfg.Enabled),
+		map[string]string{"console_host": consoleHost, "enabled": fmt.Sprintf("%t", cfg.Enabled)})
 	daemon.TriggerReload(paths.StateDir)
 
 	if cfg.Enabled {
@@ -2756,6 +2809,9 @@ func runSSHDetailsWizard(paths app.Paths, prompter ui.Prompter) error {
 	ui.StatusWarn("Copy these credentials now. You will need the encryption password to view them again.")
 
 	activitylog.Audit(paths.LogsDir, "SSH credentials configured: user "+creds.Username)
+	audit.Emit(audit.CategorySSHCredentialsConfigured, audit.SeverityInfo, audit.UserActor(),
+		fmt.Sprintf("SSH credentials configured for user %q", creds.Username),
+		map[string]string{"ssh_user": creds.Username})
 	pauseForEnter()
 	return nil
 }
