@@ -127,11 +127,13 @@ func TestLegacyQueueMigration(t *testing.T) {
 	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
 		t.Errorf("legacy queue should have been removed")
 	}
-	// acked = min(seq) - 1 = 10 (so server had acked 1..10 already)
-	if got := q.AckedSeq(); got != 10 {
-		t.Errorf("migrated acked: got %d, want 10", got)
+	// acked = 0 post-migration — reship everything, server dedupes via
+	// UNIQUE(source_node_id, seq) and reconciles. Avoids orphan-gap class
+	// of bugs from v2.3.0's ack-before-persist race.
+	if got := q.AckedSeq(); got != 0 {
+		t.Errorf("migrated acked: got %d, want 0", got)
 	}
-	// ReadBatch should return exactly the migrated two.
+	// ReadBatch returns both migrated events since nothing is acked.
 	events, _ := q.ReadBatch(0)
 	if len(events) != 2 || events[0].Seq != 11 || events[1].Seq != 12 {
 		t.Errorf("migrated batch: %+v", events)

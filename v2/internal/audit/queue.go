@@ -56,6 +56,14 @@ func NewQueue(stateDir string) *Queue {
 // unacked events only and was trimmed on ack). New model keeps events in
 // audit.jsonl permanently with ack tracked separately. If there's no legacy
 // file, this is a no-op. Safe to call repeatedly.
+//
+// audit_acked_seq is deliberately left unset (effectively 0) after migration.
+// Rationale: v2.3.0 had a bug where the server could ack an event before
+// durably persisting it, leaving the client with "acked past a seq the server
+// doesn't actually have" state — an orphan gap no heartbeat can ever fill.
+// Starting at 0 reships everything in audit.jsonl; the server's UNIQUE
+// constraint dedupes already-stored events and its reconcile walks the
+// contiguous run to a fresh ack. Cheap, idempotent, prevents the gotcha.
 func (q *Queue) migrateLegacy() {
 	legacyPath := filepath.Join(q.stateDir, legacyQueueFile)
 	newPath := filepath.Join(q.stateDir, logFilename)
@@ -65,9 +73,6 @@ func (q *Queue) migrateLegacy() {
 		return // nothing to migrate
 	}
 	defer legacy.Close()
-
-	var minSeq uint64 = ^uint64(0)
-	var seen bool
 
 	newFile, err := os.OpenFile(newPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -82,23 +87,14 @@ func (q *Queue) migrateLegacy() {
 		if len(line) == 0 {
 			continue
 		}
+		// Sanity check: only forward valid JSON events.
 		var ev Event
 		if err := json.Unmarshal(line, &ev); err != nil {
 			continue
 		}
-		if ev.Seq < minSeq {
-			minSeq = ev.Seq
-		}
-		seen = true
 		if _, err := newFile.Write(append(line, '\n')); err != nil {
 			return
 		}
-	}
-
-	if seen {
-		// Everything before minSeq was already acked under the old model.
-		acked := minSeq - 1
-		_ = writeUint64(filepath.Join(q.stateDir, ackedFilename), acked)
 	}
 	_ = os.Remove(legacyPath)
 }
