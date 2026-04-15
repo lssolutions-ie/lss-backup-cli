@@ -247,6 +247,45 @@ func TestDeleteRequiresYes(t *testing.T) {
 	r.mustRun("job", "show", "--id", "d")
 }
 
+func TestDeleteWithDestroyData(t *testing.T) {
+	r := newRunner(t)
+	src := filepath.Join(r.rootDir, "src")
+	dst := filepath.Join(r.rootDir, "dst")
+	os.MkdirAll(src, 0o755)
+	os.MkdirAll(dst, 0o755)
+	os.WriteFile(filepath.Join(dst, "data.bin"), []byte("important"), 0o644)
+
+	r.mustRun("job", "create", "--id", "d", "--name", "D", "--program", "rsync", "--source", src, "--dest", dst)
+
+	// Precondition: dest file still there.
+	if _, err := os.Stat(filepath.Join(dst, "data.bin")); err != nil {
+		t.Fatalf("precondition: data file missing: %v", err)
+	}
+
+	r.mustRun("job", "delete", "--id", "d", "--yes", "--destroy-data")
+
+	// Postcondition: dest is gone entirely.
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Errorf("expected destination removed, got stat err: %v", err)
+	}
+}
+
+func TestJobValidate(t *testing.T) {
+	r := newRunner(t)
+	src := filepath.Join(r.rootDir, "src")
+	dst := filepath.Join(r.rootDir, "dst")
+	os.MkdirAll(src, 0o755)
+	r.mustRun("job", "create", "--id", "v", "--name", "V", "--program", "rsync", "--source", src, "--dest", dst)
+
+	out := r.mustRun("job", "validate", "--id", "v")
+	if !strings.Contains(out, "OK: job v is valid") {
+		t.Errorf("validate output: got %q", out)
+	}
+
+	// Unknown id → runtime error (exit 1), not usage (exit 2).
+	r.mustFail(1, "job", "validate", "--id", "nope")
+}
+
 func TestUsageErrorExitCode(t *testing.T) {
 	r := newRunner(t)
 	r.mustFail(2, "job", "show")            // missing --id

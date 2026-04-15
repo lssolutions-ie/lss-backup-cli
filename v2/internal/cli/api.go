@@ -734,40 +734,30 @@ func fireImmediateReportAPI(paths app.Paths) {
 	fireImmediateReport(paths)
 }
 
-// destroyJobData deletes the backup data at a job's destination. Matches the
-// semantics of the interactive "also destroy data" flow. restic: forget all
-// snapshots + prune; rsync: rm -rf the destination.
-// NOTE: this is a placeholder that calls out to reuse the menu path if
-// available. For v2.4.0 we punt on full parity and refuse if the helper
-// isn't found — safer than half-implementing destructive ops.
+// destroyJobData wipes the backed-up data at a job's destination. Matches the
+// interactive "also destroy data" flow:
+//   - local: os.RemoveAll on the destination path
+//   - s3/smb/nfs: cannot destroy non-local data from here; returns an error
+//     explaining what the operator must do manually
+//
+// This is destructive and irreversible. The caller must have already gated
+// the call behind an explicit --yes + --destroy-data flag combo.
 func destroyJobData(job config.Job) error {
-	// For now, decline to destroy data from the scripted path; require the
-	// menu flow. This keeps the scripted API safe by default while still
-	// allowing --destroy-data to succeed for jobs whose destination path is
-	// already empty (detected by the absence of any files).
-	// TODO(m12): lift the interactive destroy-data helper out of cli.go so
-	// the scripted path can call it too.
-	if err := deleteDestIfEmpty(job); err == nil {
-		return nil
-	}
-	return errors.New("scripted --destroy-data not yet supported for non-empty destinations; use the interactive menu for this operation")
-}
-
-func deleteDestIfEmpty(job config.Job) error {
-	if job.Destination.Type != "local" {
-		return errors.New("non-local destination")
-	}
-	entries, err := os.ReadDir(job.Destination.Path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
+	switch job.Destination.Type {
+	case "local", "":
+		if err := os.RemoveAll(job.Destination.Path); err != nil {
+			return fmt.Errorf("remove %s: %w", job.Destination.Path, err)
 		}
-		return err
+		return nil
+	case "s3":
+		return fmt.Errorf("scripted --destroy-data cannot wipe S3 buckets (path: %s) — delete manually via your S3 provider", job.Destination.Path)
+	case "smb":
+		return fmt.Errorf("scripted --destroy-data cannot wipe SMB shares (host: %s, share: %s) — delete manually on the remote host", job.Destination.Host, job.Destination.ShareName)
+	case "nfs":
+		return fmt.Errorf("scripted --destroy-data cannot wipe NFS mounts (host: %s, share: %s) — delete manually on the remote host", job.Destination.Host, job.Destination.ShareName)
+	default:
+		return fmt.Errorf("scripted --destroy-data: unknown destination type %q", job.Destination.Type)
 	}
-	if len(entries) > 0 {
-		return errors.New("destination not empty")
-	}
-	return os.Remove(job.Destination.Path)
 }
 
 // ensure unused-import warnings don't trip the build when we add more later.
