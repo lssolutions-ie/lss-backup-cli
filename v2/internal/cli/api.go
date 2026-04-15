@@ -50,7 +50,7 @@ type usageErr = UsageError
 
 func runJobAPI(paths app.Paths, args []string) error {
 	if len(args) == 0 {
-		return UsageError{Msg: "job: expected subcommand: list | show | create | edit | delete | enable | disable"}
+		return UsageError{Msg: "job: expected subcommand: list | show | create | edit | delete | enable | disable | validate"}
 	}
 	sub, rest := args[0], args[1:]
 	switch sub {
@@ -68,9 +68,38 @@ func runJobAPI(paths app.Paths, args []string) error {
 		return runJobEnableDisable(paths, rest, true)
 	case "disable":
 		return runJobEnableDisable(paths, rest, false)
+	case "validate":
+		return runJobValidate(paths, rest)
 	default:
 		return UsageError{Msg: fmt.Sprintf("job: unknown subcommand %q", sub)}
 	}
+}
+
+// runJobValidate checks a job config against the layout validator without
+// mutating anything. Exit 0 = valid, exit 1 = invalid (errors printed to
+// stderr, one per line).
+func runJobValidate(paths app.Paths, args []string) error {
+	fs := newFlagSet("job validate")
+	id := fs.String("id", "", "job id [required]")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" {
+		return UsageError{Msg: "job validate: --id is required"}
+	}
+	job, err := jobs.Load(paths, *id)
+	if err != nil {
+		return err
+	}
+	errs := jobs.ValidateLayout(job)
+	if len(errs) == 0 {
+		fmt.Printf("OK: job %s is valid\n", job.ID)
+		return nil
+	}
+	for _, e := range errs {
+		fmt.Fprintln(os.Stderr, e.Error())
+	}
+	return fmt.Errorf("job %s failed validation (%d issue(s))", job.ID, len(errs))
 }
 
 func runScheduleAPI(paths app.Paths, args []string) error {

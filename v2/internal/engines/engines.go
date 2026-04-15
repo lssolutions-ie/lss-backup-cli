@@ -93,6 +93,9 @@ func (e ResticEngine) Run(job config.Job, output io.Writer) (*BackupSummary, err
 	if job.Source.ExcludeFile != "" {
 		resticArgs = append(resticArgs, "--exclude-file="+job.Source.ExcludeFile)
 	}
+	if os.Getenv("LSS_BACKUP_DRY_RUN") == "1" {
+		resticArgs = append(resticArgs, "--dry-run")
+	}
 	parser := newResticJSONParser(output)
 	stderrTail := newTailBuffer(errorTailBytes)
 	cmd := exec.Command(resticBin, resticArgs...)
@@ -409,6 +412,9 @@ func (e RsyncEngine) Run(job config.Job, output io.Writer) (*BackupSummary, erro
 	}
 	if job.Source.ExcludeFile != "" {
 		rsyncArgs = append(rsyncArgs, "--exclude-from="+job.Source.ExcludeFile)
+	}
+	if os.Getenv("LSS_BACKUP_DRY_RUN") == "1" {
+		rsyncArgs = append(rsyncArgs, "--dry-run")
 	}
 	rsyncArgs = append(rsyncArgs, sourcePath, destinationPath)
 

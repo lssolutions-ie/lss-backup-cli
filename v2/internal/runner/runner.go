@@ -59,6 +59,10 @@ func (s Service) Run(job config.Job) (RunResult, error) {
 	}
 	defer unmountDest()
 
+	dryRun := os.Getenv("LSS_BACKUP_DRY_RUN") == "1"
+	if dryRun {
+		fmt.Fprintf(writer, "--- DRY RUN --- no data will be written; last_run.json will not be updated ---\n")
+	}
 	fmt.Fprintf(writer, "Starting job %s (%s)\n", job.ID, engine.Name())
 	fmt.Fprintf(writer, "Source: %s\n", job.Source.Path)
 	fmt.Fprintf(writer, "Destination: %s\n", job.Destination.Path)
@@ -114,8 +118,12 @@ func (s Service) Run(job config.Job) (RunResult, error) {
 		}
 	}
 
-	if err := WriteLastRun(job.JobDir, result); err != nil {
-		fmt.Fprintf(writer, "Warning: could not write last run state: %v\n", err)
+	if !dryRun {
+		if err := WriteLastRun(job.JobDir, result); err != nil {
+			fmt.Fprintf(writer, "Warning: could not write last run state: %v\n", err)
+		}
+	} else {
+		fmt.Fprintf(writer, "--- DRY RUN --- last_run.json left unchanged\n")
 	}
 
 	if runErr != nil {

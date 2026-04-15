@@ -122,7 +122,14 @@ func Run(args []string) error {
 			prompter := ui.NewPrompter()
 			return runSSHDetailsWizard(paths, prompter)
 		}
-		if args[0] == "run" && len(args) == 2 {
+		if args[0] == "run" && len(args) >= 2 {
+			// `run <id> [--dry-run]`. Dry-run flag is passed to engines via
+			// env var so we don't need to plumb it through every interface.
+			for i := 2; i < len(args); i++ {
+				if args[i] == "--dry-run" {
+					os.Setenv("LSS_BACKUP_DRY_RUN", "1")
+				}
+			}
 			return runJobByID(paths, args[1])
 		}
 		if args[0] == "repo-info" && len(args) >= 2 && args[1] == "--json" {
@@ -2020,6 +2027,13 @@ func runJobByID(paths app.Paths, id string) error {
 
 	service := runner.NewService()
 	_, runErr := service.Run(job)
+
+	// In dry-run mode skip the post_run report — nothing meaningful changed
+	// on the wire state, and the post_run would clobber the real last_run
+	// view on the server.
+	if os.Getenv("LSS_BACKUP_DRY_RUN") == "1" {
+		return runErr
+	}
 
 	// Fire-and-forget report regardless of run outcome.
 	if appCfg, cfgErr := config.LoadAppConfig(paths.RootDir); cfgErr == nil && appCfg.Enabled {
