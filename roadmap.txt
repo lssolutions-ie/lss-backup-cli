@@ -26,7 +26,7 @@ Guiding Principles
 - Reporting must never fail or block a backup job.
 
 
-Current Version: v2.2.6
+Current Version: v2.3.2
 Current State: All three platforms (macOS, Linux, Windows) tested and working.
                CI builds and attaches binaries for all 6 platform/arch combos
                on every v2.* tag push. In-app updater downloads pre-built
@@ -43,6 +43,15 @@ Current State: All three platforms (macOS, Linux, Windows) tested and working.
                tampering (snapshot_drop), and restic --json exit_error
                surfacing (stderr tail capture). Full attack-simulation test
                validated 10/10 anomalies firing end-to-end on 2026-04-14.
+
+               v2.3.x series adds the structured audit pipeline. audit.Emit
+               is the single write path; audit.jsonl is the source of truth;
+               events ride /api/v1/status heartbeats (up to 200/hb) with a
+               monotonic seq + server ack. Cross-process flock serializes
+               concurrent writes between daemon and interactive CLI. Server
+               contract is a closed 19-value category enum with info/warn/
+               critical severities and structured actors. Full smoke + user-
+               actor + migration-recovery validated end-to-end on 2026-04-15.
 
                M6, M7, M11 complete.
 

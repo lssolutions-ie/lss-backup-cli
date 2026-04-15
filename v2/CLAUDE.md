@@ -59,8 +59,13 @@ v2/
 │   ├── runner/
 │   │   ├── runner.go              Executes jobs: selects engine, writes log, persists RunResult
 │   │   └── result.go             RunResult struct + last_run.json read/write
-│   ├── audit/audit.go             Per-job audit log (Record/Read) — {jobDir}/audit.log
-│   ├── activitylog/activitylog.go System activity log + audit-events log (8-year retention)
+│   ├── audit/
+│   │   ├── audit.go                Per-job audit log (Record/Read) — {jobDir}/audit.log
+│   │   ├── event.go                AuditEvent struct + closed category enum (v2.3+)
+│   │   ├── queue.go                audit.jsonl append-only log + seq + ack tracking + flock
+│   │   ├── emit.go                 Emit() — single entry point for structured audit events
+│   │   └── flock_unix.go / flock_windows.go   Cross-process file lock
+│   ├── activitylog/activitylog.go Operational activity log (menu nav, scheduled runs, reporter warnings)
 │   ├── logcleanup/logcleanup.go   KeepLatestFiles + TrimFileLines helpers
 │   ├── schedule/cron.go           Cron validation + human-readable descriptions
 │   ├── ui/prompt.go               Ask, Confirm, Select, AskPassword (masked)
@@ -205,18 +210,32 @@ Used by `ListSnapshots()` — populated from `restic snapshots --json`.
 
 | File | Location | Retention | Contents |
 |------|----------|-----------|----------|
-| `activity.log` | `{logsDir}/` | 10,000 lines → trims to 8,000 | All activity: menu selections, runs, edits, imports, exports, daemon events |
-| `audit-events.log` | `{logsDir}/` | **8 years** | `[AUDIT]` entries only — job created/deleted/modified with OS username |
+| `activity.log` | `{logsDir}/` | 10,000 lines → trims to 8,000 | All activity: menu selections, runs, edits, imports, exports, daemon events, `[AUDIT]` mirror lines |
+| `audit.jsonl` | `{stateDir}/` | 100,000 lines → trims to 80,000 | Structured audit events (v2.3+). One JSON Event per line. Source of truth for wire delivery. |
+| `audit_seq` / `audit_acked_seq` | `{stateDir}/` | 1 value each | Monotonic seq counter + highest server-acked seq |
+| `audit.lock` | `{stateDir}/` | sentinel | flock for cross-process audit writes (daemon + CLI) |
+| `audit-events.log` | `{logsDir}/` | legacy, pre-v2.3.1 | Old `[AUDIT]` text log. Stopped growing in v2.3.1. Still readable via CLI viewer for historical events. |
 | `daemon.log` | `{stateDir}/` | 5,000 lines → trims to 4,000 (on startup, all platforms) | Daemon process output |
 | `{job}/audit.log` | Per-job dir | Unbounded (low volume) | Per-job user actions with timestamp, action, detail |
 | `{job}/logs/*.log` | Per-job logs | Last 30 files | Full restic/rsync output per backup run |
 | `{job}/logs/restore/*.log` | Per-job restore | Last 10 files | Full output per restore run |
 | `{job}/last_run.json` | Per-job dir | 1 entry (overwritten) | Last run status, timestamps, duration, error, log path |
 
-### Audit provenance
-`activitylog.Audit()` writes to **both** `activity.log` and `audit-events.log`.
-All `[AUDIT]` entries include the OS username (`os/user.Current()`) and
-`"via interactive CLI"` to distinguish from daemon activity.
+### Audit event pipeline (v2.3+)
+`audit.Emit(category, severity, actor, message, details)` is the **single**
+entry point for structured audit events. It appends to `audit.jsonl` under
+a cross-process file lock (flock) and mirrors a human-readable summary
+to `activity.log` for the CLI log viewer. `audit.jsonl` is append-only,
+trimmed lazily; `audit_acked_seq` tracks server delivery separately so
+the local log retains full history even after events are shipped.
+
+Heartbeats piggyback up to 200 pending events (seq > audit_acked_seq)
+on `/api/v1/status`. Server returns `audit_ack_seq`; reporter calls
+`AckUpTo()` on 2xx. Migration from pre-v2.3.2 sets acked=0 so the first
+heartbeat reships everything and the server dedupes via UNIQUE(node,seq).
+
+Actors: `"system"` (daemon, engines, tunnel), `"user:<os_user>"` (interactive
+CLI actions via `audit.UserActor()`), `"remote:<source>"` reserved.
 
 ---
 
@@ -484,7 +503,8 @@ not by OS-level cron or Task Scheduler entries.
 - Snapshot picker for restore (date-filtered, numbered list; carries full Snapshot struct for date)
 - Restore target: `{user-target}/{job-id}/{DD-MM-YYYY}--{snapshotID}/`; restic output flattened
 - Per-job audit log (`{jobDir}/audit.log`)
-- System audit events log (`audit-events.log`, 8-year retention)
+- Structured audit event pipeline (`audit.jsonl` + wire shipping to management server with per-node monotonic seq and server-side ack trim)
+- Closed audit category enum: daemon_started/stopped, job_created/modified/deleted, schedule/retention/notifications_changed, run_failed, run_permission_denied, restore_started/completed/failed, ssh_credentials_configured, mgmt_console_configured/cleared, update_installed, tunnel_connected/disconnected
 - Activity log with retention (10k lines cap)
 - Log browser: main menu Audit Log (system audit events / activity / daemon / job run logs)
 - Log browser: per-job Audit Log (user actions / backup logs / restore logs)
@@ -609,9 +629,13 @@ Two distinct display modes are used, depending on whether the log has timestamps
 - Scheduling is daemon-based — do NOT add cron file writing or `schtasks` calls per job.
 - Windows: never try to delete the running binary. The update flow handles this with rename-then-replace.
 - Reporting (M7) must be fire-and-forget with a 15-second timeout. A failed report must never block a backup.
-- `activitylog.Audit()` writes to both `activity.log` and `audit-events.log` — use this (not `Log()`)
-  for any significant user action that should survive activity log rotation.
-- `audit.Record()` is best-effort and never returns an error — safe to call anywhere.
+- `audit.Emit(category, severity, actor, message, details)` is the single API for
+  structured audit events (v2.3+). Best-effort; never blocks the caller. Writes
+  to `audit.jsonl` under flock and mirrors a one-line summary to `activity.log`.
+- `activitylog.Log()` is for operational messages (menu nav, scheduled runs,
+  reporter warnings). **Don't use it for audit events** — those go through `audit.Emit`.
+- `audit.Record()` is best-effort and never returns an error — writes to per-job
+  `{jobDir}/audit.log`, local-only, not shipped to server.
 - Log file retention is enforced lazily (on write/startup), not by a background job.
 - Any new `prompter.Select` call that triggers a save/action must check `idx == -1` and return
   `errCancelled` before proceeding — the Select prompt returns `idx=-1, choice="", err=nil` on Enter.
