@@ -1,6 +1,6 @@
 # LSS Backup — Threat Model
 
-_Status: v1 draft, 2026-04-15. Scope: lss-backup-cli v2.4+ and the management server at similar maturity. Shared between both sessions._
+_Status: v2, 2026-04-16. Scope: lss-backup-cli v2.5+ and management server v1.14+. Shared between both sessions._
 
 ---
 
@@ -40,7 +40,7 @@ These are explicit non-goals for the current version. If any become in-scope, th
 
 7. **Real-time alerting.** The SMTP / webhook / escalation stack is deferred. Until it ships, alerting is pull-based (operators check the dashboard) or via healthchecks.io pings.
 
-8. **Forensics under active attack.** The audit log is a history, not an integrity-verified evidence chain. When HMAC chain lands, it becomes tamper-evident relative to a trusted CLI; until then, relative to a trusted node.
+8. **Forensics under active attack.** The audit log is now integrity-verified via HMAC chain (v2.5.0). Tamper-evident relative to a trusted CLI: if an attacker modifies events on the node before shipping, the chain breaks and the server refuses to advance the ack pointer. Does NOT protect against a compromised CLI binary that computes valid HMACs for forged events — that requires binary attestation (out of scope).
 
 ## Trust boundaries
 
@@ -80,7 +80,7 @@ _Source: server-side session, merged 2026-04-16._
 | Repo tampering (restic forget) | ✅ Detected (snapshot_drop anomaly) |
 | Snapshot ID set tracking | ✅ Server ready (migration 036), CLI shipping `snapshot_ids` in v2.4.7 |
 | Config drift (unauthorized edits) | ✅ Audit trail (`audit.jsonl` + server /audit) |
-| Audit log tampering | ⚠️ Detected only relative to a trusted CLI. HMAC chain spec at `docs/HMAC_CHAIN_SPEC.md`. |
+| Audit log tampering | ✅ HMAC-SHA256 chain on every event (v2.5.0 CLI + v1.14.0 server). Chain break → CRITICAL + ack freeze. |
 | Permanent client-side gap | ✅ 1-hour stale-gap sweeper on server prevents pipeline freeze |
 | Node went silent (attacker stopped daemon) | ✅ Silent-node alarm (7min default, tunable). Shipped v1.12.0. |
 | Tunnel brute-force via leaked PSK | ✅ Per-UID exponential backoff rate limiter (1s → 10min). Shipped v1.12.0. |
