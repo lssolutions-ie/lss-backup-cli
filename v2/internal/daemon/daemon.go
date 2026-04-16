@@ -18,6 +18,7 @@ import (
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/app"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/audit"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/dr"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/engines"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/jobs"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/logcleanup"
@@ -71,6 +72,12 @@ func Run(paths app.Paths) error {
 	audit.Init(paths)
 	audit.Emit(audit.CategoryDaemonStarted, audit.SeverityInfo, audit.ActorSystem,
 		"Daemon started", nil)
+
+	// Init DR manager so the reporter can update config from heartbeat
+	// responses and the daemon loop can schedule DR backups.
+	if appCfg, err := config.LoadAppConfig(paths.RootDir); err == nil && appCfg.Enabled {
+		dr.Init(paths, appCfg.PSKKey)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -170,6 +177,8 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}, tunnel
 
 		case <-heartbeatTicker.C:
 			log.Println("Heartbeat tick")
+			// Check if DR backup is due or force-requested.
+			maybeRunDRBackup(paths)
 			fireReport(paths, scheduled, reporting.ReportTypeHeartbeat, tunnelMgr)
 
 		case <-reloadTicker.C:
@@ -389,6 +398,20 @@ func fireReport(paths app.Paths, scheduled []scheduledJob, reportType string, tu
 	status := reporting.BuildNodeStatus(nodeName, allJobs, nextRunByID, true)
 	status.ReportType = reportType
 
+	// Attach DR status if configured.
+	if mgr := dr.Global(); mgr != nil {
+		st := mgr.GetStatus()
+		if st.Configured {
+			status.DRStatus = &reporting.DRStatus{
+				Configured:    st.Configured,
+				LastBackupAt:  st.LastBackupAt,
+				Status:        st.StatusText,
+				Error:         st.Error,
+				SnapshotCount: st.SnapshotCount,
+			}
+		}
+	}
+
 	// Honour any pending reconcile_repo_stats request from the server:
 	// run restic stats per requested job and attach repo_size_bytes to
 	// Jobs[].result. Best-effort; failures drop from this batch and the
@@ -408,6 +431,32 @@ func fireReport(paths app.Paths, scheduled []scheduledJob, reportType string, tu
 
 	reporter := reporting.NewReporter(appCfg, paths.RootDir, paths.LogsDir)
 	reporter.Report(status)
+}
+
+// maybeRunDRBackup checks if a DR backup is due (interval elapsed or
+// force-requested by the server) and runs it. Called on every heartbeat
+// tick so DR doesn't need its own timer in the select loop.
+func maybeRunDRBackup(paths app.Paths) {
+	mgr := dr.Global()
+	if mgr == nil {
+		return
+	}
+	force := dr.ConsumeForceRun()
+	if !force && !mgr.IsDue() {
+		return
+	}
+	log.Println("DR backup: starting...")
+	count, err := mgr.RunBackup(paths)
+	if err != nil {
+		log.Printf("DR backup: failed: %v", err)
+		mgr.RecordFailure(err.Error())
+		audit.Emit(audit.CategoryJobModified, audit.SeverityWarn, audit.ActorSystem,
+			"DR backup failed: "+err.Error(), nil)
+	} else {
+		mgr.RecordSuccess(count)
+		audit.Emit(audit.CategoryJobModified, audit.SeverityInfo, audit.ActorSystem,
+			fmt.Sprintf("DR backup completed (%d snapshots)", count), nil)
+	}
 }
 
 // computeRequestedRepoSizes drains the reconcile queue and runs

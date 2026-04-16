@@ -42,6 +42,18 @@ type NodeStatus struct {
 	// seq > last_acked_seq, sorted ASC. Present only when there's something
 	// to ship. Server returns audit_ack_seq; reporter trims the queue.
 	AuditEvents    []audit.Event  `json:"audit_events,omitempty"`
+	// DRStatus reports the current disaster-recovery state so the server
+	// can render the shield icon (grey/green/red).
+	DRStatus       *DRStatus      `json:"dr_status,omitempty"`
+}
+
+// DRStatus is the CLI's view of its DR backup state.
+type DRStatus struct {
+	Configured    bool       `json:"configured"`
+	LastBackupAt  *time.Time `json:"last_backup_at,omitempty"`
+	Status        string     `json:"status,omitempty"` // "success" or "failure"
+	Error         string     `json:"error,omitempty"`
+	SnapshotCount int        `json:"snapshot_count,omitempty"`
 }
 
 // JobStatus describes the current state of a single backup job.

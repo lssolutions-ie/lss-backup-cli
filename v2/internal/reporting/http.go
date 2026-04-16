@@ -18,6 +18,7 @@ import (
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/activitylog"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/audit"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/dr"
 )
 
 const (
@@ -159,6 +160,31 @@ func (r *httpReporter) doSend(status NodeStatus) ReportResponse {
 	// job, and attaches repo_size_bytes to the outgoing payload.
 	if len(result.ReconcileRepoStats) > 0 {
 		RequestReconcile(result.ReconcileRepoStats)
+	}
+
+	// Handle DR config pushed by the server.
+	if result.DRConfig != nil {
+		if mgr := dr.Global(); mgr != nil {
+			cfg := dr.Config{
+				Enabled:        result.DRConfig.Enabled,
+				S3Endpoint:     result.DRConfig.S3Endpoint,
+				S3Bucket:       result.DRConfig.S3Bucket,
+				S3Region:       result.DRConfig.S3Region,
+				S3AccessKey:    result.DRConfig.S3AccessKey,
+				S3SecretKey:    result.DRConfig.S3SecretKey,
+				ResticPassword: result.DRConfig.ResticPassword,
+				NodeFolder:     result.DRConfig.NodeFolder,
+				IntervalHours:  result.DRConfig.IntervalHours,
+			}
+			if changed, err := mgr.UpdateConfig(cfg); err != nil {
+				r.warn("dr config update: " + err.Error())
+			} else if changed {
+				dr.SetForceRun() // first config or config change → run immediately
+			}
+		}
+	}
+	if result.DRForceRun {
+		dr.SetForceRun()
 	}
 
 	return result
