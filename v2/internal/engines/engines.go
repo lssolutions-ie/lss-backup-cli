@@ -134,6 +134,14 @@ func (e ResticEngine) Run(job config.Job, output io.Writer) (*BackupSummary, err
 	if summary != nil {
 		if snaps, err := e.ListSnapshots(job); err == nil {
 			summary.SnapshotCount = len(snaps)
+			ids := make([]string, 0, len(snaps))
+			for _, s := range snaps {
+				ids = append(ids, shortSnapshotID(s.ID))
+			}
+			if len(ids) > 1000 {
+				ids = ids[len(ids)-1000:]
+			}
+			summary.SnapshotIDs = ids
 		}
 	}
 	return summary, nil

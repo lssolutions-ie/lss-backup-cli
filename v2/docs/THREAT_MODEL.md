@@ -49,22 +49,46 @@ These are explicit non-goals for the current version. If any become in-scope, th
 - **Management server ⇌ operator browser**: session auth, HTTPS. Out of scope for this doc.
 - **Node ⇌ backup destination**: for local, filesystem perms. For S3, credentials in secrets.env. For SMB/NFS, credentials in secrets.env. For rsync destinations on the same host, standard Unix perms.
 
+## PSK leak attack tree
+
+_Source: server-side session, merged 2026-04-16._
+
+What the attacker gets with a leaked PSK:
+
+1. **Forge heartbeats** — send fake NodeStatus payloads. Server trusts them (AES-256-GCM decrypts cleanly). Can inject false job states.
+2. **Forge audit events** — inject arbitrary audit rows with any actor including `"user:admin"`. Appears legitimate on /audit. Mitigation (planned): HMAC chain. Until shipped, audit is tamper-evident only relative to a trusted CLI.
+3. **Open reverse tunnels** — connect to `/ws/ssh-tunnel`, HMAC auth succeeds. Gets a reverse TCP forward on loopback. Still needs the node's SSH private key to do anything useful. Mitigation (shipped v1.12.0): per-UID exponential backoff rate limiter (1s → 10min cap).
+4. **Replay old heartbeats** — resend captured payload. Mitigation (shipped v1.0): ±10min freshness window on `reported_at`.
+
+What the attacker does NOT get: database access, web session, other nodes' data, server-side secret key.
+
+Mitigation chain: PSK rotation via `HandleNodeRegeneratePSK` (manual, audited). No auto-rotation (acceptable single-tenant; flag for multi-tenant).
+
+## Compromised management server
+
+_Source: server-side session, merged 2026-04-16._
+
+**If attacker has root on the server:** MySQL data, `secret.key`, `.cast` session recordings, web sessions all fully exposed. Attacker can decrypt all node PSKs. We do NOT defend against this today. Hardening path: off-host syslog mirror, HMAC chain (makes event forgery detectable post-facto), HSM for `secret.key`. All roadmap, none shipped.
+
+**If attacker has stolen superadmin web session:** can view everything, ack anomalies, create/delete users, regen PSKs, open terminals, modify permissions, change tuning thresholds. All audited. Key risk: raising anomaly thresholds to suppress detection. Mitigation (not shipped): alert on `tuning_saved` with large-magnitude threshold changes.
+
 ## Defensive posture summary
 
 | Concern | Status |
 |---|---|
 | Source wipe / ransomware | ✅ Detected (bytes_drop + files_drop anomaly) |
 | Repo tampering (restic forget) | ✅ Detected (snapshot_drop anomaly) |
+| Snapshot ID set tracking | ✅ Server ready (migration 036), CLI shipping `snapshot_ids` in v2.4.7 |
 | Config drift (unauthorized edits) | ✅ Audit trail (`audit.jsonl` + server /audit) |
-| Audit log tampering | ⚠️ Detected only relative to a trusted CLI. HMAC chain would close this. |
+| Audit log tampering | ⚠️ Detected only relative to a trusted CLI. HMAC chain spec at `docs/HMAC_CHAIN_SPEC.md`. |
 | Permanent client-side gap | ✅ 1-hour stale-gap sweeper on server prevents pipeline freeze |
-| Node went silent (attacker stopped daemon) | ⚠️ 10-minute threshold, too loose. "Aggressive silence alarm" (1-2 missed heartbeats) is planned. |
-| Tunnel brute-force via leaked PSK | ⚠️ No rate limit on `/ws/ssh-tunnel` today. P0 hardening planned. |
+| Node went silent (attacker stopped daemon) | ✅ Silent-node alarm (7min default, tunable). Shipped v1.12.0. |
+| Tunnel brute-force via leaked PSK | ✅ Per-UID exponential backoff rate limiter (1s → 10min). Shipped v1.12.0. |
+| Host audit (sshd/sudo/systemd) | ✅ Host audit worker with journal cursor. Shipped v1.12.0. |
+| Full server backup/restore | ✅ /settings/backup UI. Shipped v1.13.1. |
 | PSK rotation | ⚠️ Manual. Acceptable while single-operator. |
 | Real-time alerting | ❌ Deferred (last-ever milestone). |
-| MySQL backup of server itself | ❌ Gap. Planned. |
-| Staging environment | ❌ Gap. First fresh-VM install doubles as staging. |
-| Integration tests | 🛠 In progress (CLI side landed v2.4.0; server-side still pending). |
+| Integration tests | ✅ CLI: 25 tests + CI. Server: ~50 tests + CI. |
 
 ## When this document changes
 

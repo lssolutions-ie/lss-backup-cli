@@ -65,15 +65,16 @@ type JobStatus struct {
 // JobResult is the server-facing view of a backup run's structured outcome.
 // Sent when the CLI has data; omitted otherwise. All fields are optional.
 type JobResult struct {
-	BytesTotal    int64  `json:"bytes_total,omitempty"`
-	BytesNew      int64  `json:"bytes_new,omitempty"`
-	FilesTotal    int64  `json:"files_total,omitempty"`
-	FilesNew      int64  `json:"files_new,omitempty"`
-	SnapshotID    string `json:"snapshot_id,omitempty"`
-	SnapshotCount int    `json:"snapshot_count,omitempty"`
+	BytesTotal    int64    `json:"bytes_total,omitempty"`
+	BytesNew      int64    `json:"bytes_new,omitempty"`
+	FilesTotal    int64    `json:"files_total,omitempty"`
+	FilesNew      int64    `json:"files_new,omitempty"`
+	SnapshotID    string   `json:"snapshot_id,omitempty"`
+	SnapshotCount int      `json:"snapshot_count,omitempty"`
+	SnapshotIDs   []string `json:"snapshot_ids,omitempty"`
 	// RepoSizeBytes is populated by the reconcile_repo_stats flow when the
 	// server asks for fresh restic stats. Not written by the runner.
-	RepoSizeBytes int64  `json:"repo_size_bytes,omitempty"`
+	RepoSizeBytes int64    `json:"repo_size_bytes,omitempty"`
 }
 
 // JobConfig is a redacted view of the job's configuration, safe to send
@@ -190,6 +191,7 @@ func BuildNodeStatus(nodeName string, allJobs []config.Job, nextRunByID map[stri
 					FilesNew:      lr.Result.FilesNew,
 					SnapshotID:    lr.Result.SnapshotID,
 					SnapshotCount: lr.Result.SnapshotCount,
+					SnapshotIDs:   lr.Result.SnapshotIDs,
 				}
 			}
 		}

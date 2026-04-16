@@ -68,12 +68,13 @@ type RunResult struct {
 // BackupResult is the structured outcome of a backup run.
 // Populated for restic jobs; omitted for rsync (v2.2.0).
 type BackupResult struct {
-	BytesTotal    int64  `json:"bytes_total,omitempty"`
-	BytesNew      int64  `json:"bytes_new,omitempty"`
-	FilesTotal    int64  `json:"files_total,omitempty"`
-	FilesNew      int64  `json:"files_new,omitempty"`
-	SnapshotID    string `json:"snapshot_id,omitempty"`
-	SnapshotCount int    `json:"snapshot_count,omitempty"`
+	BytesTotal    int64    `json:"bytes_total,omitempty"`
+	BytesNew      int64    `json:"bytes_new,omitempty"`
+	FilesTotal    int64    `json:"files_total,omitempty"`
+	FilesNew      int64    `json:"files_new,omitempty"`
+	SnapshotID    string   `json:"snapshot_id,omitempty"`
+	SnapshotCount int      `json:"snapshot_count,omitempty"`
+	SnapshotIDs   []string `json:"snapshot_ids,omitempty"`
 }
 
 // WriteLastRun persists result to {jobDir}/last_run.json.

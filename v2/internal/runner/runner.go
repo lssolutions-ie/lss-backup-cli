@@ -89,6 +89,7 @@ func (s Service) Run(job config.Job) (RunResult, error) {
 			FilesNew:      summary.FilesNew,
 			SnapshotID:    summary.SnapshotID,
 			SnapshotCount: summary.SnapshotCount,
+			SnapshotIDs:   summary.SnapshotIDs,
 		}
 	}
 

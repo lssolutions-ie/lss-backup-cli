@@ -15,7 +15,8 @@ type BackupSummary struct {
 	FilesTotal    int64
 	FilesNew      int64
 	SnapshotID    string
-	SnapshotCount int // total snapshots in the repo after this run (restic only)
+	SnapshotCount int      // total snapshots in the repo after this run (restic only)
+	SnapshotIDs   []string // all snapshot short-IDs in the repo post-prune (restic only, cap 1000)
 }
 
 // resticJSONParser is an io.Writer that consumes restic's `--json` stream,

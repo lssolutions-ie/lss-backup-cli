@@ -184,6 +184,19 @@ func Run(args []string) error {
 			}
 			return runRepoLSRsync(paths, jobID, subPath)
 		}
+		if args[0] == "repo-diff" && len(args) >= 4 && args[1] == "--json" {
+			// repo-diff --json <job-id> <snapshot-a> <snapshot-b>
+			jobID := args[2]
+			snapA := args[3]
+			snapB := ""
+			if len(args) >= 5 {
+				snapB = args[4]
+			}
+			if snapB == "" {
+				return errors.New("repo-diff --json <job-id> <snapshot-a> <snapshot-b>")
+			}
+			return runRepoDiff(paths, jobID, snapA, snapB)
+		}
 		if args[0] == "repo-dump-zip" && len(args) >= 4 && args[1] == "--json" {
 			// repo-dump-zip --json <job-id> <snapshot-id> --path <p1> --path <p2> ...
 			jobID := args[2]
@@ -2355,6 +2368,102 @@ func runRepoLSRsync(appPaths app.Paths, jobID, subPath string) error {
 	out, _ := json.MarshalIndent(resp, "", "  ")
 	fmt.Println(string(out))
 	return nil
+}
+
+// runRepoDiff outputs a JSON object with added/removed/changed file lists
+// from `restic diff <snap-a> <snap-b>`. Used by the management server's
+// forensics UI to show "what was deleted" after a snapshot_drop anomaly.
+func runRepoDiff(paths app.Paths, jobID, snapA, snapB string) error {
+	job, err := jobs.Load(paths, jobID)
+	if err != nil {
+		return err
+	}
+	if job.Program != "restic" {
+		return fmt.Errorf("repo-diff is only supported for restic jobs")
+	}
+	if strings.TrimSpace(job.Secrets.ResticPassword) == "" {
+		return fmt.Errorf("RESTIC_PASSWORD is required for restic jobs")
+	}
+	resticBin, err := engines.LookResticPath()
+	if err != nil {
+		return err
+	}
+	unmount, mountErr := mountIfNeededForRepo(job)
+	if mountErr != nil {
+		return mountErr
+	}
+	defer unmount()
+
+	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "diff", snapA, snapB)
+	cmd.Env = engines.ResticEnvForJob(job)
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
+	out, err := cmd.Output()
+
+	type diffEntry struct {
+		Path string `json:"path"`
+	}
+	type diffResult struct {
+		Added          []diffEntry `json:"added"`
+		Removed        []diffEntry `json:"removed"`
+		Changed        []diffEntry `json:"changed"`
+		SnapshotAExists bool       `json:"snapshot_a_exists"`
+		SnapshotBExists bool       `json:"snapshot_b_exists"`
+	}
+
+	result := diffResult{
+		Added:          []diffEntry{},
+		Removed:        []diffEntry{},
+		Changed:        []diffEntry{},
+		SnapshotAExists: true,
+		SnapshotBExists: true,
+	}
+
+	if err != nil {
+		errMsg := strings.TrimSpace(stderrBuf.String())
+		if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "no matching ID") {
+			if strings.Contains(errMsg, snapA) {
+				result.SnapshotAExists = false
+			}
+			if strings.Contains(errMsg, snapB) {
+				result.SnapshotBExists = false
+			}
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(result)
+		}
+		return fmt.Errorf("restic diff failed: %w — %s", err, errMsg)
+	}
+
+	// Parse restic diff text output. Lines starting with:
+	//   +    /path  → added
+	//   -    /path  → removed
+	//   M    /path  → modified content
+	//   T    /path  → type changed (treated as changed)
+	// Summary lines at the end are skipped (no leading symbol).
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimRight(line, "\r")
+		if len(line) < 6 {
+			continue
+		}
+		prefix := line[0]
+		path := strings.TrimSpace(line[1:])
+		if path == "" {
+			continue
+		}
+		switch prefix {
+		case '+':
+			result.Added = append(result.Added, diffEntry{Path: path})
+		case '-':
+			result.Removed = append(result.Removed, diffEntry{Path: path})
+		case 'M', 'T':
+			result.Changed = append(result.Changed, diffEntry{Path: path})
+		}
+	}
+
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(result)
 }
 
 func runRepoDumpZip(paths app.Paths, jobID, snapshotID string, filePaths []string) error {
