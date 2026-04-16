@@ -20,18 +20,20 @@ import (
 //
 // Files under stateDir:
 //
-//   audit.jsonl       one JSON Event per line, append-only, trimmed lazily
-//                     when it exceeds logMaxLines. Kept regardless of server
-//                     ack state — operators can always grep this locally.
-//   audit_seq         next sequence number to assign (uint64 as ASCII)
-//   audit_acked_seq   highest seq the management server has durably stored
-//   audit.lock        flock sentinel — serializes seq/log/ack mutations
-//                     across processes (daemon + interactive CLI).
+//   audit.jsonl        one JSON Event per line, append-only, trimmed lazily
+//                      when it exceeds logMaxLines. Kept regardless of server
+//                      ack state — operators can always grep this locally.
+//   audit_seq          next sequence number to assign (uint64 as ASCII)
+//   audit_acked_seq    highest seq the management server has durably stored
+//   audit_chain_head   hex HMAC of the most recent event in the chain
+//   audit.lock         flock sentinel — serializes seq/log/ack mutations
+//                      across processes (daemon + interactive CLI).
 //
 // In-process writes also hold a sync.Mutex so tests that instantiate a
 // single Queue don't need the filesystem lock path to be hot.
 type Queue struct {
 	stateDir string
+	psk      string // node PSK for HMAC chain; empty = no HMAC
 	mu       sync.Mutex
 }
 
@@ -39,15 +41,18 @@ const (
 	logFilename       = "audit.jsonl"
 	seqFilename       = "audit_seq"
 	ackedFilename     = "audit_acked_seq"
+	chainHeadFilename = "audit_chain_head"
 	lockFilename      = "audit.lock"
 	legacyQueueFile   = "audit_queue.jsonl" // pre-v2.3.1 — migrated on first use
 	logMaxLines       = 100_000
 	logTrimTo         = 80_000
 )
 
-// NewQueue returns a Queue rooted at stateDir. The directory must exist.
-func NewQueue(stateDir string) *Queue {
-	q := &Queue{stateDir: stateDir}
+// NewQueue returns a Queue rooted at stateDir. psk is the node's pre-shared
+// key for HMAC chain computation; pass "" to disable HMAC (events will be
+// emitted without the hmac field, which the server accepts for pre-v2.5 nodes).
+func NewQueue(stateDir, psk string) *Queue {
+	q := &Queue{stateDir: stateDir, psk: psk}
 	q.migrateLegacy()
 	return q
 }
@@ -141,6 +146,18 @@ func (q *Queue) Append(category, severity, actor, message string, details map[st
 		Message:  truncateMessage(message),
 		Details:  truncateDetails(details),
 	}
+
+	// HMAC chain: if PSK is configured, compute HMAC over
+	// (prev_chain_head || canonical_json(event)) and persist the new head.
+	if q.psk != "" {
+		prevHead := q.readChainHead()
+		mac, macErr := computeEventHMAC(q.psk, prevHead, ev)
+		if macErr == nil {
+			ev.HMAC = mac
+			q.writeChainHead(mac)
+		}
+	}
+
 	line, err := json.Marshal(ev)
 	if err != nil {
 		return Event{}, fmt.Errorf("marshal event: %w", err)
@@ -348,6 +365,27 @@ func writeUint64(path string, v uint64) error {
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(strconv.FormatUint(v, 10)), 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
+	}
+	return os.Rename(tmp, path)
+}
+
+func (q *Queue) readChainHead() string {
+	data, err := os.ReadFile(filepath.Join(q.stateDir, chainHeadFilename))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func (q *Queue) writeChainHead(head string) {
+	path := filepath.Join(q.stateDir, chainHeadFilename)
+	_ = writeUint64File(path, head) // reuse the atomic write pattern
+}
+
+func writeUint64File(path, content string) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(content), 0o644); err != nil {
+		return err
 	}
 	return os.Rename(tmp, path)
 }

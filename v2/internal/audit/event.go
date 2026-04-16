@@ -44,6 +44,11 @@ const (
 // counter that never rewinds or reuses a value. Details is an optional
 // map of structured key/value context; the server soft-caps the serialized
 // size at 8 KB (client truncates at 2 KB).
+//
+// HMAC (v2.5+): HMAC-SHA256 chain over (prev_hmac || canonical_json(event))
+// keyed with the node PSK. Server verifies incrementally; chain break →
+// CRITICAL audit row + ack freeze. Empty when PSK is not configured or
+// the node hasn't been upgraded to v2.5+.
 type Event struct {
 	Seq      uint64            `json:"seq"`
 	TS       int64             `json:"ts"`
@@ -52,6 +57,7 @@ type Event struct {
 	Actor    string            `json:"actor"`
 	Message  string            `json:"message"`
 	Details  map[string]string `json:"details,omitempty"`
+	HMAC     string            `json:"hmac,omitempty"`
 }
 
 // Maximum characters for Event.Message before client-side truncation.

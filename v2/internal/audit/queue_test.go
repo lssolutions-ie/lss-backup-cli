@@ -9,7 +9,7 @@ import (
 )
 
 func TestAppendAssignsSequentialSeqs(t *testing.T) {
-	q := NewQueue(t.TempDir())
+	q := NewQueue(t.TempDir(), "")
 	for i := uint64(1); i <= 5; i++ {
 		ev, err := q.Append("daemon_started", "info", "system", "hi", nil)
 		if err != nil {
@@ -30,7 +30,7 @@ func TestAppendAssignsSequentialSeqs(t *testing.T) {
 
 func TestAckUpToHidesButPreservesEvents(t *testing.T) {
 	dir := t.TempDir()
-	q := NewQueue(dir)
+	q := NewQueue(dir, "")
 	for i := 0; i < 5; i++ {
 		q.Append("job_created", "info", "user:test", "x", nil)
 	}
@@ -54,7 +54,7 @@ func TestAckUpToHidesButPreservesEvents(t *testing.T) {
 }
 
 func TestAckOnlyMovesForward(t *testing.T) {
-	q := NewQueue(t.TempDir())
+	q := NewQueue(t.TempDir(), "")
 	for i := 0; i < 3; i++ {
 		q.Append("daemon_started", "info", "system", "x", nil)
 	}
@@ -66,7 +66,7 @@ func TestAckOnlyMovesForward(t *testing.T) {
 }
 
 func TestReadBatchLimit(t *testing.T) {
-	q := NewQueue(t.TempDir())
+	q := NewQueue(t.TempDir(), "")
 	for i := 0; i < 10; i++ {
 		q.Append("daemon_started", "info", "system", "x", nil)
 	}
@@ -80,7 +80,7 @@ func TestReadBatchLimit(t *testing.T) {
 }
 
 func TestSeqSurvivesAck(t *testing.T) {
-	q := NewQueue(t.TempDir())
+	q := NewQueue(t.TempDir(), "")
 	for i := 0; i < 3; i++ {
 		q.Append("daemon_started", "info", "system", "x", nil)
 	}
@@ -96,7 +96,7 @@ func TestSeqSurvivesAck(t *testing.T) {
 
 func TestMessageTruncation(t *testing.T) {
 	long := strings.Repeat("a", 600)
-	q := NewQueue(t.TempDir())
+	q := NewQueue(t.TempDir(), "")
 	ev, _ := q.Append("job_created", "info", "system", long, nil)
 	if len([]rune(ev.Message)) != MessageMaxChars {
 		t.Errorf("message rune length: got %d, want %d", len([]rune(ev.Message)), MessageMaxChars)
@@ -123,7 +123,7 @@ func TestLegacyQueueMigration(t *testing.T) {
 	// seq counter sits at 12 (pre-migration state).
 	writeUint64(filepath.Join(dir, seqFilename), 12)
 
-	q := NewQueue(dir) // migration runs in constructor
+	q := NewQueue(dir, "") // migration runs in constructor
 	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
 		t.Errorf("legacy queue should have been removed")
 	}
@@ -143,8 +143,8 @@ func TestLegacyQueueMigration(t *testing.T) {
 func TestCrossProcessLock(t *testing.T) {
 	// Two NewQueue instances on the same dir simulate daemon + CLI.
 	dir := t.TempDir()
-	qA := NewQueue(dir)
-	qB := NewQueue(dir)
+	qA := NewQueue(dir, "")
+	qB := NewQueue(dir, "")
 
 	done := make(chan struct{})
 	go func() {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/activitylog"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/app"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
 )
 
 // Global singleton queue. One per process lifetime is enough because paths
@@ -19,11 +20,17 @@ var (
 
 // Init binds the package-level Emit helpers to the process's state directory
 // (for audit.jsonl) and logs directory (for the activity.log mirror).
-// Call once at program startup (daemon main, CLI main).
+// Call once at program startup (daemon main, CLI main). Reads the management
+// console config to obtain the node PSK for the HMAC chain; if not configured
+// (no management console), HMAC is disabled and events ship without chain.
 func Init(paths app.Paths) {
 	globalMu.Lock()
 	defer globalMu.Unlock()
-	globalQueue = NewQueue(paths.StateDir)
+	psk := ""
+	if cfg, err := config.LoadAppConfig(paths.RootDir); err == nil && cfg.Enabled {
+		psk = cfg.PSKKey
+	}
+	globalQueue = NewQueue(paths.StateDir, psk)
 	globalLogsDir = paths.LogsDir
 }
 
