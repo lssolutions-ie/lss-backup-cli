@@ -26,7 +26,7 @@ Guiding Principles
 - Reporting must never fail or block a backup job.
 
 
-Current Version: v2.5.1
+Current Version: v2.7.1
 Current State: All three platforms (macOS, Linux, Windows) tested and working.
                CI builds and attaches binaries for all 6 platform/arch combos
                on every v2.* tag push. In-app updater downloads pre-built
@@ -70,8 +70,22 @@ Current State: All three platforms (macOS, Linux, Windows) tested and working.
                snapshot ID set diff) + audit pipeline (node/server/host)
                + HMAC chain integrity.
 
+               v2.6.x adds CLI config backup/restore to S3 via restic
+               (manual path). v2.7.x extends this to server-controlled
+               disaster recovery: management server pushes S3 config +
+               restic password via heartbeat response, daemon schedules
+               periodic config backups, reports dr_status back for the
+               shield icon (grey/green/red). Per-client restic password,
+               bucket-per-client, folders-per-node.
+
                16/17 agreed-plan items closed. Only #17 (SMTP/webhook
                notifications) remains, deferred LAST EVER.
+
+               KNOWN ISSUE: daemon restart during --update is fragile on
+               macOS (launchctl unload/load timing) and Windows (schtasks
+               End/Run race). Daemon doesn't crash — it just doesn't
+               restart reliably. Needs post-restart verification loop.
+               Priority fix for next session.
 
                M6, M7, M11 complete.
 
