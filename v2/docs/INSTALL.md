@@ -10,7 +10,7 @@ This guide covers installing the CLI on Linux, macOS, and Windows and optionally
 
 | Platform | Required |
 |----------|----------|
-| Linux    | `bash`, `sudo`, `curl`, `sshpass` (for SSH credential setup), `systemd`. Debian/Ubuntu focus; RHEL/Alma should work but are untested. |
+| Linux    | `bash`, `sudo`, `curl`, `systemd`. Debian/Ubuntu focus; RHEL/Alma should work but are untested. |
 | macOS    | macOS 12+. Homebrew recommended (installer uses it to install `restic` if missing). Admin user. |
 | Windows  | Windows 11 or Server 2022. PowerShell 5.1+. Administrator account. `winget`. |
 
@@ -29,7 +29,7 @@ The installer will:
 - Create `/etc/lss-backup/` (config) and `/var/log/lss-backup/` (logs) and `/var/lib/lss-backup/` (state)
 - Install a `lss-backup.service` systemd unit and start the daemon
 - Ensure `restic` and `rsync` are on PATH (apt install if needed)
-- Configure `sshd` to allow password auth for `lss_*` users (adds a `Match User lss_*` block, idempotent)
+- Configure `sshd` to allow password auth for `lss_*` users (via `--setup-ssh` post-install step, not the installer itself)
 
 After install, open the menu:
 
@@ -42,8 +42,10 @@ sudo lss-backup-cli
 ## macOS install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/lssolutions-ie/lss-backup-cli/main/v2/install-cli.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/lssolutions-ie/lss-backup-cli/main/v2/install-cli.sh | bash
 ```
+
+**Note:** Do NOT use `sudo bash` on macOS — the installer manages its own `sudo` calls internally and rejects running as root directly.
 
 Same installer script. Paths:
 - Binary: `/usr/local/bin/lss-backup-cli`
