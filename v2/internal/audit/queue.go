@@ -133,10 +133,17 @@ func (q *Queue) Append(category, severity, actor, message string, details map[st
 	}
 	defer func() { _ = releaseLock(lf); lf.Close() }()
 
-	seq, err := q.nextSeqLocked()
+	// Read the current seq but DON'T persist yet — we only commit the seq
+	// counter after the event is durably written. This prevents orphan gaps
+	// where the seq advances but the event write fails (audit found this
+	// as a critical bug in the code review).
+	seqPath := filepath.Join(q.stateDir, seqFilename)
+	curSeq, err := readUint64(seqPath)
 	if err != nil {
 		return Event{}, err
 	}
+	seq := curSeq + 1
+
 	ev := Event{
 		Seq:      seq,
 		TS:       time.Now().UTC().Unix(),
@@ -147,14 +154,15 @@ func (q *Queue) Append(category, severity, actor, message string, details map[st
 		Details:  truncateDetails(details),
 	}
 
-	// HMAC chain: if PSK is configured, compute HMAC over
-	// (prev_chain_head || canonical_json(event)) and persist the new head.
+	// HMAC chain: compute but DON'T persist chain head yet — same reason
+	// as seq: only commit after the event is fsynced.
+	var newChainHead string
 	if q.psk != "" {
 		prevHead := q.readChainHead()
 		mac, macErr := computeEventHMAC(q.psk, prevHead, ev)
 		if macErr == nil {
 			ev.HMAC = mac
-			q.writeChainHead(mac)
+			newChainHead = mac
 		}
 	}
 
@@ -177,25 +185,30 @@ func (q *Queue) Append(category, severity, actor, message string, details map[st
 	}
 	f.Close()
 
+	// Event is durably persisted — NOW commit seq counter and chain head.
+	// If these writes fail, the event is still safely persisted; worst case
+	// is a duplicate seq on next Append (server's UNIQUE constraint handles).
+	if err := writeUint64(seqPath, seq); err != nil {
+		return Event{}, fmt.Errorf("commit seq: %w", err)
+	}
+	if newChainHead != "" {
+		q.writeChainHead(newChainHead)
+	}
+
 	// Lazy trim. Cheap check — count lines, rewrite if over cap.
 	q.maybeTrimLocked(logPath)
 	return ev, nil
 }
 
-// nextSeqLocked reads, bumps, and writes the seq counter. Caller holds both
-// the in-process mutex and the filesystem flock.
-func (q *Queue) nextSeqLocked() (uint64, error) {
-	path := filepath.Join(q.stateDir, seqFilename)
-	cur, err := readUint64(path)
-	if err != nil {
-		return 0, err
-	}
-	next := cur + 1
-	if err := writeUint64(path, next); err != nil {
-		return 0, err
-	}
-	return next, nil
-}
+// nextSeqLocked is no longer used — seq is now read before the event write
+// and committed after fsync to prevent orphan gaps. Kept as a comment for
+// git-blame context.
+//
+// The old flow was: read → bump → write seq → build event → write event.
+// Bug: if the event write failed, seq had already advanced, creating a
+// permanent gap the server couldn't fill.
+//
+// New flow: read seq → build event → write event → fsync → commit seq.
 
 // ReadBatch returns up to maxCount events with seq > audit_acked_seq,
 // sorted by seq ASC. Reads the full audit.jsonl each time — fine for the

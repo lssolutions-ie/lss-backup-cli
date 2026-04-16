@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -302,6 +303,9 @@ func runJobCreate(paths app.Paths, args []string) error {
 	}
 	if *program != "restic" && *program != "rsync" {
 		return UsageError{Msg: `job create: --program must be "restic" or "rsync"`}
+	}
+	if !isValidJobID(*id) {
+		return UsageError{Msg: "job create: --id must be alphanumeric, dash, or underscore only (no path separators)"}
 	}
 
 	input := jobs.CreateInput{
@@ -684,6 +688,12 @@ func runNotificationsSet(paths app.Paths, args []string) error {
 }
 
 // --- shared helpers ---
+
+var jobIDRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+func isValidJobID(id string) bool {
+	return jobIDRegex.MatchString(id)
+}
 
 func newFlagSet(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)

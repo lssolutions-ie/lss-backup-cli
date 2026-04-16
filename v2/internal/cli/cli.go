@@ -128,6 +128,7 @@ func Run(args []string) error {
 			for i := 2; i < len(args); i++ {
 				if args[i] == "--dry-run" {
 					os.Setenv("LSS_BACKUP_DRY_RUN", "1")
+					defer os.Unsetenv("LSS_BACKUP_DRY_RUN")
 				}
 			}
 			return runJobByID(paths, args[1])
