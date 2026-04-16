@@ -105,6 +105,9 @@ if (Get-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction Silen
     Write-Host "Daemon task stopped and removed (Task Scheduler)"
 }
 
+# Kill any orphaned daemon processes that survived the task stop.
+Get-Process -Name "lss-backup-cli" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
 # Remove the binary directory and clean it from the system PATH.
 $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
 $cleanedPath = ($machinePath -split ";") | Where-Object { $_.TrimEnd("\") -ne $BinDir.TrimEnd("\") }

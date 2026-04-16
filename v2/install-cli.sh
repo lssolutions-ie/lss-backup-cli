@@ -53,7 +53,7 @@ install_go_tarball() {
 	_arch=$(uname -m)
 	case "$_arch" in
 		x86_64)  _goarch="amd64" ;;
-		aarch64) _goarch="arm64" ;;
+		aarch64|arm64) _goarch="arm64" ;;
 		armv7l)  _goarch="armv6l" ;;
 		*)
 			echo "Unsupported architecture for Go tarball install: $_arch" >&2
@@ -61,7 +61,12 @@ install_go_tarball() {
 			;;
 	esac
 
-	_tarball="go${GO_FALLBACK_VERSION}.linux-${_goarch}.tar.gz"
+	_goos="linux"
+	if [ "$OS_NAME" = "Darwin" ]; then
+		_goos="darwin"
+	fi
+
+	_tarball="go${GO_FALLBACK_VERSION}.${_goos}-${_goarch}.tar.gz"
 	_url="https://go.dev/dl/${_tarball}"
 	_tmp="/tmp/${_tarball}"
 
@@ -243,7 +248,12 @@ case "$OS_NAME" in
 		MANIFEST_PATH="${STATE_DIR}/install-manifest.json"
 		ensure_brew
 		ensure_macos_dependency go go
-		# restic: install or upgrade to latest via Homebrew.
+		# Verify Go version meets minimum; fall back to tarball if brew installed too old.
+		if ! go_meets_minimum; then
+			echo "Homebrew Go is older than 1.${GO_MIN_MINOR}; downloading official Go..."
+			install_go_tarball
+		fi
+		# restic: install or upgrade to latest via Homebrew, with binary fallback.
 		if command -v restic >/dev/null 2>&1; then
 			echo "Upgrading restic to latest via Homebrew..."
 			brew upgrade restic 2>/dev/null || true
@@ -251,6 +261,12 @@ case "$OS_NAME" in
 		else
 			brew install restic
 			append_dep "restic" "brew" "restic" false true
+		fi
+		# Verify restic version; fall back to GitHub binary if too old.
+		if ! restic_meets_minimum; then
+			echo "restic is older than 0.${RESTIC_MIN_MINOR}; downloading latest binary..."
+			install_restic_binary
+			append_dep "restic" "github-release" "restic/restic" false true
 		fi
 		ensure_macos_dependency rsync rsync
 		# SSH server — enable Remote Login for management server terminal access.
@@ -281,6 +297,8 @@ esac
 mkdir -p "${SCRIPT_DIR}/.gocache"
 cd "${SCRIPT_DIR}"
 TMP_BINARY="$(mktemp "${TMPDIR:-/tmp}/lss-backup-cli.XXXXXX")"
+# Clean up temp files on exit (normal or error).
+trap 'rm -f "${TMP_BINARY}" 2>/dev/null' EXIT
 GOCACHE="${SCRIPT_DIR}/.gocache" go build -o "${TMP_BINARY}" .
 sudo install -m 755 "${TMP_BINARY}" "${TARGET}"
 rm -f "${TMP_BINARY}"

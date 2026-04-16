@@ -153,6 +153,14 @@ case "$OS_NAME" in
 esac
 
 safe_remove "$BIN_PATH"
+
+# Kill any orphaned daemon processes that survived the service stop.
+# This handles edge cases where the daemon was started outside the service
+# manager, or the service stop didn't fully terminate the process.
+if command -v pkill >/dev/null 2>&1; then
+	pkill -f "lss-backup-cli daemon" 2>/dev/null || true
+fi
+
 safe_remove "$CONFIG_DIR"
 safe_remove "$LOGS_DIR"
 if [ "$STATE_DIR" != "$CONFIG_DIR" ] && [ "$STATE_DIR" != "$CONFIG_DIR/state" ]; then
