@@ -227,6 +227,8 @@ func Run(args []string) error {
 			return runRetentionAPI(paths, args[1:])
 		case "notifications":
 			return runNotificationsAPI(paths, args[1:])
+		case "config":
+			return runConfigAPI(paths, args[1:])
 		}
 
 		return fmt.Errorf("unknown command %q (run with no arguments for the interactive menu)", args[0])
