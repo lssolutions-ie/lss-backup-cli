@@ -1,6 +1,7 @@
 package engines
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -274,11 +275,19 @@ func (e ResticEngine) RepoSize(job config.Job) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	cmd := exec.Command(resticBin, "-r", job.Destination.Path, "stats", "--json")
+	// 5-minute timeout: restic stats walks the repo index and can take
+	// a long time on large repos or slow network destinations (S3, SMB).
+	// Without a timeout this blocks the daemon's entire heartbeat path.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, resticBin, "-r", job.Destination.Path, "stats", "--json")
 	executil.HideWindow(cmd)
 	cmd.Env = resticEnv(job)
 	out, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return 0, fmt.Errorf("restic stats timed out after 5 minutes")
+		}
 		return 0, fmt.Errorf("restic stats failed: %w", err)
 	}
 	var s struct {

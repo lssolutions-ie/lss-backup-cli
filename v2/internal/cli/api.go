@@ -17,7 +17,6 @@ package cli
 import (
 	"bufio"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -333,7 +332,7 @@ func runJobCreate(paths app.Paths, args []string) error {
 			return fmt.Errorf("read password from stdin: %w", err)
 		}
 		if pw == "" {
-			return errors.New("job create: empty password on stdin")
+			return UsageError{Msg: "job create: empty password on stdin"}
 		}
 		input.Secrets = &config.Secrets{ResticPassword: pw}
 	}
@@ -598,7 +597,7 @@ func runRetentionSet(paths app.Paths, args []string) error {
 		return err
 	}
 	if job.Program != "restic" {
-		return errors.New("retention set: retention only applies to restic jobs")
+		return UsageError{Msg: "retention set: retention only applies to restic jobs"}
 	}
 	ret, err := buildRetention(*mode, *keepLast, *keepWithin, *keepDaily, *keepWeekly, *keepMonthly, *keepYearly)
 	if err != nil {

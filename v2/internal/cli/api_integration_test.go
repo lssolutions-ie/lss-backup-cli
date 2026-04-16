@@ -226,7 +226,7 @@ func TestRetentionRsyncRejected(t *testing.T) {
 	os.MkdirAll(src, 0o755)
 	r.mustRun("job", "create", "--id", "r", "--name", "R", "--program", "rsync", "--source", src, "--dest", dst)
 
-	stderr := r.mustFail(1, "retention", "set", "--id", "r", "--mode", "keep-last", "--keep-last", "5")
+	stderr := r.mustFail(2, "retention", "set", "--id", "r", "--mode", "keep-last", "--keep-last", "5")
 	if !strings.Contains(stderr, "retention only applies to restic") {
 		t.Errorf("expected restic-only rejection, got %q", stderr)
 	}
