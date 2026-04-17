@@ -5,6 +5,7 @@ import (
 
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/audit"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/version"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/hwinfo"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/runner"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/schedule"
@@ -38,6 +39,9 @@ type NodeStatus struct {
 	Tunnel         *TunnelStatus  `json:"tunnel,omitempty"`
 	Hardware       *hwinfo.Info   `json:"hardware,omitempty"` // included on heartbeat reports
 	Jobs           []JobStatus    `json:"jobs"`
+	// CLIVersion is the running binary's version (e.g. "v2.8.0"). Server
+	// uses it to display the Version column and detect update availability.
+	CLIVersion     string         `json:"cli_version,omitempty"`
 	// AuditEvents carries at most AuditEventsPerHeartbeatCap events with
 	// seq > last_acked_seq, sorted ASC. Present only when there's something
 	// to ship. Server returns audit_ack_seq; reporter trims the queue.
@@ -231,6 +235,7 @@ func BuildNodeStatus(nodeName string, allJobs []config.Job, nextRunByID map[stri
 		PayloadVersion: "3",
 		NodeName:       nodeName,
 		ReportedAt:     time.Now().UTC(),
+		CLIVersion:     version.Current,
 		Jobs:           statuses,
 	}
 

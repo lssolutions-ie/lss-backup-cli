@@ -19,6 +19,8 @@ import (
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/audit"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/dr"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/updatecheck"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/version"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/engines"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/jobs"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/logcleanup"
@@ -183,6 +185,8 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}, tunnel
 			log.Println("Heartbeat tick")
 			// Check if DR backup is due or force-requested.
 			maybeRunDRBackup(paths)
+			// Check if server requested a CLI update.
+			maybeRunRemoteUpdate()
 			fireReport(paths, scheduled, reporting.ReportTypeHeartbeat, tunnelMgr)
 
 		case <-reloadTicker.C:
@@ -435,6 +439,38 @@ func fireReport(paths app.Paths, scheduled []scheduledJob, reportType string, tu
 
 	reporter := reporting.NewReporter(appCfg, paths.RootDir, paths.LogsDir)
 	reporter.Report(status)
+}
+
+// maybeRunRemoteUpdate checks if the server requested a CLI self-update
+// via the heartbeat response (operator clicked "Update Available" on the
+// dashboard). Runs the same flow as --update: check → download → install →
+// restart daemon.
+func maybeRunRemoteUpdate() {
+	if !reporting.ConsumeUpdatePending() {
+		return
+	}
+	log.Println("Remote update: server requested CLI update, checking...")
+	result, err := updatecheck.Check()
+	if err != nil {
+		log.Printf("Remote update: check failed: %v", err)
+		return
+	}
+	if !result.UpdateAvailable {
+		log.Println("Remote update: already up to date")
+		return
+	}
+	log.Printf("Remote update: installing %s...", result.LatestVersion)
+	if err := updatecheck.Install(result); err != nil {
+		log.Printf("Remote update: install failed: %v", err)
+		audit.Emit(audit.CategoryUpdateInstalled, audit.SeverityWarn, audit.ActorSystem,
+			fmt.Sprintf("Remote CLI update failed: %v", err), nil)
+		return
+	}
+	audit.Emit(audit.CategoryUpdateInstalled, audit.SeverityInfo, audit.ActorSystem,
+		fmt.Sprintf("CLI updated remotely from %s to %s", version.Current, result.LatestVersion),
+		map[string]string{"component": "lss-backup-cli", "from_version": version.Current, "to_version": result.LatestVersion})
+	log.Printf("Remote update: installed %s, restarting daemon...", result.LatestVersion)
+	RestartService()
 }
 
 // maybeRunDRBackup checks if a DR backup is due (interval elapsed or
