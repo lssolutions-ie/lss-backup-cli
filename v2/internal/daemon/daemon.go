@@ -148,8 +148,9 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}, tunnel
 		fireReport(paths, scheduled, reporting.ReportTypeHeartbeat, tunnelMgr)
 	}
 
-	// If the initial heartbeat delivered a DR config (or force-run), run the
-	// backup immediately rather than waiting for the first 5-min ticker.
+	// If the initial heartbeat delivered a DR config, force-run, or remote
+	// update command, act immediately rather than waiting for the 5-min tick.
+	maybeRunRemoteUpdate()
 	maybeRunDRBackup(paths)
 
 	reloadTicker := time.NewTicker(reloadInterval)
