@@ -294,12 +294,47 @@ case "$OS_NAME" in
 		;;
 esac
 
-mkdir -p "${SCRIPT_DIR}/.gocache"
-cd "${SCRIPT_DIR}"
 TMP_BINARY="$(mktemp "${TMPDIR:-/tmp}/lss-backup-cli.XXXXXX")"
 # Clean up temp files on exit (normal or error).
 trap 'rm -f "${TMP_BINARY}" 2>/dev/null' EXIT
-GOCACHE="${SCRIPT_DIR}/.gocache" go build -o "${TMP_BINARY}" .
+
+# Detect whether we have source code to build from. When piped via
+# `curl | bash` (server-assisted install), SCRIPT_DIR won't have go.mod.
+# In that case, download the pre-built binary from GitHub Releases.
+if [ -f "${SCRIPT_DIR}/go.mod" ]; then
+	echo "Building from source..."
+	mkdir -p "${SCRIPT_DIR}/.gocache"
+	cd "${SCRIPT_DIR}"
+	GOCACHE="${SCRIPT_DIR}/.gocache" go build -o "${TMP_BINARY}" .
+else
+	echo "Downloading pre-built binary from GitHub Releases..."
+	_arch=$(uname -m)
+	case "$_arch" in
+		x86_64)  _goarch="amd64" ;;
+		aarch64|arm64) _goarch="arm64" ;;
+		*)
+			echo "Unsupported architecture: $_arch" >&2
+			exit 1
+			;;
+	esac
+	_goos="linux"
+	if [ "$OS_NAME" = "Darwin" ]; then
+		_goos="darwin"
+	fi
+	_bin_name="lss-backup-cli-${_goos}-${_goarch}"
+	_releases_url="https://github.com/lssolutions-ie/lss-backup-cli/releases/latest/download/${_bin_name}"
+
+	if command -v curl >/dev/null 2>&1; then
+		curl -fsSL "$_releases_url" -o "${TMP_BINARY}"
+	elif command -v wget >/dev/null 2>&1; then
+		wget -q "$_releases_url" -O "${TMP_BINARY}"
+	else
+		echo "Neither curl nor wget found; cannot download binary." >&2
+		exit 1
+	fi
+	chmod +x "${TMP_BINARY}"
+fi
+
 sudo install -m 755 "${TMP_BINARY}" "${TARGET}"
 rm -f "${TMP_BINARY}"
 
