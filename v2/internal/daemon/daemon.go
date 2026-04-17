@@ -467,12 +467,15 @@ func maybeRunRemoteUpdate() {
 		fmt.Sprintf("CLI updated remotely from %s to %s", version.Current, result.LatestVersion),
 		map[string]string{"component": "lss-backup-cli", "from_version": version.Current, "to_version": result.LatestVersion})
 	log.Printf("Remote update: installed %s, restarting daemon...", result.LatestVersion)
-	// Don't call RestartService() here — we ARE the daemon. RestartService
-	// polls for the new daemon, but we can't detect ourselves restarting.
-	// Instead: issue the platform restart command and exit immediately.
-	// The service manager picks up the new binary on restart.
+	// Don't call RestartService() here — we ARE the daemon.
+	// Issue the platform restart command synchronously (not Start()),
+	// then exit. On Linux, systemctl restart sends us SIGTERM and starts
+	// the new binary — we don't need os.Exit at all. On macOS/Windows,
+	// the kickstart/schtasks command handles the kill+restart.
 	triggerServiceRestart()
-	os.Exit(0)
+	// Exit with code 1 so service managers with Restart=on-failure
+	// will restart us even if triggerServiceRestart didn't complete.
+	os.Exit(1)
 }
 
 // maybeRunDRBackup checks if a DR backup is due (interval elapsed or
