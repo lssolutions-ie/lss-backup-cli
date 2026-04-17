@@ -446,12 +446,21 @@ echo "Install manifest written to ${MANIFEST_PATH}"
 # LSS_PSK_KEY are set (embedded by the server's /api/v1/install/<token>
 # endpoint), configure everything non-interactively.
 if [ -n "${LSS_SERVER_URL:-}" ] && [ -n "${LSS_NODE_UID:-}" ] && [ -n "${LSS_PSK_KEY:-}" ]; then
-	echo ""
-	echo "Server-assisted setup detected — auto-configuring..."
-	echo ""
-	"${TARGET}" --setup-auto
-	echo ""
-	echo "Node will register with server on first heartbeat."
+	if [ "${LSS_RECOVERY_MODE:-}" = "true" ]; then
+		echo ""
+		echo "Recovery mode detected — restoring from DR backup..."
+		echo ""
+		"${TARGET}" --setup-recover
+		echo ""
+		echo "Node recovered. Daemon starting."
+	else
+		echo ""
+		echo "Server-assisted setup detected — auto-configuring..."
+		echo ""
+		"${TARGET}" --setup-auto
+		echo ""
+		echo "Node will register with server on first heartbeat."
+	fi
 else
 	# Manual path — interactive SSH credential setup.
 	echo ""

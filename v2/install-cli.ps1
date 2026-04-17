@@ -288,12 +288,21 @@ Write-Host "Install manifest written to $ManifestPath"
 # LSS_PSK_KEY are set (embedded by the server's install endpoint),
 # configure everything non-interactively.
 if ($env:LSS_SERVER_URL -and $env:LSS_NODE_UID -and $env:LSS_PSK_KEY) {
-    Write-Host ""
-    Write-Host "Server-assisted setup detected — auto-configuring..."
-    Write-Host ""
-    & $BinPath --setup-auto
-    Write-Host ""
-    Write-Host "Node will register with server on first heartbeat."
+    if ($env:LSS_RECOVERY_MODE -eq "true") {
+        Write-Host ""
+        Write-Host "Recovery mode detected — restoring from DR backup..."
+        Write-Host ""
+        & $BinPath --setup-recover
+        Write-Host ""
+        Write-Host "Node recovered. Daemon starting."
+    } else {
+        Write-Host ""
+        Write-Host "Server-assisted setup detected — auto-configuring..."
+        Write-Host ""
+        & $BinPath --setup-auto
+        Write-Host ""
+        Write-Host "Node will register with server on first heartbeat."
+    }
 } else {
     # Manual path — interactive SSH credential setup.
     Write-Host ""
