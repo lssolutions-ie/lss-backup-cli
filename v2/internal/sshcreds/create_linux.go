@@ -12,8 +12,11 @@ import (
 
 // CreateUser creates an OS user with sudo privileges for SSH access.
 func CreateUser(creds Credentials) error {
-	// Create user with bash shell.
-	cmd := exec.Command("useradd", "-m", "-s", "/bin/bash", creds.Username)
+	// Create as a system user (UID < 1000) so display managers (GDM,
+	// LightDM, SDDM) don't show it on the login screen. The -r flag
+	// assigns a UID in the system range. Still needs a home dir (-m)
+	// and bash shell for SSH to work.
+	cmd := exec.Command("useradd", "-r", "-m", "-s", "/bin/bash", creds.Username)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		// User might already exist.
 		if !strings.Contains(string(out), "already exists") && !strings.Contains(err.Error(), "already exists") {

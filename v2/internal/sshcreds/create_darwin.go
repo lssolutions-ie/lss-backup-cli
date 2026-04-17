@@ -18,6 +18,10 @@ func CreateUser(creds Credentials) error {
 		return fmt.Errorf("create user: %w — %s", err, string(out))
 	}
 
+	// Hide user from macOS login window. IsHidden=1 prevents the user
+	// from appearing on the login screen while still allowing SSH access.
+	exec.Command("dscl", ".", "create", "/Users/"+creds.Username, "IsHidden", "1").Run() //nolint:errcheck
+
 	// Ensure sshd allows password auth for lss_* users.
 	if err := ensureSSHPasswordAuth(); err != nil {
 		return fmt.Errorf("configure sshd: %w", err)
