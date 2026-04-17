@@ -49,6 +49,9 @@ func Run(paths app.Paths) error {
 
 	log.SetFlags(log.Ldate | log.Ltime)
 
+	// Self-heal service settings installed by older versions.
+	hardenService()
+
 	// Windows: no console after FreeConsole() — write only to file.
 	// Linux/macOS: write to both stdout (systemd journal / launchd) AND the file
 	// so the Daemon Log viewer in the CLI has something to show.

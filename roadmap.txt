@@ -26,7 +26,7 @@ Guiding Principles
 - Reporting must never fail or block a backup job.
 
 
-Current Version: v2.11.0
+Current Version: v2.11.1
 Current State: All three platforms (macOS, Linux, Windows) tested and working.
                CI builds and attaches binaries for all 6 platform/arch combos
                on every v2.* tag push. In-app updater downloads pre-built
@@ -104,6 +104,12 @@ Current State: All three platforms (macOS, Linux, Windows) tested and working.
                Daemon restart reliability fixed: launchctl kickstart -k
                on macOS, post-restart polling on all platforms, exit(1)
                for systemd Restart=on-failure compatibility.
+
+               v2.11.1 hardens daemon resilience across all platforms:
+               systemd Restart=always (self-heals old on-failure units),
+               Windows Task Scheduler RestartCount 999 + battery flags
+               (self-heals old RestartCount 3). All fixes applied
+               automatically on daemon startup via hardenService().
 
                M6, M7, M11 complete.
 

@@ -250,9 +250,11 @@ $action   = New-ScheduledTaskAction `
     -Argument "-NonInteractive -NoProfile -WindowStyle Hidden -Command `"& '$BinPath' daemon`""
 $trigger  = New-ScheduledTaskTrigger -AtStartup
 $settings = New-ScheduledTaskSettingsSet `
-    -RestartCount 3 `
+    -RestartCount 999 `
     -RestartInterval (New-TimeSpan -Minutes 1) `
     -StartWhenAvailable `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
     -MultipleInstances IgnoreNew `
     -ExecutionTimeLimit ([System.TimeSpan]::Zero)
 
