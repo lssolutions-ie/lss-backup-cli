@@ -41,7 +41,7 @@ func runSetupAuto(paths app.Paths) error {
 	fmt.Println("  Management console configured.")
 
 	// 2. Create SSH credentials (non-interactive).
-	sshUser := ""
+	sshUser, sshPass := "", ""
 	if !sshcreds.Exists(paths.RootDir) {
 		creds, err := sshcreds.GenerateCredentials()
 		if err != nil {
@@ -55,12 +55,14 @@ func runSetupAuto(paths app.Paths) error {
 			return fmt.Errorf("save SSH credentials: %w", err)
 		}
 		sshUser = creds.Username
+		sshPass = creds.Password
 		fmt.Printf("  SSH user %s created.\n", creds.Username)
 	} else {
 		fmt.Println("  SSH credentials already exist — skipping.")
 		// Try to read existing username for the summary.
 		if creds, err := sshcreds.Load(paths.RootDir, pskKey); err == nil {
 			sshUser = creds.Username
+			sshPass = creds.Password
 		}
 	}
 
@@ -75,6 +77,7 @@ func runSetupAuto(paths app.Paths) error {
 	fmt.Printf("  Server:      %s\n", serverURL)
 	if sshUser != "" {
 		fmt.Printf("  SSH User:    %s\n", sshUser)
+		fmt.Printf("  SSH Pass:    %s\n", sshPass)
 	}
 	fmt.Printf("  Platform:    %s/%s\n", runtime.GOOS, runtime.GOARCH)
 	fmt.Println("  Daemon:      will start momentarily")

@@ -74,7 +74,7 @@ func runSetupRecover(paths app.Paths) error {
 // The caller (install-cli.sh) starts the daemon after this returns.
 func finishRecovery(paths app.Paths, pskKey string, jobCount int) error {
 	// Generate new SSH credentials (old user doesn't exist on this machine).
-	sshUser := ""
+	sshUser, sshPass := "", ""
 	if !sshcreds.Exists(paths.RootDir) {
 		creds, err := sshcreds.GenerateCredentials()
 		if err != nil {
@@ -87,6 +87,7 @@ func finishRecovery(paths app.Paths, pskKey string, jobCount int) error {
 			return fmt.Errorf("save SSH credentials: %w", err)
 		}
 		sshUser = creds.Username
+		sshPass = creds.Password
 		fmt.Printf("  SSH user %s created.\n", creds.Username)
 	}
 
@@ -101,6 +102,7 @@ func finishRecovery(paths app.Paths, pskKey string, jobCount int) error {
 	fmt.Printf("  Server:      %s\n", os.Getenv("LSS_SERVER_URL"))
 	if sshUser != "" {
 		fmt.Printf("  SSH User:    %s\n", sshUser)
+		fmt.Printf("  SSH Pass:    %s\n", sshPass)
 	}
 	fmt.Printf("  Jobs:        %d restored from DR backup\n", jobCount)
 	fmt.Printf("  Platform:    %s/%s\n", runtime.GOOS, runtime.GOARCH)
