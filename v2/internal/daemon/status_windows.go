@@ -37,3 +37,8 @@ func IsRunning() bool {
 func StartService() error {
 	return exec.Command("schtasks", "/Run", "/TN", windowsTaskName).Run()
 }
+
+// StopService stops the daemon Task Scheduler task.
+func StopService() error {
+	return exec.Command("schtasks", "/End", "/TN", windowsTaskName).Run()
+}

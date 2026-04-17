@@ -128,6 +128,18 @@ func Run(args []string) error {
 		if len(args) == 1 && args[0] == "--dr-run-now" {
 			return runDRNow(paths)
 		}
+		if args[0] == "--dr-restore" {
+			snapshotID := ""
+			for i := 1; i < len(args)-1; i++ {
+				if args[i] == "--snapshot" {
+					snapshotID = args[i+1]
+				}
+			}
+			if snapshotID == "" {
+				return fmt.Errorf("--dr-restore requires --snapshot {id}")
+			}
+			return runDRRestore(paths, snapshotID)
+		}
 		if len(args) == 1 && args[0] == "--setup-recover" {
 			return runSetupRecover(paths)
 		}

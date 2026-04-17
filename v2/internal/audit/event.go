@@ -23,6 +23,7 @@ const (
 	CategoryUpdateInstalled           = "update_installed"
 	CategoryTunnelConnected           = "tunnel_connected"
 	CategoryTunnelDisconnected        = "tunnel_disconnected"
+	CategoryDRRestore                 = "dr_restore"
 )
 
 // Event severity levels.

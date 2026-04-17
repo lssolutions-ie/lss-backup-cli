@@ -35,3 +35,14 @@ func StartService() error {
 	}
 	return nil
 }
+
+// StopService stops the daemon service.
+func StopService() error {
+	switch runtime.GOOS {
+	case "linux":
+		return exec.Command("systemctl", "stop", "lss-backup").Run()
+	case "darwin":
+		return exec.Command("launchctl", "stop", "com.lssolutions.lss-backup").Run()
+	}
+	return nil
+}
