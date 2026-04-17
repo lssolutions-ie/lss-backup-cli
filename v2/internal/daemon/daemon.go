@@ -385,10 +385,6 @@ func fireReport(paths app.Paths, scheduled []scheduledJob, reportType string, tu
 		log.Printf("Report: job load error: %v", err)
 		return
 	}
-	if len(allJobs) == 0 {
-		log.Println("Report: no jobs found")
-		return
-	}
 
 	log.Printf("Report: sending status for %d jobs (node_id=%s, psk_len=%d)", len(allJobs), appCfg.NodeID, len(appCfg.PSKKey))
 
@@ -543,7 +539,7 @@ func sendInitialHeartbeat(paths app.Paths, scheduled []scheduledJob, tunnelMgr *
 	}
 
 	allJobs, err := jobs.LoadAll(paths)
-	if err != nil || len(allJobs) == 0 {
+	if err != nil {
 		return reporting.ReportResponse{}
 	}
 
