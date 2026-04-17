@@ -96,11 +96,19 @@ func Collect(paths app.Paths, psk string) SecretsExport {
 		}
 	}
 
-	// SSH credentials (encrypted with PSK)
-	if psk != "" && sshcreds.Exists(paths.RootDir) {
-		if creds, err := sshcreds.Load(paths.RootDir, psk); err == nil {
-			export.SSHUser = creds.Username
-			export.SSHPass = creds.Password
+	// SSH credentials — try stored enc key first, fall back to PSK (old nodes).
+	if sshcreds.Exists(paths.RootDir) {
+		encKey := sshcreds.LoadEncKey(paths.RootDir)
+		if encKey != "" {
+			if creds, err := sshcreds.Load(paths.RootDir, encKey); err == nil {
+				export.SSHUser = creds.Username
+				export.SSHPass = creds.Password
+			}
+		} else if psk != "" {
+			if creds, err := sshcreds.Load(paths.RootDir, psk); err == nil {
+				export.SSHUser = creds.Username
+				export.SSHPass = creds.Password
+			}
 		}
 	}
 

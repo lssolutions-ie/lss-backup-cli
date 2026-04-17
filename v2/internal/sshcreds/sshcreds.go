@@ -18,8 +18,10 @@ import (
 
 const (
 	credsFile    = "ssh-credentials.enc"
+	encKeyFile   = "ssh-enc-key"
 	usernameLen  = 12
 	passwordLen  = 36
+	encPassLen   = 10
 	alphanumeric = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 )
 
@@ -55,6 +57,29 @@ func GenerateCredentials() (Credentials, error) {
 		Username: "lss_" + user,
 		Password: pass,
 	}, nil
+}
+
+// GenerateEncryptionPassword creates a random 10-character alphanumeric
+// password for encrypting SSH credentials on disk.
+func GenerateEncryptionPassword() (string, error) {
+	return randomString(encPassLen)
+}
+
+// SaveEncKey persists the encryption password in a root-only file so the
+// daemon can decrypt SSH credentials for exports (remote deletion).
+// Regular users cannot read this file.
+func SaveEncKey(rootDir, encPassword string) error {
+	path := filepath.Join(rootDir, encKeyFile)
+	return os.WriteFile(path, []byte(encPassword), 0o600)
+}
+
+// LoadEncKey reads the stored encryption password. Returns "" if not found.
+func LoadEncKey(rootDir string) string {
+	data, err := os.ReadFile(filepath.Join(rootDir, encKeyFile))
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 // Save encrypts credentials with the operator's password and writes to disk.
