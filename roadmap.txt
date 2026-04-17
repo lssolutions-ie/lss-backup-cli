@@ -26,7 +26,7 @@ Guiding Principles
 - Reporting must never fail or block a backup job.
 
 
-Current Version: v2.7.1
+Current Version: v2.11.0
 Current State: All three platforms (macOS, Linux, Windows) tested and working.
                CI builds and attaches binaries for all 6 platform/arch combos
                on every v2.* tag push. In-app updater downloads pre-built
@@ -81,11 +81,29 @@ Current State: All three platforms (macOS, Linux, Windows) tested and working.
                16/17 agreed-plan items closed. Only #17 (SMTP/webhook
                notifications) remains, deferred LAST EVER.
 
-               KNOWN ISSUE: daemon restart during --update is fragile on
-               macOS (launchctl unload/load timing) and Windows (schtasks
-               End/Run race). Daemon doesn't crash — it just doesn't
-               restart reliably. Needs post-restart verification loop.
-               Priority fix for next session.
+               v2.8.x adds remote CLI update from server dashboard:
+               server detects new version via GitHub tags (30-min poll),
+               sends update_cli + direct download URL in heartbeat
+               response, nodes auto-update without GitHub API calls.
+
+               v2.9.x adds one-command server-assisted node deployment:
+               server generates a one-liner with embedded UID + PSK,
+               operator pastes on fresh machine, CLI installs + auto-
+               configures + registers. install-cli.sh detects env vars
+               and downloads pre-built binary from GitHub Releases.
+
+               v2.10.x adds remote node deletion with credential export
+               (MSP-critical), hidden SSH users on all platforms, and
+               --dr-run-now for instant DR backup via SSH tunnel.
+
+               v2.11.0 adds one-command node recovery from DR backup:
+               server generates recovery one-liner for a dead node,
+               operator pastes on replacement machine, CLI restores
+               jobs + secrets + tunnel keys from S3 DR repo.
+
+               Daemon restart reliability fixed: launchctl kickstart -k
+               on macOS, post-restart polling on all platforms, exit(1)
+               for systemd Restart=on-failure compatibility.
 
                M6, M7, M11 complete.
 
