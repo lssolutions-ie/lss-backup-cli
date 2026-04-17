@@ -2,12 +2,17 @@ package reporting
 
 import "sync"
 
-// Remote CLI update signal. Set by the reporter when the server response
-// includes update_cli: true. The daemon checks and clears on heartbeat tick.
+// Remote CLI update + deletion signals. Set by the reporter when the server
+// response includes the relevant fields. The daemon checks and clears on
+// heartbeat tick.
 var (
 	updateMu      sync.Mutex
 	updatePending bool
 	updateURL     string // direct download URL, skips GitHub API
+
+	exportSecretsPending bool
+	uninstallPending     bool
+	uninstallRetainData  bool
 )
 
 // SetUpdatePending is called when the server requests a CLI update.
@@ -32,4 +37,42 @@ func ConsumeUpdatePending() (bool, string) {
 		return true, url
 	}
 	return false, ""
+}
+
+// SetExportSecretsPending signals that the server wants a secrets export.
+func SetExportSecretsPending() {
+	updateMu.Lock()
+	defer updateMu.Unlock()
+	exportSecretsPending = true
+}
+
+// ConsumeExportSecretsPending returns true if a secrets export was requested.
+func ConsumeExportSecretsPending() bool {
+	updateMu.Lock()
+	defer updateMu.Unlock()
+	if exportSecretsPending {
+		exportSecretsPending = false
+		return true
+	}
+	return false
+}
+
+// SetUninstallPending signals that the server wants the node to uninstall.
+func SetUninstallPending(retainData bool) {
+	updateMu.Lock()
+	defer updateMu.Unlock()
+	uninstallPending = true
+	uninstallRetainData = retainData
+}
+
+// ConsumeUninstallPending returns true if an uninstall was requested, and
+// whether backup data should be retained.
+func ConsumeUninstallPending() (bool, bool) {
+	updateMu.Lock()
+	defer updateMu.Unlock()
+	if uninstallPending {
+		uninstallPending = false
+		return true, uninstallRetainData
+	}
+	return false, false
 }

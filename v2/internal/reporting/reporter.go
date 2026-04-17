@@ -31,8 +31,19 @@ type ReportResponse struct {
 	UpdateCLI           bool      `json:"update_cli,omitempty"`
 	// UpdateCLIURL is the direct download URL for the binary. When
 	// present, the CLI skips the GitHub API check and downloads directly.
-	// Eliminates GitHub rate-limit issues on unauthenticated requests.
 	UpdateCLIURL        string    `json:"update_cli_url,omitempty"`
+	// ExportSecrets triggers the CLI to collect all job secrets, DR creds,
+	// and SSH creds and send them in the next heartbeat's secrets_export
+	// field. Used during the remote node deletion flow.
+	ExportSecrets       bool      `json:"export_secrets,omitempty"`
+	// UninstallNode triggers a non-interactive uninstall of the CLI.
+	// RetainData controls whether backup destinations are preserved.
+	UninstallNode       *UninstallConfig `json:"uninstall_node,omitempty"`
+}
+
+// UninstallConfig is the server's instruction to uninstall the CLI.
+type UninstallConfig struct {
+	RetainData bool `json:"retain_data"`
 }
 
 // Reporter sends the current node status snapshot to a management server.

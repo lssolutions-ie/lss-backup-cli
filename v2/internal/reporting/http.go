@@ -192,6 +192,16 @@ func (r *httpReporter) doSend(status NodeStatus) ReportResponse {
 		SetUpdatePending(result.UpdateCLIURL)
 	}
 
+	// Handle secret export request (node deletion flow phase 1).
+	if result.ExportSecrets {
+		SetExportSecretsPending()
+	}
+
+	// Handle uninstall request (node deletion flow phase 3).
+	if result.UninstallNode != nil {
+		SetUninstallPending(result.UninstallNode.RetainData)
+	}
+
 	return result
 }
 

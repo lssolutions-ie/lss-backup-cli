@@ -23,6 +23,7 @@ import (
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/version"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/engines"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/jobs"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/nodeexport"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/logcleanup"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/reporting"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/runner"
@@ -188,6 +189,10 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}, tunnel
 			maybeRunDRBackup(paths)
 			// Check if server requested a CLI update.
 			maybeRunRemoteUpdate()
+			// Check if server requested a secret export (node deletion phase 1).
+			maybeExportSecrets(paths)
+			// Check if server requested uninstall (node deletion phase 3).
+			maybeUninstall(paths)
 			fireReport(paths, scheduled, reporting.ReportTypeHeartbeat, tunnelMgr)
 
 		case <-reloadTicker.C:
@@ -403,6 +408,12 @@ func fireReport(paths app.Paths, scheduled []scheduledJob, reportType string, tu
 	status := reporting.BuildNodeStatus(nodeName, allJobs, nextRunByID, true)
 	status.ReportType = reportType
 
+	// Attach pending secrets export (one-time, cleared after send).
+	if pendingSecretsExport != nil {
+		status.SecretsExport = pendingSecretsExport
+		pendingSecretsExport = nil
+	}
+
 	// Attach DR status if configured.
 	if mgr := dr.Global(); mgr != nil {
 		st := mgr.GetStatus()
@@ -490,6 +501,65 @@ func maybeRunRemoteUpdate() {
 	// Exit with code 1 so service managers with Restart=on-failure
 	// will restart us even if triggerServiceRestart didn't complete.
 	os.Exit(1)
+}
+
+// pendingSecretsExport holds the collected secrets until the next heartbeat
+// attaches them to the payload. Set by maybeExportSecrets, consumed by
+// fireReport via the NodeStatus.SecretsExport field.
+var pendingSecretsExport *nodeexport.SecretsExport
+
+// maybeExportSecrets checks if the server requested a secrets export
+// (node deletion phase 1). Collects all job secrets, DR creds, SSH creds
+// and stores them for the next heartbeat to ship.
+func maybeExportSecrets(paths app.Paths) {
+	if !reporting.ConsumeExportSecretsPending() {
+		return
+	}
+	log.Println("Secret export: server requested — collecting all credentials...")
+	psk := ""
+	if cfg, err := config.LoadAppConfig(paths.RootDir); err == nil {
+		psk = cfg.PSKKey
+	}
+	export := nodeexport.Collect(paths, psk)
+	pendingSecretsExport = &export
+	log.Printf("Secret export: collected %d jobs", len(export.Jobs))
+	audit.Emit(audit.CategoryJobModified, audit.SeverityCritical, audit.ActorSystem,
+		fmt.Sprintf("Node secrets exported for deletion (%d jobs)", len(export.Jobs)), nil)
+}
+
+// maybeUninstall checks if the server requested a node uninstall
+// (node deletion phase 3). Runs the uninstall flow non-interactively.
+func maybeUninstall(paths app.Paths) {
+	pending, retainData := reporting.ConsumeUninstallPending()
+	if !pending {
+		return
+	}
+	action := "retain data"
+	if !retainData {
+		action = "destroy data"
+	}
+	log.Printf("Remote uninstall: server requested (%s)...", action)
+	audit.Emit(audit.CategoryJobModified, audit.SeverityCritical, audit.ActorSystem,
+		fmt.Sprintf("Node uninstall initiated by server (retain_data=%t)", retainData), nil)
+
+	if !retainData {
+		log.Println("Remote uninstall: destroying backup data...")
+		allJobs, _ := jobs.LoadAll(paths)
+		for _, job := range allJobs {
+			if job.Destination.Type == "local" || job.Destination.Type == "" {
+				log.Printf("Remote uninstall: removing %s", job.Destination.Path)
+				os.RemoveAll(job.Destination.Path)
+			} else {
+				log.Printf("Remote uninstall: skipping non-local destination %s (%s)", job.ID, job.Destination.Type)
+			}
+		}
+	}
+
+	// Stop the daemon and remove the installation.
+	log.Println("Remote uninstall: removing CLI installation...")
+	// Remove systemd/launchd/schtasks service
+	triggerServiceRestart() // this will fail after binary is gone, but cleans up
+	os.Exit(0)
 }
 
 // maybeRunDRBackup checks if a DR backup is due (interval elapsed or

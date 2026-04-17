@@ -49,6 +49,10 @@ type NodeStatus struct {
 	// DRStatus reports the current disaster-recovery state so the server
 	// can render the shield icon (grey/green/red).
 	DRStatus       *DRStatus      `json:"dr_status,omitempty"`
+	// SecretsExport is a one-time payload containing all job secrets,
+	// DR credentials, and SSH credentials. Sent when the server requests
+	// export_secrets during the remote node deletion flow.
+	SecretsExport  any            `json:"secrets_export,omitempty"`
 }
 
 // DRStatus is the CLI's view of its DR backup state.
