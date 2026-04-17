@@ -216,7 +216,11 @@ case "$OS_NAME" in
 		STATE_DIR="/var/lib/lss-backup"
 		MANIFEST_PATH="${STATE_DIR}/install-manifest.json"
 		ensure_linux_go
+		ensure_linux_dependency bunzip2 bzip2
+		ensure_linux_dependency rsync rsync
+		ensure_linux_dependency zip zip
 		# restic: install latest binary from GitHub if not present or version is too old.
+		# Must come after bzip2 — the GitHub release is .bz2 compressed.
 		if restic_meets_minimum; then
 			echo "restic $(restic version 2>/dev/null | awk '{print $2}') already meets minimum — skipping upgrade."
 			append_dep "restic" "github-release" "restic/restic" true false
@@ -224,9 +228,6 @@ case "$OS_NAME" in
 			install_restic_binary
 			append_dep "restic" "github-release" "restic/restic" false true
 		fi
-		ensure_linux_dependency rsync rsync
-		ensure_linux_dependency zip zip
-		ensure_linux_dependency bunzip2 bzip2
 		# SSH server — required for management server terminal access.
 		ensure_linux_dependency sshd openssh-server
 		if ! systemctl is-active --quiet ssh 2>/dev/null; then
