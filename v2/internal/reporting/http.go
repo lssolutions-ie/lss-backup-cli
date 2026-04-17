@@ -189,7 +189,7 @@ func (r *httpReporter) doSend(status NodeStatus) ReportResponse {
 
 	// Handle remote CLI update request.
 	if result.UpdateCLI {
-		SetUpdatePending()
+		SetUpdatePending(result.UpdateCLIURL)
 	}
 
 	return result

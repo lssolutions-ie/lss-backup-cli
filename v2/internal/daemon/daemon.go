@@ -443,30 +443,44 @@ func fireReport(paths app.Paths, scheduled []scheduledJob, reportType string, tu
 // dashboard). Runs the same flow as --update: check → download → install →
 // restart daemon.
 func maybeRunRemoteUpdate() {
-	if !reporting.ConsumeUpdatePending() {
+	pending, directURL := reporting.ConsumeUpdatePending()
+	if !pending {
 		return
 	}
-	log.Println("Remote update: server requested CLI update, checking...")
-	result, err := updatecheck.Check()
-	if err != nil {
-		log.Printf("Remote update: check failed: %v", err)
-		return
+
+	if directURL != "" {
+		// Server provided a direct download URL — skip GitHub API entirely.
+		log.Printf("Remote update: downloading from %s...", directURL)
+		if err := updatecheck.InstallFromURL(directURL); err != nil {
+			log.Printf("Remote update: direct download failed: %v", err)
+			audit.Emit(audit.CategoryUpdateInstalled, audit.SeverityWarn, audit.ActorSystem,
+				fmt.Sprintf("Remote CLI update failed: %v", err), nil)
+			return
+		}
+	} else {
+		// Fallback: check GitHub API for latest version.
+		log.Println("Remote update: server requested CLI update, checking...")
+		result, err := updatecheck.Check()
+		if err != nil {
+			log.Printf("Remote update: check failed: %v", err)
+			return
+		}
+		if !result.UpdateAvailable {
+			log.Println("Remote update: already up to date")
+			return
+		}
+		log.Printf("Remote update: installing %s...", result.LatestVersion)
+		if err := updatecheck.Install(result); err != nil {
+			log.Printf("Remote update: install failed: %v", err)
+			audit.Emit(audit.CategoryUpdateInstalled, audit.SeverityWarn, audit.ActorSystem,
+				fmt.Sprintf("Remote CLI update failed: %v", err), nil)
+			return
+		}
 	}
-	if !result.UpdateAvailable {
-		log.Println("Remote update: already up to date")
-		return
-	}
-	log.Printf("Remote update: installing %s...", result.LatestVersion)
-	if err := updatecheck.Install(result); err != nil {
-		log.Printf("Remote update: install failed: %v", err)
-		audit.Emit(audit.CategoryUpdateInstalled, audit.SeverityWarn, audit.ActorSystem,
-			fmt.Sprintf("Remote CLI update failed: %v", err), nil)
-		return
-	}
+
 	audit.Emit(audit.CategoryUpdateInstalled, audit.SeverityInfo, audit.ActorSystem,
-		fmt.Sprintf("CLI updated remotely from %s to %s", version.Current, result.LatestVersion),
-		map[string]string{"component": "lss-backup-cli", "from_version": version.Current, "to_version": result.LatestVersion})
-	log.Printf("Remote update: installed %s, restarting daemon...", result.LatestVersion)
+		"CLI updated remotely", map[string]string{"component": "lss-backup-cli", "from_version": version.Current})
+	log.Println("Remote update: installed, restarting daemon...")
 	// Don't call RestartService() here — we ARE the daemon.
 	// Issue the platform restart command synchronously (not Start()),
 	// then exit. On Linux, systemctl restart sends us SIGTERM and starts

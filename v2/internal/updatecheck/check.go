@@ -140,6 +140,39 @@ func Install(result Result) error {
 	return replaceBinary(exePath, newBin)
 }
 
+// InstallFromURL downloads a binary directly from the given URL and replaces
+// the current executable. Used by the remote update path when the server
+// provides a direct download URL (bypasses the GitHub API check entirely).
+func InstallFromURL(url string) error {
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve current executable path: %w", err)
+	}
+	exePath, err = filepath.EvalSymlinks(exePath)
+	if err != nil {
+		return fmt.Errorf("resolve symlinks for executable: %w", err)
+	}
+
+	workDir, err := os.MkdirTemp("", "lss-backup-update-*")
+	if err != nil {
+		return fmt.Errorf("create temp update directory: %w", err)
+	}
+	defer os.RemoveAll(workDir)
+
+	ext := ""
+	if runtime.GOOS == "windows" {
+		ext = ".exe"
+	}
+	newBin := filepath.Join(workDir, "lss-backup-cli-new"+ext)
+
+	fmt.Printf("  Downloading from %s...\n", url)
+	if err := downloadBinary(url, newBin); err != nil {
+		return err
+	}
+
+	return replaceBinary(exePath, newBin)
+}
+
 func fetchTags() ([]githubTag, error) {
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("https://api.github.com/repos/%s/tags?per_page=100", version.Repository), nil)
 	if err != nil {

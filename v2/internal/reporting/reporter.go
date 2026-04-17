@@ -26,9 +26,13 @@ type ReportResponse struct {
 	DRConfig            *DRConfig `json:"dr_config,omitempty"`
 	// DRForceRun is set when an operator clicks "Run Now" on the shield.
 	DRForceRun          bool      `json:"dr_force_run,omitempty"`
-	// UpdateCLI is set when an operator clicks "Update Available" on the
-	// dashboard. CLI runs the self-update flow on the next heartbeat.
+	// UpdateCLI is set when the server detects the node is behind the
+	// latest version. CLI downloads and installs the update.
 	UpdateCLI           bool      `json:"update_cli,omitempty"`
+	// UpdateCLIURL is the direct download URL for the binary. When
+	// present, the CLI skips the GitHub API check and downloads directly.
+	// Eliminates GitHub rate-limit issues on unauthenticated requests.
+	UpdateCLIURL        string    `json:"update_cli_url,omitempty"`
 }
 
 // Reporter sends the current node status snapshot to a management server.
