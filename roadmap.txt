@@ -26,7 +26,7 @@ Guiding Principles
 - Reporting must never fail or block a backup job.
 
 
-Current Version: v2.11.2
+Current Version: v2.12.0
 Current State: All three platforms (macOS, Linux, Windows) tested and working.
                CI builds and attaches binaries for all 6 platform/arch combos
                on every v2.* tag push. In-app updater downloads pre-built
@@ -110,6 +110,15 @@ Current State: All three platforms (macOS, Linux, Windows) tested and working.
                Windows Task Scheduler RestartCount 999 + battery flags
                (self-heals old RestartCount 3). All fixes applied
                automatically on daemon startup via hardenService().
+
+               v2.11.3 adds random encryption password for SSH
+               credentials (10-char alphanumeric, root-only storage,
+               shown in install/recovery banner).
+
+               v2.12.0 adds --dr-restore --snapshot for server-triggered
+               DR restore from a specific snapshot. Stops daemon, backs
+               up current config, restores jobs + secrets, restarts
+               daemon. Tested end-to-end on Proxmox node.
 
                M6, M7, M11 complete.
 
