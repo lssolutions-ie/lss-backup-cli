@@ -405,8 +405,20 @@ esac
 
 echo "Install manifest written to ${MANIFEST_PATH}"
 
-# Set up SSH credentials for management server terminal access.
-echo ""
-echo "Setting up SSH credentials for remote management..."
-echo ""
-"${TARGET}" --setup-ssh
+# Server-assisted auto-configure: if LSS_SERVER_URL + LSS_NODE_UID +
+# LSS_PSK_KEY are set (embedded by the server's /api/v1/install/<token>
+# endpoint), configure everything non-interactively.
+if [ -n "${LSS_SERVER_URL:-}" ] && [ -n "${LSS_NODE_UID:-}" ] && [ -n "${LSS_PSK_KEY:-}" ]; then
+	echo ""
+	echo "Server-assisted setup detected — auto-configuring..."
+	echo ""
+	"${TARGET}" --setup-auto
+	echo ""
+	echo "Node will register with server on first heartbeat."
+else
+	# Manual path — interactive SSH credential setup.
+	echo ""
+	echo "Setting up SSH credentials for remote management..."
+	echo ""
+	"${TARGET}" --setup-ssh
+fi

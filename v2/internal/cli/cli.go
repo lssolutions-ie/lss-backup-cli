@@ -122,6 +122,9 @@ func Run(args []string) error {
 			prompter := ui.NewPrompter()
 			return runSSHDetailsWizard(paths, prompter)
 		}
+		if len(args) == 1 && args[0] == "--setup-auto" {
+			return runSetupAuto(paths)
+		}
 		if args[0] == "run" && len(args) >= 2 {
 			// `run <id> [--dry-run]`. Dry-run flag is passed to engines via
 			// env var so we don't need to plumb it through every interface.

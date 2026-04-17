@@ -284,8 +284,20 @@ Write-Host "Daemon task registered and started as $modeLabel (Task Scheduler)"
 
 Write-Host "Install manifest written to $ManifestPath"
 
-# Set up SSH credentials for management server terminal access.
-Write-Host ""
-Write-Host "Setting up SSH credentials for remote management..."
-Write-Host ""
-& $BinPath --setup-ssh
+# Server-assisted auto-configure: if LSS_SERVER_URL + LSS_NODE_UID +
+# LSS_PSK_KEY are set (embedded by the server's install endpoint),
+# configure everything non-interactively.
+if ($env:LSS_SERVER_URL -and $env:LSS_NODE_UID -and $env:LSS_PSK_KEY) {
+    Write-Host ""
+    Write-Host "Server-assisted setup detected — auto-configuring..."
+    Write-Host ""
+    & $BinPath --setup-auto
+    Write-Host ""
+    Write-Host "Node will register with server on first heartbeat."
+} else {
+    # Manual path — interactive SSH credential setup.
+    Write-Host ""
+    Write-Host "Setting up SSH credentials for remote management..."
+    Write-Host ""
+    & $BinPath --setup-ssh
+}
