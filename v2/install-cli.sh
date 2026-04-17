@@ -226,6 +226,7 @@ case "$OS_NAME" in
 		fi
 		ensure_linux_dependency rsync rsync
 		ensure_linux_dependency zip zip
+		ensure_linux_dependency bunzip2 bzip2
 		# SSH server — required for management server terminal access.
 		ensure_linux_dependency sshd openssh-server
 		if ! systemctl is-active --quiet ssh 2>/dev/null; then
