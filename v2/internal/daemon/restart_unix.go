@@ -94,6 +94,21 @@ func killAllDaemons() int {
 	return killed
 }
 
+// triggerServiceRestart issues the platform restart command WITHOUT polling.
+// Used by the daemon's self-update path: we issue the command and exit
+// immediately, letting the service manager start the new binary.
+func triggerServiceRestart() {
+	switch runtime.GOOS {
+	case "darwin":
+		// kickstart -k: atomic kill + restart. We'll be killed by this.
+		exec.Command("launchctl", "kickstart", "-k", "system/com.lssolutions.lss-backup").Start() //nolint:errcheck
+	case "linux":
+		// systemctl restart sends SIGTERM then starts new. Our os.Exit(0)
+		// lets systemctl proceed without waiting for the signal handler.
+		exec.Command("systemctl", "restart", "lss-backup").Start() //nolint:errcheck
+	}
+}
+
 func possibleStateDirs() []string {
 	switch runtime.GOOS {
 	case "darwin":
