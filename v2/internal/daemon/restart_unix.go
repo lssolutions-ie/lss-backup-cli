@@ -3,29 +3,64 @@
 package daemon
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
-// RestartService kills all running daemon processes and lets the service
-// manager (systemd/launchd) restart a fresh one. Returns the number of
-// daemon processes that were killed.
+// RestartService kills all running daemon processes and starts a fresh one
+// via the platform service manager. Polls for up to 15 seconds to verify
+// the daemon actually came back. Returns the number of old processes killed.
 func RestartService() int {
 	killed := killAllDaemons()
 
-	// Trigger the service manager to start a new instance.
 	switch runtime.GOOS {
 	case "darwin":
-		exec.Command("launchctl", "start", "com.lssolutions.lss-backup").Run() //nolint:errcheck
+		restartDarwin()
 	case "linux":
 		exec.Command("systemctl", "restart", "lss-backup").Run() //nolint:errcheck
 	}
 
+	// Verify the daemon actually started. Without this, the --update
+	// command exits and the operator sees "offline" on the dashboard.
+	if !waitForDaemon(15) {
+		fmt.Fprintln(os.Stderr, "  [WARN]    Daemon did not start within 15 seconds. Check service logs.")
+	}
+
 	return killed
+}
+
+// restartDarwin uses launchctl kickstart which is more reliable than the
+// legacy `launchctl start` command. The -k flag kills the existing process
+// and starts a new one in a single operation, avoiding the race where
+// launchd hasn't noticed the old process is gone yet.
+func restartDarwin() {
+	// Try modern kickstart first (macOS 10.10+).
+	if err := exec.Command("launchctl", "kickstart", "-k", "system/com.lssolutions.lss-backup").Run(); err == nil {
+		return
+	}
+	// Fallback: bootout + bootstrap (same as the installer uses).
+	plist := "/Library/LaunchDaemons/com.lssolutions.lss-backup.plist"
+	exec.Command("launchctl", "bootout", "system", plist).Run()                //nolint:errcheck
+	time.Sleep(1 * time.Second)
+	exec.Command("launchctl", "bootstrap", "system", plist).Run()              //nolint:errcheck
+}
+
+// waitForDaemon polls IsRunning() for up to maxSeconds. Returns true if
+// the daemon was detected running.
+func waitForDaemon(maxSeconds int) bool {
+	for i := 0; i < maxSeconds; i++ {
+		time.Sleep(1 * time.Second)
+		if IsRunning() {
+			return true
+		}
+	}
+	return false
 }
 
 // killAllDaemons finds and kills all lss-backup-cli daemon processes

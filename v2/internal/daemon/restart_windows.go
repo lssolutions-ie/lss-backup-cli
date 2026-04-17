@@ -15,33 +15,52 @@ import (
 const windowsTaskName = `\LSS Backup\LSS Backup Daemon`
 
 // detachedProcess is the Windows CREATE_DETACHED_PROCESS flag.
-// It detaches the child from the parent's console so it survives after the CLI exits.
 const detachedProcess = 0x00000008
 
 // RestartService stops any running daemon processes and starts a fresh one.
-// Returns the number of daemon processes that were killed.
+// Polls for up to 15 seconds to verify the daemon came back. Returns the
+// number of old processes killed.
 func RestartService() int {
 	killed := stopAndWait()
 
 	// Remove stale PID file so the new instance can start.
 	os.Remove(filepath.Join(`C:\ProgramData\LSS Backup\state`, "daemon.pid"))
 
+	// Try Task Scheduler first.
 	startViaTaskScheduler()
-	time.Sleep(3 * time.Second)
-	if !IsRunning() {
-		startDirect()
+
+	// Poll for the daemon to come up (up to 15 seconds).
+	if waitForDaemon(15) {
+		return killed
+	}
+
+	// Task Scheduler didn't start it — try direct launch as fallback.
+	fmt.Fprintln(os.Stderr, "  [WARN]    Task Scheduler didn't start daemon, trying direct launch...")
+	startDirect()
+
+	if !waitForDaemon(10) {
+		fmt.Fprintln(os.Stderr, "  [WARN]    Daemon did not start within 25 seconds. Check Task Scheduler and logs.")
 	}
 
 	return killed
 }
 
+// waitForDaemon polls IsRunning() for up to maxSeconds.
+func waitForDaemon(maxSeconds int) bool {
+	for i := 0; i < maxSeconds; i++ {
+		time.Sleep(1 * time.Second)
+		if IsRunning() {
+			return true
+		}
+	}
+	return false
+}
+
 // stopAndWait ends the scheduled task and kills any lingering daemon processes,
 // then polls until the task leaves Running state (up to 15 seconds).
-// Returns the number of processes killed.
 func stopAndWait() int {
 	exec.Command("schtasks", "/End", "/TN", windowsTaskName).Run() //nolint:errcheck
 
-	// Kill any lingering daemon processes (exclude ourselves).
 	ourPID := os.Getpid()
 	countScript := fmt.Sprintf(
 		`(Get-Process -Name lss-backup-cli -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne %d }).Count`,
@@ -73,14 +92,10 @@ func stopAndWait() int {
 	return killed
 }
 
-// startViaTaskScheduler asks Task Scheduler to run the daemon task.
-// This works when the CLI is running with sufficient privileges.
 func startViaTaskScheduler() {
 	exec.Command("schtasks", "/Run", "/TN", windowsTaskName).Run() //nolint:errcheck
 }
 
-// startDirect launches the daemon binary directly as a detached process.
-// Used as a fallback when Task Scheduler cannot start the task.
 func startDirect() {
 	exePath, err := os.Executable()
 	if err != nil {
