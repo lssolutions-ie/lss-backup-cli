@@ -13,7 +13,7 @@ rsync), runs them, logs results, and reports to a central management server.
 V2 is a clean rewrite of a v1 shell-script-based tool. The goal is durability, safety, and
 operator-friendliness over cleverness.
 
-**Version:** v2.11.1
+**Version:** v2.11.2
 **Module:** `github.com/lssolutions-ie/lss-backup-cli/v2`
 **Go version:** 1.25.0
 
@@ -434,6 +434,15 @@ not by OS-level cron or Task Scheduler entries.
 | macOS    | launchd plist installed by `install-cli.sh`              |
 | Windows  | Task Scheduler task at startup via installer             |
 
+### Service resilience (`hardenService()`)
+
+On every daemon startup, `hardenService()` self-heals service settings installed by older versions:
+- **Linux:** rewrites `Restart=on-failure` → `Restart=always`, `RestartSec=30` → `10`, runs `systemctl daemon-reload`
+- **Windows:** bumps `RestartCount` 3→999, adds `AllowStartIfOnBatteries` + `DontStopIfGoingOnBatteries`
+- **macOS:** no-op (`KeepAlive=true` is already bulletproof)
+
+Combined with platform restart mechanisms, the daemon survives crash, sleep, hibernate, and power cycle on all platforms.
+
 ### Daemon log file
 
 `daemon.log` is written on **all platforms** (not just Windows):
@@ -666,4 +675,4 @@ Two distinct display modes are used, depending on whether the log has timestamps
 
 ---
 
-_Last updated: 2026-04-17 (v2.11.0)_
+_Last updated: 2026-04-17 (v2.11.2)_
