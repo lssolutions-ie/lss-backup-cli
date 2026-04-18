@@ -17,17 +17,6 @@ import (
 func runRegenerateCredentials(paths app.Paths) error {
 	audit.Init(paths)
 
-	// Load existing credentials to delete the old OS user.
-	encKey := sshcreds.LoadEncKey(paths.RootDir)
-	if encKey != "" {
-		if oldCreds, err := sshcreds.Load(paths.RootDir, encKey); err == nil {
-			fmt.Printf("Removing old SSH user %s...\n", oldCreds.Username)
-			if err := sshcreds.DeleteUser(oldCreds.Username); err != nil {
-				fmt.Printf("[WARN] Could not delete old user: %v\n", err)
-			}
-		}
-	}
-
 	// Generate new credentials.
 	newCreds, err := sshcreds.GenerateCredentials()
 	if err != nil {
@@ -38,6 +27,12 @@ func runRegenerateCredentials(paths app.Paths) error {
 	fmt.Printf("Creating new SSH user %s...\n", newCreds.Username)
 	if err := sshcreds.CreateUser(newCreds); err != nil {
 		return fmt.Errorf("create SSH user: %w", err)
+	}
+
+	// Remove ALL old lss_* users (handles orphans from prior installs/recoveries).
+	removed := sshcreds.CleanupOldUsers(newCreds.Username)
+	for _, u := range removed {
+		fmt.Printf("Removed old SSH user %s\n", u)
 	}
 
 	// Generate new encryption password.
