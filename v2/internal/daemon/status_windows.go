@@ -38,7 +38,16 @@ func StartService() error {
 	return exec.Command("schtasks", "/Run", "/TN", windowsTaskName).Run()
 }
 
-// StopService stops the daemon Task Scheduler task.
+// StopService stops the daemon Task Scheduler task and force-kills any
+// lingering process. Stop-ScheduledTask alone can leave the process alive
+// when a WebSocket connection holds it open.
 func StopService() error {
-	return exec.Command("schtasks", "/End", "/TN", windowsTaskName).Run()
+	exec.Command("schtasks", "/End", "/TN", windowsTaskName).Run() //nolint:errcheck
+
+	ourPID := os.Getpid()
+	killScript := fmt.Sprintf(
+		`Get-Process -Name lss-backup-cli -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne %d } | Stop-Process -Force`,
+		ourPID,
+	)
+	return exec.Command("powershell.exe", "-NonInteractive", "-NoProfile", "-Command", killScript).Run()
 }
