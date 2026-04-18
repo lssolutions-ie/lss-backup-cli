@@ -207,6 +207,11 @@ func (r *httpReporter) doSend(status NodeStatus) ReportResponse {
 		MarkCredentialsSent(r.rootDir)
 	}
 
+	// Server lost vault entries — resend credentials on next heartbeat.
+	if result.ResendCredentials {
+		ClearCredentialsSent(r.rootDir)
+	}
+
 	return result
 }
 

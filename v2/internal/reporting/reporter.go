@@ -42,6 +42,9 @@ type ReportResponse struct {
 	// CredentialsReceived confirms the server stored the credentials in
 	// the vault. CLI writes a flag to stop resending.
 	CredentialsReceived bool `json:"credentials_received,omitempty"`
+	// ResendCredentials is set when the server has no vault entries for
+	// this node (e.g. after server restore). CLI clears credentials_sent.
+	ResendCredentials bool `json:"resend_credentials,omitempty"`
 }
 
 // UninstallConfig is the server's instruction to uninstall the CLI.
