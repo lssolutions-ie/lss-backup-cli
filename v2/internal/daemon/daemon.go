@@ -163,6 +163,8 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}, tunnel
 	heartbeatTicker := time.NewTicker(reportInterval)
 	defer heartbeatTicker.Stop()
 
+	lastHeartbeat := time.Now()
+
 	for {
 		next := earliestJob(scheduled)
 
@@ -187,6 +189,7 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}, tunnel
 			return nil
 
 		case <-heartbeatTicker.C:
+			lastHeartbeat = time.Now()
 			log.Println("Heartbeat tick")
 			// Check if DR backup is due or force-requested.
 			maybeRunDRBackup(paths)
@@ -202,6 +205,19 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}, tunnel
 			if timer != nil {
 				timer.Stop()
 			}
+
+			// Detect wake-from-sleep: if the heartbeat ticker hasn't fired
+			// in 2x the report interval, the OS clock jumped (macOS deep sleep
+			// can stall time.Ticker). Force a heartbeat + reset the ticker.
+			if time.Since(lastHeartbeat) > reportInterval*2 {
+				log.Println("Wake from sleep detected — forcing heartbeat")
+				heartbeatTicker.Reset(reportInterval)
+				lastHeartbeat = time.Now()
+				maybeRunDRBackup(paths)
+				maybeRunRemoteUpdate()
+				fireReport(paths, scheduled, reporting.ReportTypeHeartbeat, tunnelMgr)
+			}
+
 			log.Println("Reloading job configuration")
 			scheduled = reload(paths, scheduled)
 
