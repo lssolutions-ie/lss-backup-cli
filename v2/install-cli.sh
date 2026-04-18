@@ -208,6 +208,13 @@ ensure_macos_dependency() {
 
 TARGET="/usr/local/bin/lss-backup-cli"
 
+# Detect build mode early: source build only when go.mod is present
+# (running from the repo). Binary download otherwise (curl | bash).
+SOURCE_BUILD=false
+if [ -f "${SCRIPT_DIR}/go.mod" ]; then
+	SOURCE_BUILD=true
+fi
+
 case "$OS_NAME" in
 	Linux)
 		CONFIG_DIR="/etc/lss-backup"
@@ -215,7 +222,9 @@ case "$OS_NAME" in
 		LOGS_DIR="/var/log/lss-backup"
 		STATE_DIR="/var/lib/lss-backup"
 		MANIFEST_PATH="${STATE_DIR}/install-manifest.json"
-		ensure_linux_go
+		if [ "$SOURCE_BUILD" = true ]; then
+			ensure_linux_go
+		fi
 		ensure_linux_dependency bunzip2 bzip2
 		ensure_linux_dependency rsync rsync
 		ensure_linux_dependency zip zip
@@ -249,11 +258,13 @@ case "$OS_NAME" in
 		STATE_DIR="/Library/Application Support/LSS Backup/state"
 		MANIFEST_PATH="${STATE_DIR}/install-manifest.json"
 		ensure_brew
-		ensure_macos_dependency go go
-		# Verify Go version meets minimum; fall back to tarball if brew installed too old.
-		if ! go_meets_minimum; then
-			echo "Homebrew Go is older than 1.${GO_MIN_MINOR}; downloading official Go..."
-			install_go_tarball
+		if [ "$SOURCE_BUILD" = true ]; then
+			ensure_macos_dependency go go
+			# Verify Go version meets minimum; fall back to tarball if brew installed too old.
+			if ! go_meets_minimum; then
+				echo "Homebrew Go is older than 1.${GO_MIN_MINOR}; downloading official Go..."
+				install_go_tarball
+			fi
 		fi
 		# restic: install or upgrade to latest via Homebrew, with binary fallback.
 		if command -v restic >/dev/null 2>&1; then
