@@ -1,6 +1,8 @@
 package reporting
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 
@@ -48,4 +50,19 @@ func LoadPendingCredentials(rootDir string) *NodeCredentials {
 		SSHPassword:       creds.Password,
 		EncryptionPassword: encKey,
 	}
+}
+
+// ComputeCredentialsHash returns SHA256(ssh_username:ssh_password:encryption_password)
+// as a hex string. Returns "" if credentials are unavailable.
+func ComputeCredentialsHash(rootDir string) string {
+	encKey := sshcreds.LoadEncKey(rootDir)
+	if encKey == "" {
+		return ""
+	}
+	creds, err := sshcreds.Load(rootDir, encKey)
+	if err != nil {
+		return ""
+	}
+	h := sha256.Sum256([]byte(creds.Username + ":" + creds.Password + ":" + encKey))
+	return hex.EncodeToString(h[:])
 }

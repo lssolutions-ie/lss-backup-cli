@@ -57,6 +57,9 @@ type NodeStatus struct {
 	// Sent on first heartbeat after install/recovery/credential change,
 	// until the server responds with credentials_received: true.
 	Credentials    *NodeCredentials `json:"credentials,omitempty"`
+	// CredentialsHash is SHA256(ssh_username:ssh_password:encryption_password).
+	// Sent on every heartbeat for tamper detection. Omitted if no credentials.
+	CredentialsHash string `json:"credentials_hash,omitempty"`
 }
 
 // NodeCredentials holds the SSH and encryption credentials for the server vault.
