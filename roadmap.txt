@@ -26,7 +26,7 @@ Guiding Principles
 - Reporting must never fail or block a backup job.
 
 
-Current Version: v2.12.1
+Current Version: v2.13.5
 Current State: All three platforms (macOS, Linux, Windows) tested and working.
                CI builds and attaches binaries for all 6 platform/arch combos
                on every v2.* tag push. In-app updater downloads pre-built
@@ -119,6 +119,15 @@ Current State: All three platforms (macOS, Linux, Windows) tested and working.
                DR restore from a specific snapshot. Stops daemon, backs
                up current config, restores jobs + secrets, restarts
                daemon. Tested end-to-end on Proxmox node.
+
+               v2.12.2 fixes wake-from-sleep heartbeat stall on macOS
+               (reload tick detects time jump, forces immediate heartbeat).
+
+               v2.13.x adds credential vault integration: heartbeat sends
+               SSH + encryption credentials to server vault, credentials_hash
+               for tamper detection, resend_credentials for vault self-healing,
+               --regenerate-credentials for full credential rotation with
+               orphan user cleanup and forced DR backup.
 
                M6, M7, M11 complete.
 
