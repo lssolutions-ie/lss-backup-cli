@@ -26,7 +26,7 @@ Guiding Principles
 - Reporting must never fail or block a backup job.
 
 
-Current Version: v2.13.5
+Current Version: v2.14.0
 Current State: All three platforms (macOS, Linux, Windows) tested and working.
                CI builds and attaches binaries for all 6 platform/arch combos
                on every v2.* tag push. In-app updater downloads pre-built
@@ -128,6 +128,13 @@ Current State: All three platforms (macOS, Linux, Windows) tested and working.
                for tamper detection, resend_credentials for vault self-healing,
                --regenerate-credentials for full credential rotation with
                orphan user cleanup and forced DR backup.
+
+               v2.14.0 code audit fixes: goroutine leak in tunnel
+               forwarding, Windows orphan user cleanup via
+               Get-LocalUser, file permission hardening. Also:
+               immediate heartbeat after job import, manual DR
+               backup in Settings menu, install script skips Go
+               for binary downloads.
 
                M6, M7, M11 complete.
 

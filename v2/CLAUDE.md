@@ -13,7 +13,7 @@ rsync), runs them, logs results, and reports to a central management server.
 V2 is a clean rewrite of a v1 shell-script-based tool. The goal is durability, safety, and
 operator-friendliness over cleverness.
 
-**Version:** v2.13.5
+**Version:** v2.14.0
 **Module:** `github.com/lssolutions-ie/lss-backup-cli/v2`
 **Go version:** 1.25.0
 
@@ -542,7 +542,7 @@ Combined with platform restart mechanisms, the daemon survives crash, sleep, hib
 - Restore target: `{user-target}/{job-id}/{DD-MM-YYYY}--{snapshotID}/`; restic output flattened
 - Per-job audit log (`{jobDir}/audit.log`)
 - Structured audit event pipeline (`audit.jsonl` + wire shipping to management server with per-node monotonic seq and server-side ack trim)
-- Closed audit category enum (21): daemon_started/stopped, job_created/modified/deleted, schedule/retention/notifications_changed, run_failed, run_permission_denied, restore_started/completed/failed, ssh_credentials_configured, mgmt_console_configured/cleared, update_installed, tunnel_connected/disconnected, dr_restore, credentials_regenerated
+- Closed audit category enum (22): daemon_started/stopped, job_created/modified/deleted, schedule/retention/notifications_changed, run_failed, run_permission_denied, restore_started/completed/failed, ssh_credentials_configured, mgmt_console_configured/cleared, update_installed, tunnel_connected/disconnected, dr_restore, credentials_regenerated
 - Activity log with retention (10k lines cap)
 - Log browser: main menu Audit Log (system audit events / activity / daemon / job run logs)
 - Log browser: per-job Audit Log (user actions / backup logs / restore logs)
@@ -596,6 +596,9 @@ Combined with platform restart mechanisms, the daemon survives crash, sleep, hib
 - Credential regeneration: `--regenerate-credentials` deletes old SSH user, creates new, rotates enc password, forces DR backup, cleans up orphan lss_* users
 - Credential vault integration: heartbeat sends credentials object until server confirms receipt; `credentials_hash` (SHA256) on every heartbeat for tamper detection; `resend_credentials` response clears sent flag for vault self-healing
 - Wake-from-sleep detection: reload tick detects stalled heartbeat ticker and forces immediate heartbeat (macOS deep sleep fix)
+- Manual DR backup from Settings menu ("Backup LSS Backup Configuration" wired up)
+- Immediate heartbeat after V1/V2 job import (was waiting up to 5 min)
+- Domain change support: server moved from lssbackup.lssolutions.ie → staging.lssbackup.lssolutions.ie
 
 ### Fully stubbed (menu exists, no implementation)
 
@@ -687,4 +690,4 @@ Two distinct display modes are used, depending on whether the log has timestamps
 
 ---
 
-_Last updated: 2026-04-18 (v2.13.5)_
+_Last updated: 2026-04-18 (v2.14.0)_
