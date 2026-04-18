@@ -39,6 +39,9 @@ type ReportResponse struct {
 	// UninstallNode triggers a non-interactive uninstall of the CLI.
 	// RetainData controls whether backup destinations are preserved.
 	UninstallNode       *UninstallConfig `json:"uninstall_node,omitempty"`
+	// CredentialsReceived confirms the server stored the credentials in
+	// the vault. CLI writes a flag to stop resending.
+	CredentialsReceived bool `json:"credentials_received,omitempty"`
 }
 
 // UninstallConfig is the server's instruction to uninstall the CLI.

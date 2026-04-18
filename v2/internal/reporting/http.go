@@ -202,6 +202,11 @@ func (r *httpReporter) doSend(status NodeStatus) ReportResponse {
 		SetUninstallPending(result.UninstallNode.RetainData)
 	}
 
+	// Mark credentials as received so we stop sending them.
+	if result.CredentialsReceived {
+		MarkCredentialsSent(r.rootDir)
+	}
+
 	return result
 }
 

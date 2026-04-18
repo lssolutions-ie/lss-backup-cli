@@ -464,6 +464,9 @@ func fireReport(paths app.Paths, scheduled []scheduledJob, reportType string, tu
 		}
 	}
 
+	// Attach credentials for vault (until server confirms receipt).
+	status.Credentials = reporting.LoadPendingCredentials(paths.RootDir)
+
 	reporter := reporting.NewReporter(appCfg, paths.RootDir, paths.LogsDir)
 	reporter.Report(status)
 }
@@ -670,6 +673,9 @@ func sendInitialHeartbeat(paths app.Paths, scheduled []scheduledJob, tunnelMgr *
 			Connected: ts.Connected,
 		}
 	}
+
+	// Attach credentials for vault (until server confirms receipt).
+	status.Credentials = reporting.LoadPendingCredentials(paths.RootDir)
 
 	log.Printf("Report: sending initial heartbeat for %d jobs (node_id=%s, psk_len=%d)", len(allJobs), appCfg.NodeID, len(appCfg.PSKKey))
 	reporter := reporting.NewReporter(appCfg, paths.RootDir, paths.LogsDir)

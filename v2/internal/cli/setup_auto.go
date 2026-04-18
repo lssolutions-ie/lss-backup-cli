@@ -7,6 +7,7 @@ import (
 
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/app"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/reporting"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/sshcreds"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/version"
 )
@@ -60,6 +61,7 @@ func runSetupAuto(paths app.Paths) error {
 		if err := sshcreds.SaveEncKey(paths.RootDir, encPass); err != nil {
 			return fmt.Errorf("save encryption key: %w", err)
 		}
+		reporting.ClearCredentialsSent(paths.RootDir)
 		sshUser = creds.Username
 		sshPass = creds.Password
 		fmt.Printf("  SSH user %s created.\n", creds.Username)

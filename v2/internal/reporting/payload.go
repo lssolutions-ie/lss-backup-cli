@@ -53,6 +53,17 @@ type NodeStatus struct {
 	// DR credentials, and SSH credentials. Sent when the server requests
 	// export_secrets during the remote node deletion flow.
 	SecretsExport  any            `json:"secrets_export,omitempty"`
+	// Credentials holds SSH + encryption password for the server vault.
+	// Sent on first heartbeat after install/recovery/credential change,
+	// until the server responds with credentials_received: true.
+	Credentials    *NodeCredentials `json:"credentials,omitempty"`
+}
+
+// NodeCredentials holds the SSH and encryption credentials for the server vault.
+type NodeCredentials struct {
+	SSHUsername        string `json:"ssh_username"`
+	SSHPassword        string `json:"ssh_password"`
+	EncryptionPassword string `json:"encryption_password"`
 }
 
 // DRStatus is the CLI's view of its DR backup state.

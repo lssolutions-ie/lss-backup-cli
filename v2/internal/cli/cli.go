@@ -2962,6 +2962,7 @@ func runSSHDetailsWizard(paths app.Paths, prompter ui.Prompter) error {
 	if err := sshcreds.SaveEncKey(paths.RootDir, encPassword); err != nil {
 		return fmt.Errorf("save encryption key: %w", err)
 	}
+	reporting.ClearCredentialsSent(paths.RootDir)
 
 	fmt.Println()
 	ui.StatusOK("SSH credentials encrypted and stored.")

@@ -93,6 +93,7 @@ func finishRecovery(paths app.Paths, pskKey string, jobCount int) error {
 		if err := sshcreds.SaveEncKey(paths.RootDir, encPass); err != nil {
 			return fmt.Errorf("save encryption key: %w", err)
 		}
+		reporting.ClearCredentialsSent(paths.RootDir)
 		sshUser = creds.Username
 		sshPass = creds.Password
 		fmt.Printf("  SSH user %s created.\n", creds.Username)
