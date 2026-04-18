@@ -1327,7 +1327,9 @@ func runSettingsWizard(paths app.Paths, prompter ui.Prompter) error {
 			ui.StatusWarn("Not yet implemented.")
 			pauseForEnter()
 		case "Backup LSS Backup Configuration":
-			ui.StatusWarn("Not yet implemented.")
+			if err := runManualDRBackup(paths); err != nil {
+				ui.StatusError(err.Error())
+			}
 			pauseForEnter()
 		case "Configure Management Console":
 			if err := runManagementConsoleWizard(paths, prompter); err != nil && !errors.Is(err, errCancelled) {
