@@ -244,6 +244,7 @@ func (m *Manager) forward(remote net.Conn) {
 	go func() { io.Copy(local, remote); done <- struct{}{} }()  //nolint:errcheck
 	go func() { io.Copy(remote, local); done <- struct{}{} }()  //nolint:errcheck
 	<-done
+	<-done
 }
 
 func (m *Manager) setConnected(connected bool, port int) {

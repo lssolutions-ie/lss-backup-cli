@@ -3,6 +3,7 @@ package sshcreds
 import (
 	"bufio"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 )
@@ -52,5 +53,17 @@ func listLSSUsersUnix() []string {
 }
 
 func listLSSUsersWindows() []string {
-	return nil // Windows net user parsing is fragile; rely on single-user delete path
+	out, err := exec.Command("powershell.exe", "-NonInteractive", "-NoProfile", "-Command",
+		`Get-LocalUser | Where-Object { $_.Name -like 'lss_*' } | Select-Object -ExpandProperty Name`).Output()
+	if err != nil {
+		return nil
+	}
+	var users []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		u := strings.TrimSpace(line)
+		if u != "" && strings.HasPrefix(u, "lss_") {
+			users = append(users, u)
+		}
+	}
+	return users
 }

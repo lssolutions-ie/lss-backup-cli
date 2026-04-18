@@ -19,7 +19,7 @@ func ClearCredentialsSent(rootDir string) {
 
 // MarkCredentialsSent writes the flag so we stop sending.
 func MarkCredentialsSent(rootDir string) {
-	os.WriteFile(filepath.Join(rootDir, credentialsSentFile), []byte("1"), 0o644)
+	os.WriteFile(filepath.Join(rootDir, credentialsSentFile), []byte("1"), 0o600)
 }
 
 // credentialsSent checks if the flag exists.
