@@ -1436,6 +1436,7 @@ func runImportV2(paths app.Paths, prompter ui.Prompter, jobFile string) error {
 
 	activitylog.Log(paths.LogsDir, fmt.Sprintf("job imported (v2): %s (%s)", job.ID, job.Name))
 	daemon.TriggerReload(paths.StateDir)
+	fireImmediateReport(paths)
 	ui.StatusOK("Imported backup job: " + job.ID)
 	pauseForEnter()
 	return nil
@@ -1479,6 +1480,7 @@ func runImportLegacy(paths app.Paths, prompter ui.Prompter, envFile string) erro
 
 	activitylog.Log(paths.LogsDir, fmt.Sprintf("job imported (v1): %s (%s)", job.ID, job.Name))
 	daemon.TriggerReload(paths.StateDir)
+	fireImmediateReport(paths)
 	fmt.Println()
 	ui.StatusOK("Backup job imported from v1 config.")
 	ui.KeyValue("Job ID:", job.ID)
