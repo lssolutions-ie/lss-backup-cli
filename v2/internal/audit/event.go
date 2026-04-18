@@ -24,6 +24,7 @@ const (
 	CategoryTunnelConnected           = "tunnel_connected"
 	CategoryTunnelDisconnected        = "tunnel_disconnected"
 	CategoryDRRestore                 = "dr_restore"
+	CategoryCredentialsRegenerated    = "credentials_regenerated"
 )
 
 // Event severity levels.

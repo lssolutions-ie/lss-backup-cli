@@ -128,6 +128,9 @@ func Run(args []string) error {
 		if len(args) == 1 && args[0] == "--dr-run-now" {
 			return runDRNow(paths)
 		}
+		if len(args) == 1 && args[0] == "--regenerate-credentials" {
+			return runRegenerateCredentials(paths)
+		}
 		if args[0] == "--dr-restore" {
 			snapshotID := ""
 			for i := 1; i < len(args)-1; i++ {
