@@ -83,6 +83,9 @@ func runRegenerateCredentials(paths app.Paths) error {
 	fmt.Printf("  SSH User:    %s\n", newCreds.Username)
 	fmt.Printf("  SSH Pass:    %s\n", newCreds.Password)
 	fmt.Printf("  Enc Pass:    %s\n", newEncPass)
+	if cfg, err := config.LoadAppConfig(paths.RootDir); err == nil {
+		fmt.Printf("  PSK:         %s\n", cfg.PSKKey)
+	}
 	fmt.Println()
 	fmt.Println("New credentials will be sent to server vault on next heartbeat.")
 	return nil
