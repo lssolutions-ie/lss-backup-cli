@@ -3,13 +3,17 @@
 package hwinfo
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
+
+var psExe = filepath.Join(os.Getenv("SystemRoot"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
 
 func totalRAM() uint64 {
 	var memStatus [64]byte // MEMORYSTATUSEX
@@ -26,7 +30,7 @@ func totalRAM() uint64 {
 
 func diskUsage() []Disk {
 	// Get usage for C: drive.
-	out, err := exec.Command("powershell", "-NoProfile", "-Command",
+	out, err := exec.Command(psExe, "-NoProfile", "-Command",
 		`Get-PSDrive C | Select-Object @{N='Used';E={$_.Used}},@{N='Free';E={$_.Free}} | ConvertTo-Csv -NoTypeInformation`,
 	).Output()
 	if err != nil {

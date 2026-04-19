@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/platform"
 )
 
 const windowsTaskName = `\LSS Backup\LSS Backup Daemon`
@@ -26,7 +28,10 @@ var (
 func RestartService() int {
 	killed := stopAndWait()
 
-	os.Remove(filepath.Join(`C:\ProgramData\LSS Backup\state`, "daemon.pid"))
+	// Remove stale PID file. Use platform paths to respect LSS_BACKUP_V2_ROOT.
+	if rp, err := platform.CurrentRuntimePaths(); err == nil {
+		os.Remove(filepath.Join(rp.StateDir, "daemon.pid"))
+	}
 
 	startViaTaskScheduler()
 
