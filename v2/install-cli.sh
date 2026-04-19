@@ -225,6 +225,7 @@ case "$OS_NAME" in
 		if [ "$SOURCE_BUILD" = true ]; then
 			ensure_linux_go
 		fi
+		ensure_linux_dependency sudo sudo
 		ensure_linux_dependency bunzip2 bzip2
 		ensure_linux_dependency rsync rsync
 		ensure_linux_dependency zip zip
