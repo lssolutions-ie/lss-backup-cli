@@ -131,7 +131,7 @@ if (Test-Path (Join-Path $PSScriptRoot "go.mod")) {
 Ensure-Dependency "restic" "restic.restic" $deps { Install-ResticFallback }
 
 
-# SSH server — required for management server terminal access.
+# SSH server - required for management server terminal access.
 $sshCapability = Get-WindowsCapability -Online | Where-Object { $_.Name -like 'OpenSSH.Server*' }
 if ($sshCapability.State -ne 'Installed') {
     Write-Host "Installing OpenSSH Server..."
@@ -144,7 +144,7 @@ if ($sshdService) {
     }
     Set-Service -Name sshd -StartupType Automatic
 } else {
-    Write-Host "[WARN] sshd service not found after install — check Windows version."
+    Write-Host "[WARN] sshd service not found after install - check Windows version."
 }
 # Ensure firewall rule for SSH.
 $sshRule = Get-NetFirewallRule -Name 'sshd' -ErrorAction SilentlyContinue
@@ -320,21 +320,21 @@ Write-Host "Install manifest written to $ManifestPath"
 if ($env:LSS_SERVER_URL -and $env:LSS_NODE_UID -and $env:LSS_PSK_KEY) {
     if ($env:LSS_RECOVERY_MODE -eq "true") {
         Write-Host ""
-        Write-Host "Recovery mode detected — restoring from DR backup..."
+        Write-Host "Recovery mode detected - restoring from DR backup..."
         Write-Host ""
         & $BinPath --setup-recover
         Write-Host ""
         Write-Host "Node recovered. Daemon starting."
     } else {
         Write-Host ""
-        Write-Host "Server-assisted setup detected — auto-configuring..."
+        Write-Host "Server-assisted setup detected - auto-configuring..."
         Write-Host ""
         & $BinPath --setup-auto
         Write-Host ""
         Write-Host "Node will register with server on first heartbeat."
     }
 } else {
-    # Manual path — interactive SSH credential setup.
+    # Manual path - interactive SSH credential setup.
     Write-Host ""
     Write-Host "Setting up SSH credentials for remote management..."
     Write-Host ""
