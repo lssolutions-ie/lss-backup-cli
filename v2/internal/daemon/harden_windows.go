@@ -8,11 +8,8 @@ import (
 	"strings"
 )
 
-// hardenService ensures the Task Scheduler settings are resilient.
-// Bumps RestartCount from 3 (old default) to 999 and adds battery flags
-// so the daemon survives crashes, sleep, and hibernate reliably.
 func hardenService() {
-	out, err := exec.Command("powershell.exe", "-NonInteractive", "-NoProfile", "-Command",
+	out, err := exec.Command(psPath, "-NonInteractive", "-NoProfile", "-Command",
 		`(Get-ScheduledTask -TaskPath '\LSS Backup\' -TaskName 'LSS Backup Daemon' -ErrorAction SilentlyContinue).Settings.RestartCount`).Output()
 	if err != nil {
 		return
@@ -22,7 +19,7 @@ func hardenService() {
 		return
 	}
 
-	log.Printf("Hardening Task Scheduler: RestartCount %s → 999", current)
+	log.Printf("Hardening Task Scheduler: RestartCount %s -> 999", current)
 	script := `
 $task = Get-ScheduledTask -TaskPath '\LSS Backup\' -TaskName 'LSS Backup Daemon' -ErrorAction Stop
 $task.Settings.RestartCount = 999
@@ -31,7 +28,7 @@ $task.Settings.AllowStartIfOnBatteries = $true
 $task.Settings.StopIfGoingOnBatteries = $false
 $task | Set-ScheduledTask | Out-Null
 `
-	if err := exec.Command("powershell.exe", "-NonInteractive", "-NoProfile", "-Command", script).Run(); err != nil {
+	if err := exec.Command(psPath, "-NonInteractive", "-NoProfile", "-Command", script).Run(); err != nil {
 		log.Printf("Warning: failed to harden Task Scheduler settings: %v", err)
 	}
 }
