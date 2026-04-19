@@ -13,7 +13,7 @@ rsync), runs them, logs results, and reports to a central management server.
 V2 is a clean rewrite of a v1 shell-script-based tool. The goal is durability, safety, and
 operator-friendliness over cleverness.
 
-**Version:** v2.18.8
+**Version:** v2.18.9
 **Module:** `github.com/lssolutions-ie/lss-backup-cli/v2`
 **Go version:** 1.25.0
 
@@ -701,4 +701,4 @@ Two distinct display modes are used, depending on whether the log has timestamps
 
 ---
 
-_Last updated: 2026-04-19 (v2.18.8)_
+_Last updated: 2026-04-19 (v2.18.9)_
