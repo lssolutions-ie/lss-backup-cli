@@ -462,14 +462,22 @@ if [ -n "${LSS_SERVER_URL:-}" ] && [ -n "${LSS_NODE_UID:-}" ] && [ -n "${LSS_PSK
 		echo ""
 		echo "Recovery mode detected — restoring from DR backup..."
 		echo ""
-		"${TARGET}" --setup-recover
+		if [ "$OS_NAME" = "Darwin" ]; then
+			sudo -E "${TARGET}" --setup-recover
+		else
+			"${TARGET}" --setup-recover
+		fi
 		echo ""
 		echo "Node recovered. Daemon starting."
 	else
 		echo ""
 		echo "Server-assisted setup detected — auto-configuring..."
 		echo ""
-		"${TARGET}" --setup-auto
+		if [ "$OS_NAME" = "Darwin" ]; then
+			sudo -E "${TARGET}" --setup-auto
+		else
+			"${TARGET}" --setup-auto
+		fi
 		echo ""
 		echo "Node will register with server on first heartbeat."
 	fi
@@ -478,5 +486,9 @@ else
 	echo ""
 	echo "Setting up SSH credentials for remote management..."
 	echo ""
-	"${TARGET}" --setup-ssh
+	if [ "$OS_NAME" = "Darwin" ]; then
+		sudo -E "${TARGET}" --setup-ssh
+	else
+		"${TARGET}" --setup-ssh
+	fi
 fi
