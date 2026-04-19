@@ -1030,6 +1030,10 @@ func runCreateWizard(paths app.Paths, prompter ui.Prompter) error {
 		Secrets:            secrets,
 	}
 
+	if err := validateDestination(input); err != nil {
+		return fmt.Errorf("destination validation failed: %w", err)
+	}
+
 	job, err := jobs.Create(paths, input)
 	if err != nil {
 		return err
@@ -1478,6 +1482,10 @@ func runImportLegacy(paths app.Paths, prompter ui.Prompter, envFile string) erro
 	}
 	if strings.TrimSpace(newID) != "" {
 		result.Input.ID = newID
+	}
+
+	if err := validateDestination(result.Input); err != nil {
+		return fmt.Errorf("destination validation failed: %w", err)
 	}
 
 	job, err := jobs.Create(paths, result.Input)
