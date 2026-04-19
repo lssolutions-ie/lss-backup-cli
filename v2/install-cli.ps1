@@ -252,6 +252,7 @@ Write-Host "  2. Current user ($env:USERNAME) - inherits your PATH, easier for d
 Write-Host "     and testing. Requires you to be logged in for the daemon to run."
 Write-Host ""
 $modeChoice = Read-Host "Select mode [1/2] (default: 1)"
+if ([string]::IsNullOrWhiteSpace($modeChoice)) { $modeChoice = "1" }
 $RunAsSystem = ($modeChoice.Trim() -ne "2")
 
 if ($RunAsSystem) {
