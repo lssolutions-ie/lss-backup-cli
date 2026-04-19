@@ -288,6 +288,7 @@ func runMenu(paths app.Paths) error {
 			"Create Backup",
 			"Manage Backup",
 			"Import Backup",
+			"Running Jobs",
 			"Settings",
 			"Audit Log",
 			"About",
@@ -323,6 +324,9 @@ func runMenu(paths app.Paths) error {
 				ui.StatusError(err.Error())
 				pauseForEnter()
 			}
+		case "Running Jobs":
+			showRunningJobs(paths)
+			pauseForEnter()
 		case "Settings":
 			if err := runSettingsWizard(paths, prompter); err != nil {
 				ui.StatusError(err.Error())
@@ -501,6 +505,36 @@ func runUpdateCLI(paths app.Paths) error {
 	}
 
 	return nil
+}
+
+func showRunningJobs(paths app.Paths) {
+	ui.SectionHeader("Running Jobs")
+	all, err := jobs.LoadAll(paths)
+	if err != nil {
+		ui.StatusError(fmt.Sprintf("load jobs: %v", err))
+		return
+	}
+	found := false
+	for _, job := range all {
+		if !runner.IsJobRunning(job.JobDir) {
+			continue
+		}
+		found = true
+		pid := runner.ReadRunPID(job.JobDir)
+		p := runner.ReadRunProgress(job.JobDir)
+		if p != nil {
+			fmt.Printf("  %-24s  %-7s  PID %-6d  %d%% (%d/%d files)\n",
+				job.ID, job.Program, pid, p.Percent, p.FilesDone, p.FilesTotal)
+		} else {
+			fmt.Printf("  %-24s  %-7s  PID %-6d  (no progress data)\n",
+				job.ID, job.Program, pid)
+		}
+	}
+	if !found {
+		fmt.Println()
+		ui.StatusWarn("No backup jobs are currently running.")
+	}
+	fmt.Println()
 }
 
 func runAbout(paths app.Paths) {
