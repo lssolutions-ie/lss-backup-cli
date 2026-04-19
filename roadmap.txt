@@ -26,7 +26,7 @@ Guiding Principles
 - Reporting must never fail or block a backup job.
 
 
-Current Version: v2.14.0
+Current Version: v2.17.0
 Current State: All three platforms (macOS, Linux, Windows) tested and working.
                CI builds and attaches binaries for all 6 platform/arch combos
                on every v2.* tag push. In-app updater downloads pre-built
@@ -135,6 +135,23 @@ Current State: All three platforms (macOS, Linux, Windows) tested and working.
                immediate heartbeat after job import, manual DR
                backup in Settings menu, install script skips Go
                for binary downloads.
+
+               v2.14.1-v2.15.7 adds server dashboard wizard support:
+               --browse-path for filesystem browsing, dest-browse +
+               dest-mkdir for SMB/NFS shares, all destination type
+               flags on job create (S3/SMB/NFS), destination validation,
+               NOPASSWD sudoers for SSH users, sudo as install dep,
+               immediate heartbeat on all mutating operations, NFS
+               mount fix.
+
+               v2.16.x adds running job monitoring: per-job run.pid +
+               run_progress.json, job running --json, job stop --id
+               with SIGTERM/SIGKILL, Running Jobs in main menu.
+
+               v2.17.0 CRITICAL: scheduled jobs now run in goroutine
+               so heartbeats continue during 12+ hour backups. Daemon
+               was blocking on svc.Run() causing server to mark nodes
+               offline. Also prevents duplicate runs of same job.
 
                M6, M7, M11 complete.
 

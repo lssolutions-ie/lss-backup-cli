@@ -13,7 +13,7 @@ rsync), runs them, logs results, and reports to a central management server.
 V2 is a clean rewrite of a v1 shell-script-based tool. The goal is durability, safety, and
 operator-friendliness over cleverness.
 
-**Version:** v2.14.0
+**Version:** v2.17.0
 **Module:** `github.com/lssolutions-ie/lss-backup-cli/v2`
 **Go version:** 1.25.0
 
@@ -299,6 +299,9 @@ The CLI is **menu-driven only**. No traditional flag parsing.
 | `--dr-run-now`     | Instant DR backup via SSH tunnel                 |
 | `--dr-restore --snapshot ID` | Restore node config from specific DR snapshot |
 | `--regenerate-credentials` | Regenerate SSH user/pass + encryption password, clean up old users |
+| `--browse-path --json /path` | List directory contents as JSON for server file browser |
+| `dest-browse --json ...` | Mount SMB/NFS share, list directory, unmount |
+| `dest-mkdir --json ...` | Mount SMB/NFS share, create directory, unmount |
 | `daemon`           | Start the scheduler daemon (systemd/launchd/Task Scheduler) |
 | `repo-info --json` / `repo-ls --json` / `repo-dump --json` / `repo-dump-zip --json` / `repo-ls-rsync --json` | Repository viewer subcommands used by the management server dashboard |
 
@@ -543,6 +546,14 @@ Combined with platform restart mechanisms, the daemon survives crash, sleep, hib
 - Per-job audit log (`{jobDir}/audit.log`)
 - Structured audit event pipeline (`audit.jsonl` + wire shipping to management server with per-node monotonic seq and server-side ack trim)
 - Closed audit category enum (22): daemon_started/stopped, job_created/modified/deleted, schedule/retention/notifications_changed, run_failed, run_permission_denied, restore_started/completed/failed, ssh_credentials_configured, mgmt_console_configured/cleared, update_installed, tunnel_connected/disconnected, dr_restore, credentials_regenerated
+- Scriptable API: `job create` supports all destination types (--dest-type local|s3|smb|nfs, --s3-access-key/secret-key/region, --dest-host/share/username/domain), two-line stdin for dual passwords, destination validation before save
+- `job running --json` + `job stop --id X [--force]` for running job monitoring
+- Per-job `run.pid` + `run_progress.json` for real-time progress tracking (restic only)
+- Scheduled jobs run in a goroutine — heartbeats/reloads continue during 12+ hour backups
+- Duplicate run prevention: daemon skips job if already running
+- `dest-browse` + `dest-mkdir` for SMB/NFS share browsing/creation from server dashboard
+- NOPASSWD sudoers rule for lss_* SSH users scoped to CLI binary
+- NFS mount fix: removed invalid user=/pass= options (NFS uses host-based ACL)
 - Activity log with retention (10k lines cap)
 - Log browser: main menu Audit Log (system audit events / activity / daemon / job run logs)
 - Log browser: per-job Audit Log (user actions / backup logs / restore logs)
@@ -690,4 +701,4 @@ Two distinct display modes are used, depending on whether the log has timestamps
 
 ---
 
-_Last updated: 2026-04-18 (v2.14.0)_
+_Last updated: 2026-04-19 (v2.17.0)_
