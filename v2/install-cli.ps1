@@ -123,7 +123,10 @@ $ManifestPath = Join-Path $StateDir "install-manifest.json"
 
 $deps = [System.Collections.ArrayList]::new()
 
-Ensure-Dependency "go"     "GoLang.Go"     $deps { Install-GoFallback }
+# Only install Go when building from source (go.mod present).
+if (Test-Path (Join-Path $PSScriptRoot "go.mod")) {
+    Ensure-Dependency "go" "GoLang.Go" $deps { Install-GoFallback }
+}
 Ensure-Dependency "restic" "restic.restic" $deps { Install-ResticFallback }
 
 
@@ -157,38 +160,54 @@ Ensure-Directory $JobsDir
 Ensure-Directory $LogsDir
 Ensure-Directory $StateDir
 
-Push-Location $PSScriptRoot
-try {
-    $env:GOCACHE = Join-Path $PSScriptRoot ".gocache"
-    Ensure-Directory $env:GOCACHE
+# Detect build mode: source build when go.mod is present, binary download otherwise.
+$SourceBuild = Test-Path (Join-Path $PSScriptRoot "go.mod")
 
-    # Refresh PATH one final time before building in case Go was just installed.
-    Refresh-Path
+if ($SourceBuild) {
+    Write-Host "Building from source..."
+    Push-Location $PSScriptRoot
+    try {
+        $env:GOCACHE = Join-Path $PSScriptRoot ".gocache"
+        Ensure-Directory $env:GOCACHE
+        Refresh-Path
 
-    # Build to a temp file first so we never overwrite the running binary directly.
-    # Windows locks running executables but allows renaming them out of the way.
+        $TempBin = Join-Path $BinDir "lss-backup-cli-new.exe"
+        $OldBin  = Join-Path $BinDir "lss-backup-cli-old.exe"
+
+        go build -o $TempBin .
+
+        if (Test-Path $BinPath) {
+            if (Test-Path $OldBin) { Remove-Item $OldBin -Force -ErrorAction SilentlyContinue }
+            if (Test-Path $OldBin) {
+                $OldBin = Join-Path $BinDir ("lss-backup-cli-old-" + [System.Guid]::NewGuid().ToString("N") + ".exe")
+            }
+            Rename-Item $BinPath $OldBin
+        }
+
+        Rename-Item $TempBin $BinPath
+
+        if (Test-Path $OldBin) { Remove-Item $OldBin -Force -ErrorAction SilentlyContinue }
+    }
+    finally {
+        Pop-Location
+    }
+} else {
+    Write-Host "Downloading pre-built binary from GitHub Releases..."
+    $arch = Get-Arch
+    $tag = (Invoke-RestMethod "https://api.github.com/repos/lssolutions-ie/lss-backup-cli/releases/latest").tag_name
+    $assetName = "lss-backup-cli-windows-${arch}.exe"
+    $url = "https://github.com/lssolutions-ie/lss-backup-cli/releases/download/${tag}/${assetName}"
     $TempBin = Join-Path $BinDir "lss-backup-cli-new.exe"
-    $OldBin  = Join-Path $BinDir "lss-backup-cli-old.exe"
 
-    go build -o $TempBin .
+    Invoke-WebRequest -Uri $url -OutFile $TempBin -UseBasicParsing
 
     if (Test-Path $BinPath) {
-        # Try to clear a pre-existing old binary. If it is locked (held by the
-        # currently-running process), fall back to a unique name so the rename
-        # of the live binary never collides with it.
-        if (Test-Path $OldBin) { Remove-Item $OldBin -Force -ErrorAction SilentlyContinue }
-        if (Test-Path $OldBin) {
-            $OldBin = Join-Path $BinDir ("lss-backup-cli-old-" + [System.Guid]::NewGuid().ToString("N") + ".exe")
-        }
-        Rename-Item $BinPath $OldBin
+        $OldBin = Join-Path $BinDir ("lss-backup-cli-old-" + (Get-Date -Format 'yyyyMMddHHmmss') + ".exe")
+        Rename-Item $BinPath $OldBin -ErrorAction SilentlyContinue
     }
 
     Rename-Item $TempBin $BinPath
-
-    if (Test-Path $OldBin) { Remove-Item $OldBin -Force -ErrorAction SilentlyContinue }
-}
-finally {
-    Pop-Location
+    Write-Host "Installed lss-backup-cli ${tag} to ${BinPath}"
 }
 
 $daemonAccount = if ($RunAsSystem) { "SYSTEM" } else { "$env:USERDOMAIN\$env:USERNAME" }
