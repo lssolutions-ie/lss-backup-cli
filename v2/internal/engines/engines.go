@@ -98,6 +98,12 @@ func (e ResticEngine) Run(job config.Job, output io.Writer) (*BackupSummary, err
 		resticArgs = append(resticArgs, "--dry-run")
 	}
 	parser := newResticJSONParser(output)
+	// Write progress to run_progress.json for the running jobs API.
+	if job.JobDir != "" {
+		parser.OnProgress = func(info ProgressInfo) {
+			writeProgressFile(job, info)
+		}
+	}
 	stderrTail := newTailBuffer(errorTailBytes)
 	cmd := exec.Command(resticBin, resticArgs...)
 	executil.HideWindow(cmd)

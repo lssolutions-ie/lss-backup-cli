@@ -22,12 +22,22 @@ type BackupSummary struct {
 // resticJSONParser is an io.Writer that consumes restic's `--json` stream,
 // extracts the final summary, and writes a human-readable progress/summary
 // stream to the wrapped writer. Raw JSON is never written to output.
+// ProgressInfo is emitted during restic backup for real-time tracking.
+type ProgressInfo struct {
+	Percent    int
+	FilesDone  int64
+	FilesTotal int64
+	BytesDone  int64
+	BytesTotal int64
+}
+
 type resticJSONParser struct {
-	out       io.Writer
-	buf       bytes.Buffer
-	summary   BackupSummary
-	lastPct   int    // last printed progress percent (-1 = never)
-	fatalMsg  string // populated from exit_error events (restic's structured fatal errors)
+	out        io.Writer
+	buf        bytes.Buffer
+	summary    BackupSummary
+	lastPct    int    // last printed progress percent (-1 = never)
+	fatalMsg   string // populated from exit_error events (restic's structured fatal errors)
+	OnProgress func(ProgressInfo) // optional callback for progress tracking
 }
 
 func newResticJSONParser(out io.Writer) *resticJSONParser {
@@ -125,6 +135,15 @@ func (p *resticJSONParser) handleStatus(line []byte) {
 			pct, s.FilesDone, s.TotalFiles,
 			humanBytes(s.BytesDone), humanBytes(s.TotalBytes))
 		p.lastPct = pct
+	}
+	if p.OnProgress != nil {
+		p.OnProgress(ProgressInfo{
+			Percent:    pct,
+			FilesDone:  s.FilesDone,
+			FilesTotal: s.TotalFiles,
+			BytesDone:  s.BytesDone,
+			BytesTotal: s.TotalBytes,
+		})
 	}
 }
 

@@ -30,6 +30,7 @@ import (
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/config"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/jobs"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/reporting"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/runner"
 	cronSchedule "github.com/lssolutions-ie/lss-backup-cli/v2/internal/schedule"
 )
 
@@ -50,7 +51,7 @@ type usageErr = UsageError
 
 func runJobAPI(paths app.Paths, args []string) error {
 	if len(args) == 0 {
-		return UsageError{Msg: "job: expected subcommand: list | show | create | edit | delete | enable | disable | validate"}
+		return UsageError{Msg: "job: expected subcommand: list | show | create | edit | delete | enable | disable | validate | running | stop"}
 	}
 	sub, rest := args[0], args[1:]
 	switch sub {
@@ -70,6 +71,10 @@ func runJobAPI(paths app.Paths, args []string) error {
 		return runJobEnableDisable(paths, rest, false)
 	case "validate":
 		return runJobValidate(paths, rest)
+	case "running":
+		return runJobRunning(paths, rest)
+	case "stop":
+		return runJobStop(paths, rest)
 	default:
 		return UsageError{Msg: fmt.Sprintf("job: unknown subcommand %q", sub)}
 	}
@@ -853,6 +858,100 @@ func destroyJobData(job config.Job) error {
 	default:
 		return fmt.Errorf("scripted --destroy-data: unknown destination type %q", job.Destination.Type)
 	}
+}
+
+// --- job running ---
+
+func runJobRunning(paths app.Paths, args []string) error {
+	fs := newFlagSet("job running")
+	asJSON := fs.Bool("json", false, "emit JSON array on stdout")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	all, err := jobs.LoadAll(paths)
+	if err != nil {
+		return err
+	}
+
+	type runningJob struct {
+		JobID      string `json:"job_id"`
+		JobName    string `json:"job_name"`
+		Program    string `json:"program"`
+		PID        int    `json:"pid"`
+		StartedAt  string `json:"started_at,omitempty"`
+		Percent    int    `json:"percent"`
+		FilesDone  int64  `json:"files_done"`
+		FilesTotal int64  `json:"files_total"`
+		BytesDone  int64  `json:"bytes_done"`
+		BytesTotal int64  `json:"bytes_total"`
+		UpdatedAt  string `json:"updated_at,omitempty"`
+	}
+
+	var running []runningJob
+	for _, job := range all {
+		pid := runner.ReadRunPID(job.JobDir)
+		if pid == 0 || !runner.IsJobRunning(job.JobDir) {
+			continue
+		}
+		rj := runningJob{
+			JobID:   job.ID,
+			JobName: job.Name,
+			Program: job.Program,
+			PID:     pid,
+		}
+		if p := runner.ReadRunProgress(job.JobDir); p != nil {
+			rj.Percent = p.Percent
+			rj.FilesDone = p.FilesDone
+			rj.FilesTotal = p.FilesTotal
+			rj.BytesDone = p.BytesDone
+			rj.BytesTotal = p.BytesTotal
+			rj.StartedAt = p.StartedAt.Format("2006-01-02T15:04:05Z")
+			rj.UpdatedAt = p.UpdatedAt.Format("2006-01-02T15:04:05Z")
+		}
+		running = append(running, rj)
+	}
+
+	if *asJSON {
+		if running == nil {
+			running = []runningJob{}
+		}
+		return writeJSON(running)
+	}
+
+	if len(running) == 0 {
+		fmt.Println("No jobs currently running.")
+		return nil
+	}
+	for _, rj := range running {
+		fmt.Printf("%-24s  %-7s  PID %-6d  %d%%\n", rj.JobID, rj.Program, rj.PID, rj.Percent)
+	}
+	return nil
+}
+
+// --- job stop ---
+
+func runJobStop(paths app.Paths, args []string) error {
+	fs := newFlagSet("job stop")
+	id := fs.String("id", "", "job id [required]")
+	force := fs.Bool("force", false, "SIGKILL after SIGTERM timeout")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" {
+		return UsageError{Msg: "job stop: --id is required"}
+	}
+
+	job, err := jobs.Load(paths, *id)
+	if err != nil {
+		return err
+	}
+
+	if err := runner.StopJob(job.JobDir, *force); err != nil {
+		return err
+	}
+	fmt.Printf("stopped %s\n", job.ID)
+	return nil
 }
 
 // ensure unused-import warnings don't trip the build when we add more later.

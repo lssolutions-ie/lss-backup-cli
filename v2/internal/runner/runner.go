@@ -59,6 +59,10 @@ func (s Service) Run(job config.Job) (RunResult, error) {
 	}
 	defer unmountDest()
 
+	// Write run PID so running jobs can be detected and stopped.
+	WriteRunPID(job.JobDir)
+	defer RemoveRunPID(job.JobDir)
+
 	dryRun := os.Getenv("LSS_BACKUP_DRY_RUN") == "1"
 	if dryRun {
 		fmt.Fprintf(writer, "--- DRY RUN --- no data will be written; last_run.json will not be updated ---\n")
