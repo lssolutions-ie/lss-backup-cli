@@ -38,11 +38,8 @@ func Mount(spec Spec) error {
 
 	case "nfs":
 		source := fmt.Sprintf("%s:/%s", spec.Host, spec.ShareName)
-		opts := fmt.Sprintf("user=%s,pass=%s", spec.Username, spec.Password)
-		if spec.Domain != "" {
-			opts += ",domain=" + spec.Domain
-		}
-		cmd = exec.Command("mount", "-t", "nfs", "-O", opts, source, spec.MountPoint)
+		// NFS uses host-based access control, not user/password authentication.
+		cmd = exec.Command("mount", "-t", "nfs", source, spec.MountPoint)
 
 	default:
 		return fmt.Errorf("unsupported mount type: %s", spec.Type)
