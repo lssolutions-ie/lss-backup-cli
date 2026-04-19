@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 # Fallback versions used when winget is not available.
 # Update these when newer releases are available.
 $GoFallbackVersion     = "1.22.5"
-$ResticFallbackVersion = "0.17.3"
+$ResticFallbackVersion = "0.18.1"
 
 function Test-CommandExists {
     param([string]$Name)
@@ -32,6 +32,12 @@ function Get-Arch {
     return "amd64"
 }
 
+function Get-ResticArch {
+    # Restic doesn't publish windows/arm64 builds. Windows on ARM runs
+    # amd64 binaries via emulation, so fall back to amd64.
+    return "amd64"
+}
+
 function Install-GoFallback {
     $arch = Get-Arch
     $url  = "https://go.dev/dl/go${GoFallbackVersion}.windows-${arch}.msi"
@@ -45,7 +51,7 @@ function Install-GoFallback {
 }
 
 function Install-ResticFallback {
-    $arch    = Get-Arch
+    $arch    = Get-ResticArch
     $url     = "https://github.com/restic/restic/releases/download/v${ResticFallbackVersion}/restic_${ResticFallbackVersion}_windows_${arch}.zip"
     $zip     = Join-Path $env:TEMP "restic-install.zip"
     $dir     = "C:\Program Files\restic"
