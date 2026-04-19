@@ -72,7 +72,8 @@ function Install-ResticFallback {
     # Add restic dir to the system PATH if not already present.
     $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
     if ($machinePath -notlike "*restic*") {
-        [System.Environment]::SetEnvironmentVariable("Path", "$machinePath;$dir", "Machine")
+        $newResticPath = $machinePath + ";" + $dir
+        [System.Environment]::SetEnvironmentVariable("Path", $newResticPath, [System.EnvironmentVariableTarget]::Machine)
     }
 }
 
@@ -236,7 +237,8 @@ Write-Host "Installed lss-backup-cli to $BinPath"
 # then refresh the current session so lss-backup-cli is usable immediately.
 $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
 if ($machinePath -notlike "*$BinDir*") {
-    [System.Environment]::SetEnvironmentVariable("Path", "$machinePath;$BinDir", "Machine")
+    $newPath = $machinePath + ";" + $BinDir
+    [System.Environment]::SetEnvironmentVariable("Path", $newPath, [System.EnvironmentVariableTarget]::Machine)
     Write-Host "Added $BinDir to system PATH"
 }
 Refresh-Path
@@ -270,9 +272,10 @@ $TaskName = "LSS Backup Daemon"
 # can call FreeConsole(), causing the daemon to exit cleanly (exit code 0).
 # A hidden PowerShell parent owns the console; the Go binary inherits it but
 # never receives a close event.
+$daemonCmd = "& '" + $BinPath + "' daemon"
 $action   = New-ScheduledTaskAction `
     -Execute "powershell.exe" `
-    -Argument "-NonInteractive -NoProfile -WindowStyle Hidden -Command `"& '$BinPath' daemon`""
+    -Argument ('-NonInteractive -NoProfile -WindowStyle Hidden -Command "' + $daemonCmd + '"')
 $trigger  = New-ScheduledTaskTrigger -AtStartup
 $settings = New-ScheduledTaskSettingsSet `
     -RestartCount 999 `
