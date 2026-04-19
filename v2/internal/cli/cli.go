@@ -143,6 +143,9 @@ func Run(args []string) error {
 			}
 			return runDRRestore(paths, snapshotID)
 		}
+		if args[0] == "--browse-path" && len(args) >= 3 && args[1] == "--json" {
+			return runBrowsePath(paths, args[2])
+		}
 		if len(args) == 1 && args[0] == "--setup-recover" {
 			return runSetupRecover(paths)
 		}
