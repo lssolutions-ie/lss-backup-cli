@@ -5,8 +5,12 @@ package mount
 import (
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
 )
+
+var netExe = filepath.Join(os.Getenv("SystemRoot"), "System32", "net.exe")
 
 // Mount authenticates to a Windows SMB share using net use.
 // NFS is not supported on Windows.
@@ -20,8 +24,7 @@ func Mount(spec Spec) error {
 
 	uncPath := UNCPath(spec.Host, spec.ShareName)
 
-	// Build net use command: net use \\host\share password /user:domain\username
-	args := []string{uncPath}
+	args := []string{"use", uncPath}
 	if spec.Password != "" {
 		args = append(args, spec.Password)
 	}
@@ -31,10 +34,10 @@ func Mount(spec Spec) error {
 		args = append(args, fmt.Sprintf("/user:%s", spec.Username))
 	}
 
-	cmd := exec.Command("net", append([]string{"use"}, args...)...)
+	cmd := exec.Command(netExe, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("net use %s: %w — %s", uncPath, err, string(out))
+		return fmt.Errorf("net use %s: %w - %s", uncPath, err, string(out))
 	}
 
 	log.Printf("Mount: authenticated SMB share %s", uncPath)
@@ -43,10 +46,10 @@ func Mount(spec Spec) error {
 
 // Unmount disconnects a Windows SMB share.
 func Unmount(path string) {
-	cmd := exec.Command("net", "use", path, "/delete", "/y")
+	cmd := exec.Command(netExe, "use", path, "/delete", "/y")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("Mount: warning: net use %s /delete failed: %v — %s", path, err, string(out))
+		log.Printf("Mount: warning: net use %s /delete failed: %v - %s", path, err, string(out))
 		return
 	}
 	log.Printf("Mount: disconnected SMB share %s", path)
@@ -54,7 +57,7 @@ func Unmount(path string) {
 
 // IsMounted checks if a UNC path is currently connected.
 func IsMounted(path string) bool {
-	out, err := exec.Command("net", "use").Output()
+	out, err := exec.Command(netExe, "use").Output()
 	if err != nil {
 		return false
 	}

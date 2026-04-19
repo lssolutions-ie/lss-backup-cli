@@ -245,14 +245,22 @@ Refresh-Path
 
 # Ask whether to run the daemon as SYSTEM or the current user.
 Write-Host ""
-Write-Host "Daemon account:"
-Write-Host "  1. SYSTEM (recommended for servers/production) - runs at startup regardless"
-Write-Host "     of who is logged in, full privilege, no PATH issues from user installs."
-Write-Host "  2. Current user ($env:USERNAME) - inherits your PATH, easier for development"
-Write-Host "     and testing. Requires you to be logged in for the daemon to run."
-Write-Host ""
-$modeChoice = Read-Host "Select mode [1/2] (default: 1)"
-if ([string]::IsNullOrWhiteSpace($modeChoice)) { $modeChoice = "1" }
+# Non-interactive (piped via irm | iex or SSH): default to SYSTEM.
+# Interactive: prompt the operator.
+$isInteractive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+if ($isInteractive) {
+    Write-Host "Daemon account:"
+    Write-Host "  1. SYSTEM (recommended for servers/production) - runs at startup regardless"
+    Write-Host "     of who is logged in, full privilege, no PATH issues from user installs."
+    Write-Host "  2. Current user ($env:USERNAME) - inherits your PATH, easier for development"
+    Write-Host "     and testing. Requires you to be logged in for the daemon to run."
+    Write-Host ""
+    $modeChoice = Read-Host "Select mode [1/2] (default: 1)"
+    if ([string]::IsNullOrWhiteSpace($modeChoice)) { $modeChoice = "1" }
+} else {
+    $modeChoice = "1"
+    Write-Host "Installing daemon as SYSTEM (non-interactive mode)."
+}
 $RunAsSystem = ($modeChoice.Trim() -ne "2")
 
 if ($RunAsSystem) {
