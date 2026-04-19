@@ -132,20 +132,63 @@ Ensure-Dependency "restic" "restic.restic" $deps { Install-ResticFallback }
 
 
 # SSH server - required for management server terminal access.
-$sshCapability = Get-WindowsCapability -Online | Where-Object { $_.Name -like 'OpenSSH.Server*' }
-if ($sshCapability.State -ne 'Installed') {
-    Write-Host "Installing OpenSSH Server..."
-    Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 | Out-Null
-}
+# Server 2019+ and Windows 10 1809+: use Add-WindowsCapability.
+# Server 2016 and older: download OpenSSH from GitHub and install manually.
 $sshdService = Get-Service -Name sshd -ErrorAction SilentlyContinue
+if (-not $sshdService) {
+    $installed = $false
+
+    # Try Add-WindowsCapability first (Server 2019+, Win10 1809+).
+    try {
+        $cap = Get-WindowsCapability -Online -ErrorAction Stop | Where-Object { $_.Name -like 'OpenSSH.Server*' }
+        if ($cap -and $cap.State -ne 'Installed') {
+            Write-Host "Installing OpenSSH Server via Windows Capability..."
+            Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 -ErrorAction Stop | Out-Null
+            $installed = $true
+        } elseif ($cap) {
+            $installed = $true
+        }
+    } catch {
+        Write-Host "Windows Capability not available - downloading OpenSSH from GitHub..."
+    }
+
+    # Fallback: download OpenSSH from GitHub (Server 2016, older builds).
+    if (-not $installed) {
+        $sshDir = Join-Path $env:ProgramFiles 'OpenSSH-Win64'
+        if (-not (Test-Path $sshDir)) {
+            $sshUrl = 'https://github.com/PowerShell/Win32-OpenSSH/releases/latest/download/OpenSSH-Win64.zip'
+            $sshZip = Join-Path $env:TEMP 'OpenSSH-Win64.zip'
+            Invoke-WebRequest -Uri $sshUrl -OutFile $sshZip -UseBasicParsing
+            Expand-Archive -Path $sshZip -DestinationPath $env:ProgramFiles -Force
+            Remove-Item $sshZip -Force
+        }
+        # Run the install script that comes with the GitHub release.
+        $installScript = Join-Path $sshDir 'install-sshd.ps1'
+        if (Test-Path $installScript) {
+            & $installScript
+        }
+        # Add to system PATH if not present.
+        $machinePath = [System.Environment]::GetEnvironmentVariable('Path', [System.EnvironmentVariableTarget]::Machine)
+        if ($machinePath -notlike "*$sshDir*") {
+            $newPath = $machinePath + ';' + $sshDir
+            [System.Environment]::SetEnvironmentVariable('Path', $newPath, [System.EnvironmentVariableTarget]::Machine)
+        }
+    }
+
+    $sshdService = Get-Service -Name sshd -ErrorAction SilentlyContinue
+}
+
 if ($sshdService) {
     if ($sshdService.Status -ne 'Running') {
         Start-Service sshd
     }
     Set-Service -Name sshd -StartupType Automatic
+    Write-Host "SSH server ready"
 } else {
-    Write-Host "[WARN] sshd service not found after install - check Windows version."
+    Write-Host "[WARN] Could not install SSH server. Remote management terminal will not work."
+    Write-Host "[WARN] Install OpenSSH Server manually: https://github.com/PowerShell/Win32-OpenSSH/releases"
 }
+
 # Ensure firewall rule for SSH.
 $sshRule = Get-NetFirewallRule -Name 'sshd' -ErrorAction SilentlyContinue
 if (-not $sshRule) {
@@ -153,7 +196,6 @@ if (-not $sshRule) {
         -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 | Out-Null
     Write-Host "SSH firewall rule added (port 22)"
 }
-Write-Host "SSH server ready"
 
 Ensure-Directory $BinDir
 Ensure-Directory $ConfigDir
