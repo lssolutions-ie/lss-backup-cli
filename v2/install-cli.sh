@@ -402,8 +402,7 @@ UNIT
 		rm -f "${TMP_UNIT}"
 		sudo systemctl daemon-reload
 		sudo systemctl enable lss-backup
-		sudo systemctl restart lss-backup
-		echo "Daemon service enabled and started (systemd)"
+		echo "Daemon service registered (systemd)"
 		;;
 	Darwin)
 		PLIST_PATH="/Library/LaunchDaemons/com.lssolutions.lss-backup.plist"
@@ -431,8 +430,7 @@ PLIST
 		sudo launchctl bootout system "${PLIST_PATH}" 2>/dev/null || true
 		sudo install -m 644 "${TMP_PLIST}" "${PLIST_PATH}"
 		rm -f "${TMP_PLIST}"
-		sudo launchctl bootstrap system "${PLIST_PATH}"
-		echo "Daemon service enabled and started (launchd)"
+		echo "Daemon service registered (launchd)"
 		echo ""
 		echo "================================================================"
 		echo "  IMPORTANT: Full Disk Access required on macOS"
@@ -492,3 +490,17 @@ else
 		"${TARGET}" --setup-ssh
 	fi
 fi
+
+# Start the daemon AFTER config is written so it picks up the server URL,
+# node ID, and PSK on first boot. Starting before setup-auto means the
+# daemon loads empty config and doesn't report to the server.
+case "$OS_NAME" in
+	Linux)
+		sudo systemctl restart lss-backup
+		echo "Daemon started (systemd)"
+		;;
+	Darwin)
+		sudo launchctl bootstrap system "${PLIST_PATH}"
+		echo "Daemon started (launchd)"
+		;;
+esac

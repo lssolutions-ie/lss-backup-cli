@@ -307,17 +307,17 @@ Register-ScheduledTask `
     -Principal $principal `
     -Force | Out-Null
 
-# Stop any existing instance before starting fresh (reinstall case).
+# Stop any existing instance (reinstall case).
 Stop-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction SilentlyContinue
-Start-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName
+
 $modeLabel = if ($RunAsSystem) { "SYSTEM" } else { $env:USERNAME }
 Write-Host "Daemon task registered and started as $modeLabel (Task Scheduler)"
 
 Write-Host "Install manifest written to $ManifestPath"
 
-# Server-assisted auto-configure: if LSS_SERVER_URL + LSS_NODE_UID +
-# LSS_PSK_KEY are set (embedded by the server's install endpoint),
-# configure everything non-interactively.
+# Server-assisted auto-configure BEFORE starting the daemon so config.toml
+# exists when the daemon starts. Otherwise the daemon loads empty config
+# and doesn't report to the server.
 if ($env:LSS_SERVER_URL -and $env:LSS_NODE_UID -and $env:LSS_PSK_KEY) {
     if ($env:LSS_RECOVERY_MODE -eq "true") {
         Write-Host ""
@@ -341,3 +341,6 @@ if ($env:LSS_SERVER_URL -and $env:LSS_NODE_UID -and $env:LSS_PSK_KEY) {
     Write-Host ""
     & $BinPath --setup-ssh
 }
+
+# Start the daemon AFTER config is written.
+Start-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName
