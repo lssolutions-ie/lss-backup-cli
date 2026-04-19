@@ -906,8 +906,8 @@ func runJobRunning(paths app.Paths, args []string) error {
 			rj.FilesTotal = p.FilesTotal
 			rj.BytesDone = p.BytesDone
 			rj.BytesTotal = p.BytesTotal
-			rj.StartedAt = p.StartedAt.Format("2006-01-02T15:04:05Z")
-			rj.UpdatedAt = p.UpdatedAt.Format("2006-01-02T15:04:05Z")
+			rj.StartedAt = p.StartedAt
+			rj.UpdatedAt = p.UpdatedAt
 		}
 		running = append(running, rj)
 	}

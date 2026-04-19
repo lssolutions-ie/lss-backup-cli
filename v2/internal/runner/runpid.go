@@ -17,17 +17,17 @@ const (
 
 // RunProgress is the on-disk progress snapshot for a running job.
 type RunProgress struct {
-	JobID      string    `json:"job_id"`
-	JobName    string    `json:"job_name"`
-	Program    string    `json:"program"`
-	PID        int       `json:"pid"`
-	StartedAt  time.Time `json:"started_at"`
-	Percent    int       `json:"percent"`
-	FilesDone  int64     `json:"files_done"`
-	FilesTotal int64     `json:"files_total"`
-	BytesDone  int64     `json:"bytes_done"`
-	BytesTotal int64     `json:"bytes_total"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	JobID      string `json:"job_id"`
+	JobName    string `json:"job_name"`
+	Program    string `json:"program"`
+	PID        int    `json:"pid"`
+	StartedAt  string `json:"started_at"`
+	Percent    int    `json:"percent"`
+	FilesDone  int64  `json:"files_done"`
+	FilesTotal int64  `json:"files_total"`
+	BytesDone  int64  `json:"bytes_done"`
+	BytesTotal int64  `json:"bytes_total"`
+	UpdatedAt  string `json:"updated_at"`
 }
 
 // WriteRunPID writes the current process PID to {jobDir}/run.pid.
