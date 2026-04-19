@@ -34,9 +34,8 @@ func doUninstall(nonInteractive bool) error {
 		return err
 	}
 
-	if runtime.GOOS == "darwin" && os.Geteuid() == 0 {
-		return fmt.Errorf("please run lss-backup-cli --uninstall without sudo on macOS; the program will ask for elevation only when needed")
-	}
+	// macOS: sudo is fine for uninstall — we need root to remove files
+	// from /Library/Application Support and /usr/local/bin.
 
 	fmt.Println("LSS Backup CLI Uninstall")
 	fmt.Println("========================")
