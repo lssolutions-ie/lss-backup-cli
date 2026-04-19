@@ -107,6 +107,7 @@ func ensureSudoersRule(username string) error {
 		}
 	}
 
+	os.MkdirAll("/etc/sudoers.d", 0o755)
 	if err := os.WriteFile(sudoersFile, []byte(rule), 0o440); err != nil {
 		return fmt.Errorf("write sudoers rule: %w", err)
 	}
