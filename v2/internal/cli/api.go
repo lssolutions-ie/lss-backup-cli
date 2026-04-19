@@ -418,6 +418,11 @@ func runJobCreate(paths app.Paths, args []string) error {
 		input.Secrets = secrets
 	}
 
+	// Validate destination before creating the job.
+	if err := validateDestination(input); err != nil {
+		return fmt.Errorf("destination validation failed: %w", err)
+	}
+
 	job, err := jobs.Create(paths, input)
 	if err != nil {
 		return err
