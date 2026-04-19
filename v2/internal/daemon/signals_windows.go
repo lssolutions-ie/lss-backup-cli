@@ -8,18 +8,29 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+	"unsafe"
+)
+
+var (
+	kernel32              = syscall.NewLazyDLL("kernel32.dll")
+	procFreeConsole       = kernel32.NewProc("FreeConsole")
+	procSetConsoleCtrlHandler = kernel32.NewProc("SetConsoleCtrlHandler")
 )
 
 // detachConsole detaches the process from its console window.
-// When Task Scheduler runs a console application as SYSTEM, Windows allocates
-// a console host and immediately closes it, sending CTRL_CLOSE_EVENT to the
-// process. Go maps that to os.Interrupt, which would trigger the shutdown
-// handler and exit the daemon cleanly (exit code 0) seconds after starting.
-// This must only be called when actually running as the daemon — calling it
-// during interactive CLI use would strip the terminal from the user's session.
+// First disables CTRL_CLOSE_EVENT handling so the console close can't
+// kill the process during the race window before FreeConsole completes.
 func detachConsole() {
-	dll := syscall.NewLazyDLL("kernel32.dll")
-	dll.NewProc("FreeConsole").Call()
+	// Ignore all console control events (CTRL_C, CTRL_BREAK, CTRL_CLOSE).
+	// The callback returns TRUE (1) to tell Windows we handled it.
+	handler := syscall.NewCallback(func(ctrlType uint32) uintptr {
+		return 1 // handled, don't kill
+	})
+	procSetConsoleCtrlHandler.Call(handler, 1)
+
+	// Now safe to free the console — even if Windows sends CTRL_CLOSE_EVENT
+	// during this call, our handler ignores it.
+	procFreeConsole.Call()
 }
 
 // watchReloadSignal polls for a sentinel file every 5 seconds.
@@ -46,3 +57,6 @@ func watchReloadSignal(ctx context.Context, stateDir string, reloadCh chan<- str
 		}
 	}()
 }
+
+// Suppress unused import warning.
+var _ = unsafe.Sizeof(0)
