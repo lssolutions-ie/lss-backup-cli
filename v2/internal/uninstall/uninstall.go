@@ -18,7 +18,17 @@ import (
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/platform"
 )
 
+// Run performs an interactive uninstall with prompts.
 func Run() error {
+	return doUninstall(false)
+}
+
+// RunNonInteractive performs a non-interactive uninstall (no prompts, no backup).
+func RunNonInteractive() error {
+	return doUninstall(true)
+}
+
+func doUninstall(nonInteractive bool) error {
 	paths, err := platform.CurrentRuntimePaths()
 	if err != nil {
 		return err
@@ -28,8 +38,6 @@ func Run() error {
 		return fmt.Errorf("please run lss-backup-cli --uninstall without sudo on macOS; the program will ask for elevation only when needed")
 	}
 
-	reader := bufio.NewReader(os.Stdin)
-
 	fmt.Println("LSS Backup CLI Uninstall")
 	fmt.Println("========================")
 	fmt.Println("Binary:", paths.BinPath)
@@ -38,36 +46,40 @@ func Run() error {
 	fmt.Println("State: ", paths.StateDir)
 	fmt.Println("")
 
-	shouldBackup, err := promptYesNo(reader, "Do you want to back up LSS Backup data before uninstalling?")
-	if err != nil {
-		return err
-	}
+	if !nonInteractive {
+		reader := bufio.NewReader(os.Stdin)
 
-	if shouldBackup {
-		zipPath, err := promptZipPath(reader)
+		shouldBackup, err := promptYesNo(reader, "Do you want to back up LSS Backup data before uninstalling?")
 		if err != nil {
 			return err
 		}
-		if err := createBackup(paths, zipPath); err != nil {
-			return err
-		}
-		fmt.Println("Backup created at:", zipPath)
-	}
 
-	manifest, manifestErr := installmanifest.Load(paths.ManifestPath)
-	if manifestErr == nil {
-		removeDeps, err := promptYesNo(reader, "Do you want to also remove dependencies installed by this program?")
-		if err != nil {
-			return err
+		if shouldBackup {
+			zipPath, err := promptZipPath(reader)
+			if err != nil {
+				return err
+			}
+			if err := createBackup(paths, zipPath); err != nil {
+				return err
+			}
+			fmt.Println("Backup created at:", zipPath)
 		}
-		if removeDeps {
-			removeManagedDependencies(manifest)
-		}
-	} else {
-		if errors.Is(manifestErr, os.ErrNotExist) {
-			fmt.Println("Install manifest not found, skipping dependency removal.")
+
+		manifest, manifestErr := installmanifest.Load(paths.ManifestPath)
+		if manifestErr == nil {
+			removeDeps, err := promptYesNo(reader, "Do you want to also remove dependencies installed by this program?")
+			if err != nil {
+				return err
+			}
+			if removeDeps {
+				removeManagedDependencies(manifest)
+			}
 		} else {
-			fmt.Println("Could not read install manifest, skipping dependency removal:", manifestErr)
+			if errors.Is(manifestErr, os.ErrNotExist) {
+				fmt.Println("Install manifest not found, skipping dependency removal.")
+			} else {
+				fmt.Println("Could not read install manifest, skipping dependency removal:", manifestErr)
+			}
 		}
 	}
 

@@ -109,7 +109,10 @@ func Run(args []string) error {
 	audit.Init(paths)
 
 	if len(args) > 0 {
-		if len(args) == 1 && args[0] == "--uninstall" {
+		if args[0] == "--uninstall" {
+			if len(args) >= 2 && args[1] == "--yes" {
+				return uninstall.RunNonInteractive()
+			}
 			return uninstall.Run()
 		}
 		if len(args) == 1 && args[0] == "--update" {
