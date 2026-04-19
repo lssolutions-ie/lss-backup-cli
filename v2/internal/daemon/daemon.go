@@ -164,6 +164,9 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}, tunnel
 	defer heartbeatTicker.Stop()
 
 	lastHeartbeat := time.Now()
+	jobDoneCh := make(chan config.Job, 1)
+	runningJobID := ""
+	_ = runningJobID // used to skip re-triggering a running job
 
 	for {
 		next := earliestJob(scheduled)
@@ -230,18 +233,38 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}, tunnel
 
 		case <-timerCh:
 			job := next.job
+			if runningJobID == job.ID {
+				log.Printf("Job %s is already running, skipping", job.ID)
+				newNext, _ := nextRunAfter(job, time.Now())
+				if !newNext.IsZero() {
+					writeNextRun(job, newNext)
+					scheduled = updateNextRun(scheduled, job.ID, newNext)
+				}
+				continue
+			}
 			log.Printf("Starting job %s (%s)", job.ID, job.Name)
 			activitylog.Log(paths.LogsDir, fmt.Sprintf("scheduled run started: %s (%s)", job.ID, job.Name))
 
-			result, err := svc.Run(job)
-			if err != nil {
-				log.Printf("Job %s failed: %v", job.ID, err)
-				activitylog.Log(paths.LogsDir, fmt.Sprintf("scheduled run failed: %s (%s) — %v", job.ID, job.Name, err))
-			} else {
-				log.Printf("Job %s completed successfully in %ds", job.ID, result.DurationSeconds)
-				activitylog.Log(paths.LogsDir, fmt.Sprintf("scheduled run completed: %s (%s) — %ds", job.ID, job.Name, result.DurationSeconds))
-			}
+			// Run in a goroutine so the main loop keeps processing heartbeats,
+			// reloads, and server commands during long-running backups (12+ hrs).
+			runningJobID = job.ID
+			go func(j config.Job) {
+				result, err := svc.Run(j)
+				if err != nil {
+					log.Printf("Job %s failed: %v", j.ID, err)
+					activitylog.Log(paths.LogsDir, fmt.Sprintf("scheduled run failed: %s (%s) — %v", j.ID, j.Name, err))
+				} else {
+					log.Printf("Job %s completed successfully in %ds", j.ID, result.DurationSeconds)
+					activitylog.Log(paths.LogsDir, fmt.Sprintf("scheduled run completed: %s (%s) — %ds", j.ID, j.Name, result.DurationSeconds))
+				}
 
+				// Report after every scheduled run regardless of outcome.
+				fireReport(paths, scheduled, reporting.ReportTypePostRun, tunnelMgr)
+
+				jobDoneCh <- j
+			}(job)
+
+			// Reschedule immediately so the timer doesn't re-fire this job.
 			newNext, err := nextRunAfter(job, time.Now())
 			if err != nil {
 				log.Printf("Warning: could not reschedule job %s: %v", job.ID, err)
@@ -252,8 +275,9 @@ func loop(ctx context.Context, paths app.Paths, reloadCh <-chan struct{}, tunnel
 				log.Printf("Job %s next run: %s", job.ID, newNext.Format(time.RFC3339))
 			}
 
-			// Report after every scheduled run regardless of outcome.
-			fireReport(paths, scheduled, reporting.ReportTypePostRun, tunnelMgr)
+		case doneJob := <-jobDoneCh:
+			log.Printf("Job %s goroutine finished", doneJob.ID)
+			runningJobID = ""
 		}
 	}
 }
