@@ -288,8 +288,21 @@ func runJobCreate(paths app.Paths, args []string) error {
 	dest := fs.String("dest", "", "destination path [required]")
 	excludeFile := fs.String("exclude-file", "", "path to an exclude-patterns file")
 	rsyncNoPerms := fs.Bool("rsync-no-perms", false, "add --no-perms --no-owner --no-group (rsync only)")
-	enabled := fs.Bool("enabled", true, "whether the job is enabled (enable at create; disable means daemon won't schedule it)")
-	passwordStdin := fs.Bool("password-stdin", false, "read restic password from stdin (one line, trailing newline stripped)")
+	enabled := fs.Bool("enabled", true, "whether the job is enabled")
+	passwordStdin := fs.Bool("password-stdin", false, "read passwords from stdin (line 1: restic, line 2: dest password if SMB/NFS)")
+
+	// Destination type and network fields.
+	destType := fs.String("dest-type", "local", "destination type: local | s3 | smb | nfs")
+	destHost := fs.String("dest-host", "", "SMB/NFS host (e.g. 192.168.1.100)")
+	destShare := fs.String("dest-share", "", "SMB/NFS share name")
+	destUsername := fs.String("dest-username", "", "SMB/NFS username")
+	destDomain := fs.String("dest-domain", "", "SMB domain (optional, default WORKGROUP)")
+
+	// S3 credentials.
+	s3AccessKey := fs.String("s3-access-key", "", "AWS/S3 access key ID")
+	s3SecretKey := fs.String("s3-secret-key", "", "AWS/S3 secret access key")
+	s3Region := fs.String("s3-region", "", "AWS/S3 region (optional)")
+
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -307,14 +320,36 @@ func runJobCreate(paths app.Paths, args []string) error {
 		return UsageError{Msg: "job create: --id must be alphanumeric, dash, or underscore only (no path separators)"}
 	}
 
+	// Validate destination type.
+	switch *destType {
+	case "local", "s3", "smb", "nfs":
+	default:
+		return UsageError{Msg: `job create: --dest-type must be "local", "s3", "smb", or "nfs"`}
+	}
+	if *destType == "smb" || *destType == "nfs" {
+		if *destHost == "" {
+			return UsageError{Msg: "job create: --dest-host is required for SMB/NFS destinations"}
+		}
+		if *destShare == "" {
+			return UsageError{Msg: "job create: --dest-share is required for SMB/NFS destinations"}
+		}
+	}
+	if *destType == "s3" && *program != "restic" {
+		return UsageError{Msg: "job create: S3 destinations are only supported with restic"}
+	}
+
 	input := jobs.CreateInput{
 		ID:                 *id,
 		Name:               *name,
 		Program:            *program,
 		SourceType:         "local",
 		SourcePath:         *source,
-		DestType:           "local",
+		DestType:           *destType,
 		DestPath:           *dest,
+		DestHost:           *destHost,
+		DestShareName:      *destShare,
+		DestUsername:        *destUsername,
+		DestDomain:         *destDomain,
 		ExcludeFile:        *excludeFile,
 		Enabled:            *enabled,
 		RsyncNoPermissions: *rsyncNoPerms,
@@ -322,19 +357,65 @@ func runJobCreate(paths app.Paths, args []string) error {
 		Retention:          config.Retention{Mode: "none"},
 	}
 
-	// Secrets for restic jobs come via stdin; rsync doesn't need any.
-	if *program == "restic" {
-		if !*passwordStdin {
-			return UsageError{Msg: "job create: restic jobs require --password-stdin (pipe the restic repo password into stdin)"}
-		}
-		pw, err := readLineFromStdin()
-		if err != nil {
+	// Build secrets from flags + stdin.
+	secrets := &config.Secrets{}
+	hasSecrets := false
+
+	// S3 credentials from flags.
+	if *s3AccessKey != "" {
+		secrets.AWSAccessKeyID = *s3AccessKey
+		hasSecrets = true
+	}
+	if *s3SecretKey != "" {
+		secrets.AWSSecretAccessKey = *s3SecretKey
+		hasSecrets = true
+	}
+	if *s3Region != "" {
+		secrets.AWSDefaultRegion = *s3Region
+		hasSecrets = true
+	}
+
+	// Passwords from stdin. Restic jobs require at least line 1.
+	// SMB/NFS destinations optionally read line 2.
+	if *passwordStdin {
+		stdinReader := bufio.NewReader(os.Stdin)
+
+		// Line 1: restic password (required for restic jobs).
+		pw, err := stdinReader.ReadString('\n')
+		if err != nil && err != io.EOF {
 			return fmt.Errorf("read password from stdin: %w", err)
 		}
-		if pw == "" {
-			return UsageError{Msg: "job create: empty password on stdin"}
+		pw = strings.TrimRight(pw, "\r\n")
+		if *program == "restic" {
+			if pw == "" {
+				return UsageError{Msg: "job create: empty restic password on stdin line 1"}
+			}
+			secrets.ResticPassword = pw
+			hasSecrets = true
 		}
-		input.Secrets = &config.Secrets{ResticPassword: pw}
+
+		// Line 2: destination password (SMB/NFS, optional).
+		if *destType == "smb" || *destType == "nfs" {
+			destPw, err := stdinReader.ReadString('\n')
+			if err != nil && err != io.EOF {
+				return fmt.Errorf("read dest password from stdin: %w", err)
+			}
+			destPw = strings.TrimRight(destPw, "\r\n")
+			if destPw != "" {
+				if *destType == "smb" {
+					secrets.SMBDestPassword = destPw
+				} else {
+					secrets.NFSDestPassword = destPw
+				}
+				hasSecrets = true
+			}
+		}
+	} else if *program == "restic" {
+		return UsageError{Msg: "job create: restic jobs require --password-stdin (pipe the restic repo password into stdin)"}
+	}
+
+	if hasSecrets {
+		input.Secrets = secrets
 	}
 
 	job, err := jobs.Create(paths, input)
