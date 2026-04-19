@@ -1191,6 +1191,7 @@ func runManageWizard(paths app.Paths, prompter ui.Prompter) error {
 					fmt.Sprintf("Job %q (%s) configuration edited", job.ID, job.Name),
 					map[string]string{"job_id": job.ID, "job_name": job.Name, "program": job.Program})
 				daemon.TriggerReload(paths.StateDir)
+				fireImmediateReport(paths)
 			}
 		case "Configure Schedule":
 			updatedJob, err := jobs.Load(paths, job.ID)
@@ -2855,6 +2856,7 @@ func runManagementConsoleWizard(paths app.Paths, prompter ui.Prompter) error {
 		fmt.Sprintf("Management console configured (enabled=%t)", cfg.Enabled),
 		map[string]string{"console_host": consoleHost, "enabled": fmt.Sprintf("%t", cfg.Enabled)})
 	daemon.TriggerReload(paths.StateDir)
+	fireImmediateReport(paths)
 
 	if cfg.Enabled {
 		ui.StatusOK("Management console reporting enabled.")
