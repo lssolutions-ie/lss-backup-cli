@@ -146,6 +146,9 @@ func Run(args []string) error {
 		if args[0] == "--browse-path" && len(args) >= 3 && args[1] == "--json" {
 			return runBrowsePath(paths, args[2])
 		}
+		if args[0] == "dest-browse" && len(args) >= 2 && args[1] == "--json" {
+			return runDestBrowse(paths, args[2:])
+		}
 		if len(args) == 1 && args[0] == "--setup-recover" {
 			return runSetupRecover(paths)
 		}
