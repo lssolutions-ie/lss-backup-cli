@@ -265,6 +265,13 @@ func addFileToZip(writer *zip.Writer, sourcePath string, zipPath string) error {
 }
 
 func removeInstalledData(paths platform.RuntimePaths) {
+	// On Windows, the daemon runs as SYSTEM and writes files (daemon.log,
+	// audit.jsonl, daemon.pid, per-job state, etc.) that a non-elevated
+	// admin SSH session cannot delete. Take ownership + grant full control
+	// before attempting removal. No-op on Unix.
+	grantRemovalAccess(filepath.Dir(paths.BinPath))
+	grantRemovalAccess(paths.ConfigDir)
+
 	removeBinary(paths.BinPath)
 	safeRemove(paths.ConfigDir)
 	// LogsDir and StateDir are subdirs of ConfigDir; only try them separately
