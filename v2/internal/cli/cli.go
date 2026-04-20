@@ -111,9 +111,39 @@ func Run(args []string) error {
 	if len(args) > 0 {
 		if args[0] == "--uninstall" {
 			if len(args) >= 2 && args[1] == "--yes" {
+				destroyData := false
+				for _, a := range args[2:] {
+					if a == "--destroy-data" {
+						destroyData = true
+					}
+				}
+				if destroyData {
+					// Wipe local backup repos before the binary+config go away.
+					// Non-local destinations (s3/smb/nfs) are skipped — we can't
+					// arbitrarily remove remote repos. Best-effort: log each
+					// removal, don't abort on failure; uninstall still proceeds.
+					if allJobs, err := jobs.LoadAll(paths); err == nil {
+						for _, job := range allJobs {
+							if job.Destination.Type != "local" && job.Destination.Type != "" {
+								fmt.Printf("Skipping non-local destination %s (%s)\n", job.ID, job.Destination.Type)
+								continue
+							}
+							if job.Destination.Path == "" {
+								continue
+							}
+							fmt.Printf("Destroying backup data: %s\n", job.Destination.Path)
+							if err := os.RemoveAll(job.Destination.Path); err != nil {
+								fmt.Printf("  Warning: could not remove %s: %v\n", job.Destination.Path, err)
+							}
+						}
+					}
+				}
 				return uninstall.RunNonInteractive()
 			}
 			return uninstall.Run()
+		}
+		if args[0] == "--secrets-export" {
+			return runSecretsExport(paths)
 		}
 		if len(args) == 1 && args[0] == "--update" {
 			return runUpdateCLI(paths)

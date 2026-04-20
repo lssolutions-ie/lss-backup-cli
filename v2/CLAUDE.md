@@ -13,7 +13,7 @@ rsync), runs them, logs results, and reports to a central management server.
 V2 is a clean rewrite of a v1 shell-script-based tool. The goal is durability, safety, and
 operator-friendliness over cleverness.
 
-**Version:** v2.18.11
+**Version:** v2.19.0
 **Module:** `github.com/lssolutions-ie/lss-backup-cli/v2`
 **Go version:** 1.25.0
 
@@ -292,6 +292,9 @@ The CLI is **menu-driven only**. No traditional flag parsing.
 |--------------------|--------------------------------------------------|
 | `run <job-id>`     | Run a job non-interactively                      |
 | `--uninstall`      | Trigger uninstall wizard                         |
+| `--uninstall --yes` | Non-interactive uninstall (retain backup data)  |
+| `--uninstall --yes --destroy-data` | Also wipe local backup destinations |
+| `--secrets-export --json` | Print all node credentials as JSON to stdout (server-driven node deletion) |
 | `--update`         | Non-interactive update — no prompts, no restart message |
 | `--setup-ssh`      | Launch SSH credentials wizard                    |
 | `--setup-auto`     | Non-interactive node setup (server-assisted install) |
@@ -701,4 +704,4 @@ Two distinct display modes are used, depending on whether the log has timestamps
 
 ---
 
-_Last updated: 2026-04-20 (v2.18.11)_
+_Last updated: 2026-04-20 (v2.19.0)_
