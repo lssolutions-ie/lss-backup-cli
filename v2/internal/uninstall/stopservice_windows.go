@@ -55,20 +55,36 @@ func killDaemonProcess() {
 func unregisterDaemonService() {
 	fmt.Println("Unregistering daemon task...")
 
+	taskRemoved := false
 	if err := exec.Command(schtasksExe, "/Delete", "/TN", windowsTaskName, "/F").Run(); err == nil {
 		fmt.Println("Scheduled task removed.")
-		return
+		taskRemoved = true
+	} else {
+		psScript := `Unregister-ScheduledTask -TaskPath "\LSS Backup\" -TaskName "LSS Backup Daemon" -Confirm:$false`
+		elevateCmd := fmt.Sprintf(
+			`Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NonInteractive -NoProfile -Command "%s"'`,
+			psScript,
+		)
+		if err := exec.Command(psExe, "-NonInteractive", "-NoProfile", "-Command", elevateCmd).Run(); err != nil {
+			fmt.Println("Warning: could not remove scheduled task. Remove it manually from Task Scheduler.")
+			fmt.Printf("  Task path: \\LSS Backup\\  Task name: LSS Backup Daemon\n")
+		} else {
+			fmt.Println("Scheduled task removed.")
+			taskRemoved = true
+		}
 	}
 
-	psScript := `Unregister-ScheduledTask -TaskPath "\LSS Backup\" -TaskName "LSS Backup Daemon" -Confirm:$false`
-	elevateCmd := fmt.Sprintf(
-		`Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NonInteractive -NoProfile -Command "%s"'`,
-		psScript,
-	)
-	if err := exec.Command(psExe, "-NonInteractive", "-NoProfile", "-Command", elevateCmd).Run(); err != nil {
-		fmt.Println("Warning: could not remove scheduled task. Remove it manually from Task Scheduler.")
-		fmt.Printf("  Task path: \\LSS Backup\\  Task name: LSS Backup Daemon\n")
-	} else {
-		fmt.Println("Scheduled task removed.")
+	if taskRemoved {
+		// schtasks.exe cannot remove empty task folders, so the parent
+		// "\LSS Backup\" folder would otherwise linger in Task Scheduler
+		// even after the task is gone. The COM Schedule.Service API can
+		// DeleteFolder; it fails safely if the folder still contains
+		// tasks, so it's fine to run unconditionally.
+		removeFolderScript := `try { ` +
+			`$sched = New-Object -ComObject Schedule.Service; ` +
+			`$sched.Connect(); ` +
+			`$sched.GetFolder("\").DeleteFolder("LSS Backup", 0) ` +
+			`} catch { }`
+		exec.Command(psExe, "-NonInteractive", "-NoProfile", "-Command", removeFolderScript).Run() //nolint:errcheck
 	}
 }
