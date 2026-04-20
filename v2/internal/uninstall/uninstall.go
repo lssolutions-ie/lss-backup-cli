@@ -14,21 +14,48 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/app"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/installmanifest"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/jobs"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/platform"
 )
 
+// Options controls the non-interactive uninstall flow. Interactive Run()
+// collects answers via prompts and does not take Options.
+type Options struct {
+	// DestroyData: wipe each local job destination (os.RemoveAll) before
+	// the binary and config are removed. Non-local destinations are
+	// logged and skipped.
+	DestroyData bool
+}
+
 // Run performs an interactive uninstall with prompts.
 func Run() error {
-	return doUninstall(false)
+	return doUninstall(false, Options{})
 }
 
-// RunNonInteractive performs a non-interactive uninstall (no prompts, no backup).
+// RunNonInteractive performs a non-interactive uninstall (no prompts,
+// no backup, no dependency removal). Equivalent to
+// RunNonInteractiveWithOptions(Options{}).
 func RunNonInteractive() error {
-	return doUninstall(true)
+	return doUninstall(true, Options{})
 }
 
-func doUninstall(nonInteractive bool) error {
+// RunNonInteractiveWithOptions is the canonical non-interactive entry
+// point. Used by --uninstall --yes [--destroy-data] and by the daemon's
+// heartbeat-driven uninstall path so both paths produce the same state
+// on the node and the same uninstall_complete heartbeat.
+func RunNonInteractiveWithOptions(opts Options) error {
+	return doUninstall(true, opts)
+}
+
+func doUninstall(nonInteractive bool, opts Options) error {
+	// Survive SIGHUP — when this runs via the server's SSH tunnel, stopping
+	// the daemon below will drop the tunnel (and thus the SSH session).
+	// Without this, sshd's SIGHUP would kill us before the final heartbeat
+	// fires. No-op on Windows.
+	ignoreTunnelDrop()
+
 	paths, err := platform.CurrentRuntimePaths()
 	if err != nil {
 		return err
@@ -86,10 +113,73 @@ func doUninstall(nonInteractive bool) error {
 	stopDaemonService()
 	unregisterDaemonService()
 
+	// Destroy local backup repos if requested. Non-local destinations
+	// (s3/smb/nfs) are logged and skipped — we can't arbitrarily remove
+	// remote repos. Failures are collected for the uninstall_complete
+	// heartbeat but don't abort the flow.
+	destroyDetails, destroyFailures := destroyLocalBackupData(paths, opts.DestroyData)
+
+	// Fire the positive-confirmation heartbeat BEFORE removing the
+	// binary + config — the reporter re-reads AppConfig from disk to
+	// build the envelope, and once removeInstalledData() runs the PSK
+	// is gone. By this point the destructive work (daemon stopped,
+	// service unregistered, data wiped if requested) is done; what
+	// remains is local disk cleanup.
+	cleanupSucceeded := destroyFailures == 0
+	sendUninstallCompleteHB(paths, !opts.DestroyData, cleanupSucceeded, destroyDetails)
+
 	removeInstalledData(paths)
 
 	fmt.Println("LSS Backup CLI uninstall complete.")
 	return nil
+}
+
+// destroyLocalBackupData iterates jobs and os.RemoveAll's every local
+// destination (matching the heartbeat-driven path in daemon.maybeUninstall,
+// now unified here). Returns a human-readable summary and a count of
+// removal failures so the caller can build the uninstall_complete HB.
+// If destroy is false, returns ("", 0) — no work done.
+func destroyLocalBackupData(paths platform.RuntimePaths, destroy bool) (string, int) {
+	if !destroy {
+		return "", 0
+	}
+
+	appPaths, err := app.DiscoverPaths()
+	if err != nil {
+		msg := fmt.Sprintf("destroy-data: could not resolve app paths: %v", err)
+		fmt.Println(msg)
+		return msg, 1
+	}
+	_ = paths // runtime paths not needed once DiscoverPaths resolves the same layout
+
+	allJobs, err := jobs.LoadAll(appPaths)
+	if err != nil {
+		msg := fmt.Sprintf("destroy-data: could not load jobs: %v", err)
+		fmt.Println(msg)
+		return msg, 1
+	}
+
+	wiped := 0
+	skipped := 0
+	failures := 0
+	for _, job := range allJobs {
+		if job.Destination.Type != "local" && job.Destination.Type != "" {
+			fmt.Printf("Skipping non-local destination %s (%s)\n", job.ID, job.Destination.Type)
+			skipped++
+			continue
+		}
+		if job.Destination.Path == "" {
+			continue
+		}
+		fmt.Printf("Destroying backup data: %s\n", job.Destination.Path)
+		if err := os.RemoveAll(job.Destination.Path); err != nil {
+			fmt.Printf("  Warning: could not remove %s: %v\n", job.Destination.Path, err)
+			failures++
+		} else {
+			wiped++
+		}
+	}
+	return fmt.Sprintf("wiped=%d skipped_non_local=%d failures=%d", wiped, skipped, failures), failures
 }
 
 func promptYesNo(reader *bufio.Reader, question string) (bool, error) {

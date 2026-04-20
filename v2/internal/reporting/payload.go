@@ -18,9 +18,21 @@ const AuditEventsPerHeartbeatCap = 200
 
 // Report types sent in the payload so the server can distinguish them.
 const (
-	ReportTypeHeartbeat = "heartbeat" // periodic 5-minute tick
-	ReportTypePostRun   = "post_run"  // immediately after a job runs
+	ReportTypeHeartbeat          = "heartbeat"           // periodic 5-minute tick
+	ReportTypePostRun            = "post_run"            // immediately after a job runs
+	ReportTypeUninstallComplete  = "uninstall_complete"  // final HB fired at end of uninstall flow
 )
+
+// UninstallReport is the positive-confirmation payload attached to the
+// final heartbeat sent at the end of the uninstall flow. The server uses
+// it to decide whether to DeleteNode() the row. Any field missing /
+// cleanup_succeeded=false → row stays in uninstall_pending for operator
+// intervention. No heuristics, no "probably done".
+type UninstallReport struct {
+	RetainedData     bool   `json:"retained_data"`
+	CleanupSucceeded bool   `json:"cleanup_succeeded"`
+	CleanupDetails   string `json:"cleanup_details,omitempty"`
+}
 
 // TunnelStatus holds the current reverse tunnel state for the management server.
 type TunnelStatus struct {
@@ -60,6 +72,9 @@ type NodeStatus struct {
 	// CredentialsHash is SHA256(ssh_username:ssh_password:encryption_password).
 	// Sent on every heartbeat for tamper detection. Omitted if no credentials.
 	CredentialsHash string `json:"credentials_hash,omitempty"`
+	// Uninstall is the positive-confirmation payload sent on the final
+	// uninstall_complete report. Absent on all other report types.
+	Uninstall *UninstallReport `json:"uninstall,omitempty"`
 }
 
 // NodeCredentials holds the SSH and encryption credentials for the server vault.

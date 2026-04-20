@@ -29,6 +29,7 @@ import (
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/runner"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/schedule"
 	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/tunnel"
+	"github.com/lssolutions-ie/lss-backup-cli/v2/internal/uninstall"
 	"github.com/robfig/cron/v3"
 )
 
@@ -575,7 +576,10 @@ func maybeExportSecrets(paths app.Paths) {
 }
 
 // maybeUninstall checks if the server requested a node uninstall
-// (node deletion phase 3). Runs the uninstall flow non-interactively.
+// (node deletion phase 3). Runs the same non-interactive uninstall
+// flow the CLI uses for --uninstall --yes [--destroy-data], so both
+// SSH-instant and heartbeat-driven paths produce identical on-node
+// state and fire the same uninstall_complete confirmation heartbeat.
 func maybeUninstall(paths app.Paths) {
 	pending, retainData := reporting.ConsumeUninstallPending()
 	if !pending {
@@ -589,23 +593,12 @@ func maybeUninstall(paths app.Paths) {
 	audit.Emit(audit.CategoryJobModified, audit.SeverityCritical, audit.ActorSystem,
 		fmt.Sprintf("Node uninstall initiated by server (retain_data=%t)", retainData), nil)
 
-	if !retainData {
-		log.Println("Remote uninstall: destroying backup data...")
-		allJobs, _ := jobs.LoadAll(paths)
-		for _, job := range allJobs {
-			if job.Destination.Type == "local" || job.Destination.Type == "" {
-				log.Printf("Remote uninstall: removing %s", job.Destination.Path)
-				os.RemoveAll(job.Destination.Path)
-			} else {
-				log.Printf("Remote uninstall: skipping non-local destination %s (%s)", job.ID, job.Destination.Type)
-			}
-		}
+	// The uninstall package handles everything: stop daemon, unregister
+	// service, wipe local repos if destroy-data, fire the final
+	// uninstall_complete heartbeat, remove binary/config/state/logs.
+	if err := uninstall.RunNonInteractiveWithOptions(uninstall.Options{DestroyData: !retainData}); err != nil {
+		log.Printf("Remote uninstall: failed: %v", err)
 	}
-
-	// Stop the daemon and remove the installation.
-	log.Println("Remote uninstall: removing CLI installation...")
-	// Remove systemd/launchd/schtasks service
-	triggerServiceRestart() // this will fail after binary is gone, but cleans up
 	os.Exit(0)
 }
 
