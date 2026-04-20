@@ -208,6 +208,69 @@ ensure_macos_dependency() {
 
 TARGET="/usr/local/bin/lss-backup-cli"
 
+# ---------------------------------------------------------------------------
+# Preflight cleanup: detect + remove debris from any prior install so we
+# start from a known state. Stops running daemons, removes service units,
+# wipes stale binary. Preserves ConfigDir (jobs, SSH creds, DR config, audit
+# history) so an in-place re-run acts as an upgrade, not a reset. If the
+# operator wanted a clean slate, they should run --uninstall first.
+# Each step is best-effort; a missing artifact is not an error.
+# ---------------------------------------------------------------------------
+remove_previous_install() {
+	echo "Checking for previous install..."
+
+	case "$OS_NAME" in
+		Linux)
+			# Stop + disable systemd unit if present.
+			if systemctl list-unit-files 2>/dev/null | grep -q '^lss-backup\.service'; then
+				echo "  Stopping previous daemon (systemd)"
+				sudo systemctl stop lss-backup.service 2>/dev/null || true
+				sudo systemctl disable lss-backup.service 2>/dev/null || true
+			fi
+			if [ -f "/etc/systemd/system/lss-backup.service" ]; then
+				echo "  Removing systemd unit: /etc/systemd/system/lss-backup.service"
+				sudo rm -f /etc/systemd/system/lss-backup.service
+				sudo systemctl daemon-reload 2>/dev/null || true
+			fi
+			# Kill any stray daemon processes that aren't managed by systemd.
+			if pgrep -f "/usr/local/bin/lss-backup-cli daemon" >/dev/null 2>&1; then
+				echo "  Killing stray daemon processes"
+				sudo pkill -f "/usr/local/bin/lss-backup-cli daemon" 2>/dev/null || true
+			fi
+			;;
+		Darwin)
+			# Unload + remove launchd plist if present.
+			_plist="/Library/LaunchDaemons/com.lssolutions.lss-backup.plist"
+			if [ -f "$_plist" ]; then
+				echo "  Stopping previous daemon (launchd)"
+				sudo launchctl unload "$_plist" 2>/dev/null || true
+				echo "  Removing launchd plist: $_plist"
+				sudo rm -f "$_plist"
+			fi
+			# Kill any stray daemon processes not managed by launchd.
+			if pgrep -f "/usr/local/bin/lss-backup-cli daemon" >/dev/null 2>&1; then
+				echo "  Killing stray daemon processes"
+				sudo pkill -f "/usr/local/bin/lss-backup-cli daemon" 2>/dev/null || true
+			fi
+			;;
+	esac
+
+	# Remove the binary itself. Replaced by the install below — no daemon
+	# should be holding it now that services are stopped.
+	if [ -f "$TARGET" ]; then
+		echo "  Removing previous binary: $TARGET"
+		sudo rm -f "$TARGET"
+	fi
+
+	# Intentionally NOT removing ConfigDir / LogsDir / StateDir — preserves
+	# user jobs, SSH credentials, DR config, and audit history across
+	# installer re-runs. --uninstall is the supported path for full reset.
+
+	echo "Previous install cleanup complete."
+}
+
+remove_previous_install
+
 # Detect build mode early: source build only when go.mod is present
 # (running from the repo). Binary download otherwise (curl | bash).
 SOURCE_BUILD=false

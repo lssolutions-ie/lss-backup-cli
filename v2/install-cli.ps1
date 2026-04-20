@@ -122,6 +122,75 @@ $LogsDir      = Join-Path $ConfigDir "logs"
 $StateDir     = Join-Path $ConfigDir "state"
 $ManifestPath = Join-Path $StateDir "install-manifest.json"
 
+# ---------------------------------------------------------------------------
+# Preflight cleanup: detect and remove debris from any prior install so we
+# start from a known state. Removes running processes, scheduled tasks, and
+# binary-dir leftovers. Preserves ConfigDir (jobs, SSH creds, DR config,
+# audit history) so an in-place re-run of the installer acts as an upgrade,
+# not a reset. If the operator wanted a clean slate, they should run
+# --uninstall first — which does wipe ConfigDir.
+# Each step is best-effort; a missing artifact is not an error.
+# ---------------------------------------------------------------------------
+function Remove-PreviousInstall {
+    Write-Host "Checking for previous install..."
+
+    $takeownExe = Join-Path $env:SystemRoot "System32\takeown.exe"
+    $icaclsExe  = Join-Path $env:SystemRoot "System32\icacls.exe"
+
+    # 1) Stop any running CLI/daemon processes so files become deletable.
+    Get-Process -Name "lss-backup-cli*" -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            Write-Host "  Stopping process: $($_.Name) (PID $($_.Id))"
+            try { $_ | Stop-Process -Force -ErrorAction Stop } catch { }
+        }
+
+    # 2) Remove the scheduled task + containing folder. schtasks.exe cannot
+    #    delete a task folder, so we use the Schedule.Service COM API.
+    try {
+        $sched = New-Object -ComObject Schedule.Service
+        $sched.Connect()
+        try {
+            $folder = $sched.GetFolder("\").GetFolder("LSS Backup")
+            foreach ($t in $folder.GetTasks(1)) {
+                Write-Host "  Removing scheduled task: $($t.Path)"
+                try { $folder.DeleteTask($t.Name, 0) } catch { }
+            }
+            try { $sched.GetFolder("\").DeleteFolder("LSS Backup", 0) } catch { }
+        } catch { }
+    } catch { }
+
+    # 3) Take ownership + grant Administrators full control on BinDir and
+    #    ConfigDir. BinDir so we can clean up orphan .exe files; ConfigDir
+    #    so a future uninstall (and the daemon itself) has write access
+    #    even if a prior SYSTEM-owned state left bad ACLs behind.
+    foreach ($target in @($BinDir, $ConfigDir)) {
+        if (Test-Path $target) {
+            & $takeownExe /F $target /R /D Y 2>$null | Out-Null
+            & $icaclsExe  $target /grant "*S-1-5-32-544:F" /T /C /Q 2>$null | Out-Null
+        }
+    }
+
+    # 4) Remove every file inside BinDir (current .exe, lss-backup-cli-old-*,
+    #    lss-backup-cli-new, stray .gocache from source builds). Keep the
+    #    folder itself so the later Ensure-Directory is a no-op.
+    if (Test-Path $BinDir) {
+        Get-ChildItem -Path $BinDir -Force -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                Write-Host "  Removing previous binary artifact: $($_.Name)"
+                try { Remove-Item $_.FullName -Recurse -Force -ErrorAction Stop } catch {
+                    Write-Host "  Warning: could not remove $($_.FullName) — continuing"
+                }
+            }
+    }
+
+    # Intentionally NOT removing ConfigDir — preserves user jobs and SSH
+    # credentials across installer re-runs.
+
+    Write-Host "Previous install cleanup complete."
+}
+
+Remove-PreviousInstall
+
 $deps = [System.Collections.ArrayList]::new()
 
 # Only install Go when building from source (go.mod present).
